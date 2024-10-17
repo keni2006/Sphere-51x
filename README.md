@@ -11,16 +11,7 @@ SPHERESERVER 0.51x  WISHLIST  (3/17/21)
 ![alt text](http://dragonsoftime.com/junk/taskbar.png)
 
 
-<b>[ISSUE 04]</b><BR>
--COLORED NAMES on NPCs
 
-![alt text](http://dragonsoftime.com/junk/colorednames.png)
-
-```
-TAG.NAME.HUE 021
-NAMEHUE=021
-```
-nice to be able to change the color of NPCs name when single clicked
 
 
 <b>[ISSUE 05]</b><BR>
@@ -180,6 +171,21 @@ SRC.SYSMESSAGE #0033,3,You have gained a reward!
 ```
 SRC.SAY #0033,3,I talk in color!
 ```
+<b>[ DONE! ]</b>
+
+<b>[ISSUE 04]</b><BR>
+-COLORED NAMES on NPCs
+
+![alt text](http://dragonsoftime.com/junk/colorednames.png)
+https://i.gyazo.com/c251800168fead568651171a6a2156a7.png
+```
+TAG.NAME.HUE 021
+NAMEHUE=021
+```
+nice to be able to change the color of NPCs name when single clicked
+
+FIXED particly, later add change via scripts 
+![alt text](https://i.gyazo.com/c251800168fead568651171a6a2156a7.png)
 <b>[ DONE! ]</b>
 
 <b>[ISSUE 06]</b><BR>
