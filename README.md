@@ -177,15 +177,17 @@ SRC.SAY #0033,3,I talk in color!
 -COLORED NAMES on NPCs
 
 ![alt text](http://dragonsoftime.com/junk/colorednames.png)
-https://i.gyazo.com/c251800168fead568651171a6a2156a7.png
+
 ```
 TAG.NAME.HUE 021
 NAMEHUE=021
 ```
 nice to be able to change the color of NPCs name when single clicked
 
-FIXED particly, later add change via scripts 
 ![alt text](https://i.gyazo.com/c251800168fead568651171a6a2156a7.png)
+
+FIXED particly, later add change via scripts 
+
 <b>[ DONE! ]</b>
 
 <b>[ISSUE 06]</b><BR>
