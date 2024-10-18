@@ -7,7 +7,7 @@ https://github.com/Sphereserver/Source-Archive/tree/main/0.52
 *TODO make mysql data store without SAVEWORLD
 
 <b>18.10.2024<BR>
-Should be tested. Not working correctly now *TODO should be save in sphereworld like PVPPOINTS=VALUE
+-Should be tested. Not working correctly now *TODO should be save in sphereworld like PVPPOINTS=VALUE
 New Feature: PvP Points 
 src.pvpPoints 
 
