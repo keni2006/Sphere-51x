@@ -1,15 +1,19 @@
 # SphereServer-0.51x
-Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before he passed<BR>
-https://github.com/Sphereserver/Source-Archive/tree/main/0.52
 
-*TODO fix some problems with protocol,fix server crashes after using inccorect values and parametres in scripts
-*TODO make pvm and pvp points charge correctly by zones 
-*TODO make mysql data store without SAVEWORLD
+Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before he passed.  
+[Source Archive](https://github.com/Sphereserver/Source-Archive/tree/main/0.52)
 
-<b>18.10.2024<BR>
--Should be tested. Not working correctly now *TODO should be save in sphereworld like PVPPOINTS=VALUE
-New Feature: PvP Points 
-src.pvpPoints 
+## TODO
+- Fix some problems with the protocol.
+- Fix server crashes after using incorrect values and parameters in scripts.
+- Ensure PvM and PvP points charge correctly by zones.
+- Implement MySQL data store without `SAVEWORLD`.
+
+### Date: 18.10.2024
+- Should be tested. Currently not working correctly.  
+*TODO*: Should be saved in `sphereworld` like `PVPPOINTS=VALUE`.  
+**New Feature**: PvP Points  
+`src.pvpPoints`
 
 
 SPHERESERVER 0.51x  WISHLIST  (3/17/21)
