@@ -217,7 +217,7 @@ CCharBase::CCharBase( CREID_TYPE id ) : CBaseBase( id )
   	m_MaxFood = 15;			// Default value
 	m_Str = 1;
 	m_Dex = 1;
-
+	m_pvpPoints = 0;
 	if ( IsValidDispID(id))
 	{
 		// in display range.
@@ -366,6 +366,7 @@ enum
 	CT_STR,
 	CT_TEVENTS,
 	CT_TSPEECH,
+	CT_PVPPPOINTS,
 };
 
 const TCHAR * CCharBase::sm_KeyTable[] =
@@ -385,6 +386,7 @@ const TCHAR * CCharBase::sm_KeyTable[] =
 	"STR",
 	"TEVENTS",
 	"TSPEECH",
+	"PVPPPOINTS",
 };
 
 bool CCharBase::r_WriteVal( const TCHAR * pKey, CGString & sVal, CTextConsole * pChar )
@@ -397,6 +399,9 @@ bool CCharBase::r_WriteVal( const TCHAR * pKey, CGString & sVal, CTextConsole * 
 
 	switch ( FindTableSorted( pKey, sm_KeyTable, COUNTOF( sm_KeyTable )))
 	{
+	case CT_PVPPPOINTS: // PVPPOINTS
+		sVal.FormatVal(m_pvpPoints);
+		break;
 	case CT_ANIM:
 		sVal.FormatHex( m_Anims );
 		break;
@@ -449,6 +454,9 @@ bool CCharBase::r_LoadVal( CScript & s )
 		return( false );
 	switch ( FindTableSorted( s.GetKey(), sm_KeyTable, COUNTOF( sm_KeyTable )))
 	{
+	case CT_PVPPPOINTS:   //PVPPOINTS
+		m_pvpPoints = s.GetArgVal();
+		break;
 	case CT_ANIM:
 		m_Anims = s.GetArgRange();
 		break;

@@ -3427,6 +3427,12 @@ public:
 	CFragmentArray m_Events;	// Action or motivation type indexes.
 
 	static const TCHAR * sm_KeyTable[];
+	
+	//NEWDATA PVP AND PVM POINTS 18/10/2024
+private:
+	int m_pvpPoints; // store pvppoints
+
+
 
 private:
 	void SetFoodType( const TCHAR * pszFood );
