@@ -6,7 +6,7 @@
 //
 
 #include "graysvr.h"	// predef header.
-
+int m_PvpPoints; // announce
 bool CChar::SetPlayerAccount( CAccount * pAccount )
 {
 	// Set up the char as a Player.
@@ -75,6 +75,7 @@ const TCHAR * CCharPlayer::sm_KeyTable[] =
 	"PLOT1",
 	"PLOT2",
 	"SKILLCLASS",
+	"PVPPOINTS",
 };
 
 CCharPlayer::CCharPlayer( CAccount * pAccount ) :
@@ -82,6 +83,7 @@ CCharPlayer::CCharPlayer( CAccount * pAccount ) :
 {
 	ASSERT(pAccount);
 	m_Murders = 0;
+	m_PvpPoints = 0;
 	m_Plot1 = 0;
 	m_Plot2 = 0;
 	m_SkillClass = 0;
@@ -146,6 +148,9 @@ bool CCharPlayer::r_WriteVal( const TCHAR * pszKey, CGString & sVal )
 	case 4: // "SKILLCLASS"
 		sVal.FormatVal( m_SkillClass );
 		return( true );
+	case 5:	// "PVPOINTS"
+		sVal.FormatVal(m_PvpPoints);
+		return(true);
 	}
 	return( false );
 }
@@ -206,6 +211,8 @@ void CCharPlayer::r_Write( CScript & s ) const
 {
 	ASSERT(m_pAccount);
 	s.WriteKey( "ACCOUNT", m_pAccount->GetName());
+	if (m_PvpPoints) // addpvp
+		s.WriteKeyVal("PVPOINTS", m_PvpPoints);
 
 	if ( m_Murders )
 		s.WriteKeyVal( "KILLS", m_Murders );
