@@ -6,7 +6,7 @@
 //
 
 #include "graysvr.h"	// predef header.
-int m_PvpPoints; // announce
+int m_PvpPoints; // Объявление переменной
 bool CChar::SetPlayerAccount( CAccount * pAccount )
 {
 	// Set up the char as a Player.
@@ -72,15 +72,17 @@ const TCHAR * CCharPlayer::sm_KeyTable[] =
 {
 	"ACCOUNT",
 	"KILLS",
+	"PVPPOINTS",
 	"PLOT1",
 	"PLOT2",
 	"SKILLCLASS",
-	"PVPPOINTS",
+
 };
 
 CCharPlayer::CCharPlayer( CAccount * pAccount ) :
 	m_pAccount( pAccount )
 {
+
 	ASSERT(pAccount);
 	m_Murders = 0;
 	m_PvpPoints = 0;
@@ -211,9 +213,8 @@ void CCharPlayer::r_Write( CScript & s ) const
 {
 	ASSERT(m_pAccount);
 	s.WriteKey( "ACCOUNT", m_pAccount->GetName());
-	if (m_PvpPoints) // addpvp
-		s.WriteKeyVal("PVPOINTS", m_PvpPoints);
-
+	if ( m_PvpPoints ) // Дописано
+		s.WriteKeyVal( "PVPOINTS", m_PvpPoints );
 	if ( m_Murders )
 		s.WriteKeyVal( "KILLS", m_Murders );
 	if ( m_Plot1 )

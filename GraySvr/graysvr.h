@@ -3430,7 +3430,7 @@ public:
 	
 	//NEWDATA PVP AND PVM POINTS 18/10/2024
 private:
-	int m_pvpPoints; // store pvppoints
+int m_PvpPoints; // store pvppoints
 
 
 
@@ -3497,6 +3497,9 @@ enum STAT_TYPE	// Character stats
 	STAT_Karma = 3,		// -10000 to 10000 - also used as the food consumption main timer.
 	STAT_Fame,
 	STAT_QTY,
+
+	//PVPPVMSTUFF 18/10/2024
+	m_pvpPoints = 0,
 };
 
 struct CCharNPC : public CMemDynamic

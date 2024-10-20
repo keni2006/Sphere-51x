@@ -217,7 +217,7 @@ CCharBase::CCharBase( CREID_TYPE id ) : CBaseBase( id )
   	m_MaxFood = 15;			// Default value
 	m_Str = 1;
 	m_Dex = 1;
-	m_pvpPoints = 0;
+//	m_pvpPoints = 0;
 	if ( IsValidDispID(id))
 	{
 		// in display range.
@@ -454,9 +454,7 @@ bool CCharBase::r_LoadVal( CScript & s )
 		return( false );
 	switch ( FindTableSorted( s.GetKey(), sm_KeyTable, COUNTOF( sm_KeyTable )))
 	{
-	case CT_PVPPPOINTS:   //PVPPOINTS
-		m_pvpPoints = s.GetArgVal();
-		break;
+	
 	case CT_ANIM:
 		m_Anims = s.GetArgRange();
 		break;

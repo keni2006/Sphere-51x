@@ -1,2 +1,52 @@
-﻿  CChar.cpp
-  GraySvr.vcxproj -> C:\Users\Саша\Desktop\sphere-src\SphereServer-0.51x-main\SphereServer-0.51x-main\GraySvr\Debug\GraySvr.exe
+﻿  carray.cpp
+  ccrypt.cpp
+  cexpression.cpp
+  cfile.cpp
+  cfilelist.cpp
+  cGrayData.cpp
+  cgrayinst.cpp
+  cGrayMap.cpp
+  cregion.cpp
+  cscript.cpp
+  cstring.cpp
+  graycom.cpp
+  CAccount.cpp
+  CBackTask.cpp
+  cbase.cpp
+  CChar.cpp
+  CCharBase.cpp
+  CCharFight.cpp
+  CCharNPC.cpp
+  CCharNPCAct.cpp
+  CCharNPCFood.cpp
+  CCharNPCPet.cpp
+  CCharNPCStatus.cpp
+  ccharskill.cpp
+  CCharStatus.cpp
+  ccharuse.cpp
+  CChat.cpp
+  CClient.cpp
+  cclientevent.cpp
+  CClientLog.cpp
+  CClientMsg.cpp
+  cclienttarg.cpp
+  CContain.cpp
+  cfragment.cpp
+  CItem.cpp
+  CItemBase.cpp
+  CItemSp.cpp
+  CItemStone.cpp
+  CMail.cpp
+  CParty.cpp
+  csector.cpp
+  CServer.cpp
+  cvendoritem.cpp
+  CWorld.cpp
+  cworldimport.cpp
+  cworldmap.cpp
+  graysvr.cpp
+  ntservice.cpp
+  ntwindow.cpp
+C:\Users\Саша\Desktop\sphere-src\sssdasdsaed\SPHERE\GraySvr\graysvr.cpp(266,2): warning C4297: Exception_Win32: ожидается, что функция не будет выдавать исключения, но она это делает
+carray.obj : warning LNK4075: не учитывается "/EDITANDCONTINUE" из-за спецификации "/SAFESEH"
+  GraySvr.vcxproj -> C:\Users\Саша\Desktop\sphere-src\sssdasdsaed\SPHERE\GraySvr\Debug\GraySvr.exe

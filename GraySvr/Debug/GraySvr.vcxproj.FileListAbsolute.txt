@@ -1,1 +1,3 @@
 C:\Users\Саша\Desktop\sphere-src\SphereServer-0.51x-main\SphereServer-0.51x-main\GraySvr\Debug\GraySvr.exe
+C:\Users\toppk\Desktop\SPHERE\GraySvr\Debug\GraySvr.exe
+C:\Users\Саша\Desktop\sphere-src\sssdasdsaed\SPHERE\GraySvr\Debug\GraySvr.exe
