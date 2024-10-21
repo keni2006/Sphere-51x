@@ -5,9 +5,11 @@ Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before 
 
 ![SphereServer](https://avatars.githubusercontent.com/u/7201959?s=200&v=4) 
 
+[![Download](https://img.shields.io/badge/Download-Release-blue.svg)](https://github.com/keni2006/Sphere-51x/releases) 
+[![Issues](https://img.shields.io/badge/Report-Issue-red.svg)](https://github.com/keni2006/Sphere-51x/issues) 
+[![Contribution](https://img.shields.io/badge/Contribute-Guidelines-green.svg)](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md) 
 
-
-## 🚀 Features
+## 🚀 TODO
 
 - Fix some problems with the protocol.
 - Fix server crashes after using incorrect values and parameters in scripts.
@@ -24,14 +26,13 @@ Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before 
 - Should be tested. Currently not working correctly.  
 *TODO*: Should be saved in `sphereworld` like `PVPPOINTS=VALUE`.  
 
-### 🎉 New Feature: PvP Points  
+### 🎉 New Feature:
 `src.pvpPoints`
+`color names abyss style`
+`color output console`
 
-## Buttons
 
-[![Download](https://img.shields.io/badge/Download-Release-blue.svg)](https://github.com/keni2006/Sphere-51x/releases) 
-[![Issues](https://img.shields.io/badge/Report-Issue-red.svg)](https://github.com/keni2006/Sphere-51x/issues) 
-[![Contribution](https://img.shields.io/badge/Contribute-Guidelines-green.svg)](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md) 
+
 
 ## 🤝 Contributing
 
