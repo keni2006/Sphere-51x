@@ -37,6 +37,7 @@ static const WORD Item_Beards[] = // beard types
 CChar * CChar::CreateBasic( CREID_TYPE baseID ) // static
 {
 	// Create the "basic" NPC. Not NPC or player yet.
+	
 	return( new CChar( baseID ));
 }
 
@@ -1272,6 +1273,7 @@ enum
 	CC_XBODY,
 	CC_XSKIN,
 	CC_QTY,
+	//CC_PVPPONTS,
 };
 
 const TCHAR * CChar::sm_KeyTable[CC_QTY] =
@@ -1308,6 +1310,7 @@ const TCHAR * CChar::sm_KeyTable[CC_QTY] =
 	"TITLE",
 	"XBODY",
 	"XSKIN",
+	//"PVPPOINTS",
 };
 
 bool CChar::r_WriteVal( const TCHAR * pKey, CGString & sVal, CTextConsole * pSrc )
@@ -1850,7 +1853,7 @@ void CChar::r_Write( CScript & s )
 			s.WriteKeyHex( "ACTARG2", m_atUnk.m_Arg2 );
 		}
 	}
-
+	
 	s.WriteKeyVal( "HITPOINTS", m_StatHealth );
 	s.WriteKeyVal( "STAMINA", m_StatStam );
 	s.WriteKeyVal( "MANA", m_StatMana);

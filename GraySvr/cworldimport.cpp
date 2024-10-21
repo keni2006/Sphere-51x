@@ -5,6 +5,10 @@
 
 #include "graysvr.h"	// predef header.
 
+
+
+
+
 struct CImportSer : public CGObListRec
 {
 protected:
@@ -280,6 +284,13 @@ bool CImportFile::ImportSCP( CScript & s, WORD wModeFlags )
 			{
 				m_pCurSer->m_layer = (LAYER_TYPE) s.GetArgVal();
 			}
+			else if (s.IsKey("PVPPOINTS"))
+			{
+				if (CChar* pChar = dynamic_cast<CChar*>(m_pCurObj))
+				{
+					pChar->m_PvpPoints = s.GetArgVal();
+				}
+			}
 			else
 			{
 				m_pCurObj->r_LoadVal( s );
@@ -292,6 +303,7 @@ bool CImportFile::ImportSCP( CScript & s, WORD wModeFlags )
 
 bool CImportFile::ImportWSC( CScript & s, WORD wModeFlags )
 {
+
 	// This file is a WSC or UOX world script file.
 
 	int mode = 0;
@@ -601,6 +613,12 @@ bool CImportFile::ImportWSC( CScript & s, WORD wModeFlags )
 			else if ( s.IsKey("KILLS" ) && pChar->m_pPlayer )
 			{
 				pChar->m_pPlayer->m_Murders = atoi(pArg);
+			}
+			if (s.IsKey("PVPPOINTS"))
+			{
+				if (m_pCurObj != NULL)
+					return(false);
+				pChar->m_PvpPoints = atoi(pArg);
 			}
 			else if ( s.IsKey("NPCAITYPE" ))
 			{

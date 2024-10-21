@@ -2,7 +2,7 @@
 // CServer.cpp
 // Copyright Menace Software (www.menasoft.com).
 //
-
+#include <windows.h>
 #include "graysvr.h"	// predef header.
 
 #include <signal.h>

@@ -77,7 +77,7 @@
 // ADDNPC from scripts, "CONT" keyword
 
 #include "graysvr.h"	// predef header.
-
+#include <windows.h>
 const TCHAR * g_Stat_Name[STAT_QTY] =
 {
 	"STR",
@@ -574,64 +574,84 @@ bool CLog::Open( TCHAR * pszBaseDirName )	// name set previously.
 	return( CFileText::Open( GetMergedFileName( m_sBaseDir, sName ), OF_READWRITE|OF_WRITE|OF_TEXT ));
 }
 
-int CLog::EventStr( WORD wMask, const TCHAR * pszMsg )
+
+
+void SetConsoleColor(WORD color)         //console color
 {
-	if ( ! IsLogged( wMask ))	// I don't care about these.
-		return( 0 );
+	HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+	SetConsoleTextAttribute(hConsole, color);
+}
+
+int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
+{
+	if (!IsLogged(wMask))	// I don't care about these.
+		return(0);
 
 	static bool fSpinLock = false;	// make sure we don't go reentrant here.
-	if ( fSpinLock )
-		return( 0 );
+	if (fSpinLock)
+		return(0);
 	fSpinLock = true;
 
 	try
 	{
 
-	ASSERT( pszMsg && * pszMsg );
+		ASSERT(pszMsg && *pszMsg);
 
-	// Put up the date/time.
-	CRealTime NewStamp;			// last real time stamp.
-	NewStamp.FillRealTime();
+		// Put up the date/time.
+		CRealTime NewStamp;			// last real time stamp.
+		NewStamp.FillRealTime();
 
-	if ( NewStamp.m_Day != m_Stamp.m_Day ||
-		NewStamp.m_Month != m_Stamp.m_Month ||
-		NewStamp.m_Year != m_Stamp.m_Year )
-	{
-		// it's a new day, open with new day name.
-		Close();	// LINUX should alrady be closed.
-		Open();
-		Printf( NewStamp.Write());
-		Printf( "\n" );
-	}
-	else
-	{
+		if (NewStamp.m_Day != m_Stamp.m_Day ||
+			NewStamp.m_Month != m_Stamp.m_Month ||
+			NewStamp.m_Year != m_Stamp.m_Year)
+		{
+			// it's a new day, open with new day name.
+			Close();	// LINUX should alrady be closed.
+			Open();
+			Printf(NewStamp.Write());
+			Printf("\n");
+		}
+		else
+		{
 #ifndef _WIN32
-		Open();	// LINUX needs to close and re-open for each log line !
+			Open();	// LINUX needs to close and re-open for each log line !
 #endif
-	}
+		}
 
-	CGString sTime;
-	sTime.Format( "%02d:%02d:", NewStamp.m_Hour, NewStamp.m_Min );
-	m_Stamp = NewStamp;
+		CGString sTime;
+		sTime.Format("%02d:%02d:", NewStamp.m_Hour, NewStamp.m_Min);
+		m_Stamp = NewStamp;
 
-	const TCHAR * pszLabel = NULL;
+		const TCHAR* pszLabel = NULL;
 
-	switch ( wMask & 0x07 )
-	{
-	case LOGL_FATAL:	// fatal error !
-		pszLabel = "FATAL:";
-		break;
-	case LOGL_CRIT:	// critical.
-		pszLabel = "CRITICAL:";
-		break;
-	case LOGL_ERROR:	// non-fatal errors.
-		pszLabel = "ERROR:";
-		break;
-	case LOGL_WARN:
-		pszLabel = "WARNING:";
-		break;
-	}
+		switch (wMask & 0x07)
+		{
+		case LOGL_FATAL:   // fatal error!
+			pszLabel = "FATAL:";
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_INTENSITY); //red
+			break;
+		case LOGL_CRIT:    // critical.
+			pszLabel = "CRITICAL:";
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_INTENSITY); //red
+			break;
+		case LOGL_ERROR:   // non-fatal errors.
+			pszLabel = "ERROR:";
+			SetConsoleColor(FOREGROUND_RED); // 
+			break;
+		case LOGL_WARN:
+			pszLabel = "WARNING:";
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN); // yellow
+			break;
+		default:
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);//white
+			
+			break;
+		}
+	
 
+		//SHOULD BE REWRITTEN KINGA SLOWLY BUT WORK//
+		/////////////////////////////////////////////
+	
 	// Get the script context. (if there is one)
 	CGString sScriptContext;
 	if ( m_pScriptContext )
@@ -640,17 +660,24 @@ int CLog::EventStr( WORD wMask, const TCHAR * pszMsg )
 	}
 
 	// Print to screen.
-	if ( ! ( wMask & LOGM_INIT ) && ! g_Serv.IsLoading())
+	if (!(wMask & LOGM_INIT) && !g_Serv.IsLoading())
 	{
-		g_Serv.PrintStr( sTime );
+	//	SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE); // white for time
+		g_Serv.PrintStr(sTime);
 	}
-	if ( pszLabel )	g_Serv.PrintStr( pszLabel );
-	if ( ! sScriptContext.IsEmpty())
+	if (pszLabel)
 	{
-		g_Serv.PrintStr( sScriptContext );
+		g_Serv.PrintStr(pszLabel);
+		SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE); // white after printing label
 	}
-	g_Serv.PrintStr( pszMsg );
 
+	if (!sScriptContext.IsEmpty())
+	{
+		g_Serv.PrintStr(sScriptContext);
+	}
+	g_Serv.PrintStr(pszMsg);
+
+	
 	// Print to log file.
 	WriteStr( sTime );
 	if ( pszLabel )	WriteStr( pszLabel );

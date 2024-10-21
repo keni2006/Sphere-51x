@@ -3841,6 +3841,7 @@ public:
 	virtual ~CChar(); // Delete character
 
 public:
+	int m_PvpPoints;
 	// Status and attributes ------------------------------------
 	int IsWeird() const;
 	bool IsStat(UINT dwStatFlag ) const

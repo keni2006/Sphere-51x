@@ -454,8 +454,7 @@ bool CCharBase::r_LoadVal( CScript & s )
 		return( false );
 	switch ( FindTableSorted( s.GetKey(), sm_KeyTable, COUNTOF( sm_KeyTable )))
 	{
-	
-	case CT_ANIM:
+		case CT_ANIM:
 		m_Anims = s.GetArgRange();
 		break;
 	case CT_ARMOR:

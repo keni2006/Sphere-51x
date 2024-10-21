@@ -150,9 +150,9 @@ bool CCharPlayer::r_WriteVal( const TCHAR * pszKey, CGString & sVal )
 	case 4: // "SKILLCLASS"
 		sVal.FormatVal( m_SkillClass );
 		return( true );
-	case 5:	// "PVPOINTS"
-		sVal.FormatVal(m_PvpPoints);
-		return(true);
+	case 5: // "PVPPOINTS"
+		if (m_PvpPoints);
+			sVal.FormatVal(m_PvpPoints);
 	}
 	return( false );
 }
@@ -204,6 +204,9 @@ bool CCharPlayer::r_LoadVal( CScript &s )
 			return( false );
 		m_SkillClass = i;
 		}
+	case 5: // "PVPPOINTS"
+		m_PvpPoints = s.GetArgVal();
+
 		return true;
 	}
 	return( false );
@@ -214,7 +217,7 @@ void CCharPlayer::r_Write( CScript & s ) const
 	ASSERT(m_pAccount);
 	s.WriteKey( "ACCOUNT", m_pAccount->GetName());
 	if ( m_PvpPoints ) // Дописано
-		s.WriteKeyVal( "PVPOINTS", m_PvpPoints );
+		s.WriteKeyVal( "PVPPOINTS", m_PvpPoints );
 	if ( m_Murders )
 		s.WriteKeyVal( "KILLS", m_Murders );
 	if ( m_Plot1 )
