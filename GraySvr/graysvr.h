@@ -35,7 +35,7 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #define GRAY_MAIN_SERVER	""
 #define GRAY_GAME_SERVER
 #define GRAY_LOG_SERVER
-#define GRAY_URL			"https://github.com/SaschaKP/SphereServer-0.51x/"	// default url.
+#define GRAY_URL			"www.sphereserver.net"	// default url.
 
 class CCharBase;
 class CClient;
@@ -4008,7 +4008,9 @@ public:
 	// Client Player specific stuff. -------------------------
 	void ClientAttach( CClient * pClient );
 	void ClientDetach();
-	bool IsClient() const { return( m_pClient != NULL ); }
+	//bool IsClient() const { return( m_pClient != NULL ); }
+	bool IsClient() const { return (this != nullptr) && (m_pClient != nullptr); } //BLOCK ACESS FOR NULLPTR UNTIL TESTING ABYSS SCRIPTS
+
 	CClient * GetClient() const
 	{
 		return( m_pClient );
