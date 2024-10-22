@@ -6,7 +6,7 @@
 //
 
 #include "graysvr.h"	// predef header.
-
+#include "string"
 /////////////////////////////////////////////////////////////////
 // -CClient stuff.
 
@@ -690,51 +690,84 @@ void CClient::addBarkUNICODE( const NCHAR * pText, const CObjBaseTemplate * pSrc
 	xSendPkt( &cmd, len );
 }
 
-void CClient::addBark( const TCHAR * pText, const CObjBaseTemplate * pSrc, COLOR_TYPE color, TALKMODE_TYPE mode, FONT_TYPE font )
+void CClient::addBark(const TCHAR* pText, const CObjBaseTemplate* pSrc, COLOR_TYPE color, TALKMODE_TYPE mode, FONT_TYPE font)
 {
-	if ( pText == NULL ) 
+	if (pText == NULL)
 		return;
+
+	const CAccount* pAccount = GetAccount(); // GET CURRENT ACCOUNT
+	std::string lang;
+
+	// GET LANGUAGE
+	if (pAccount && pAccount->m_lang[0] != '\0') {
+		lang = pAccount->m_lang;
+	}
+
+	std::string textToSend;
+	std::string pTextStr(pText);
+	size_t delimiterPos = pTextStr.find('^');
+
+	// LANG LOGIC
+	if (lang == "RUS") {
+		// SEND ALL AFTER ^
+		if (delimiterPos != std::string::npos) {
+			textToSend = pTextStr.substr(delimiterPos + 1); 
+		}
+		else {
+			textToSend = pTextStr; 
+		}
+	}
+	else {
+		// ENU OR OVER LANGUAGE
+		// SEND ALL BEFORE ^
+		if (delimiterPos != std::string::npos) {
+			textToSend = pTextStr.substr(0, delimiterPos); 
+		}
+		else {
+			textToSend = pTextStr; 
+		}
+	}
 
 	CCommand cmd;
 	cmd.Speak.m_Cmd = XCMD_Speak;
 
-	if ( mode == TALKMODE_BROADCAST )
+	if (mode == TALKMODE_BROADCAST)
 	{
 		mode = TALKMODE_SYSTEM;
 		pSrc = NULL;
 	}
 
-	int len = strlen(pText);
+	int len = textToSend.length();
 	if (len <= 0)
 		return;
-	DEBUG_CHECK( len < MAX_TALK_BUFFER );
+	DEBUG_CHECK(len < MAX_TALK_BUFFER);
 	len += sizeof(cmd.Speak);
 	cmd.Speak.m_len = len;
-	cmd.Speak.m_mode = mode;		// mode = range.
+	cmd.Speak.m_mode = mode;       // mode = range.
 	cmd.Speak.m_color = color;
-	cmd.Speak.m_font = font;		// font. 3 = system message just to you !
+	cmd.Speak.m_font = font;       // font. 3 = system message just to you !
 
-	if ( pSrc == NULL )
+	if (pSrc == NULL)
 	{
 		cmd.Speak.m_UID = 0x01010101;
-		strcpy( cmd.Speak.m_name, "System" );
+		strcpy(cmd.Speak.m_name, "System");
 	}
 	else
 	{
 		cmd.Speak.m_UID = pSrc->GetUID();
-		strncpy( cmd.Speak.m_name, pSrc->GetName(), sizeof(cmd.Speak.m_name));
-		cmd.Speak.m_name[ sizeof(cmd.Speak.m_name)-1 ] = '\0';
+		strncpy(cmd.Speak.m_name, pSrc->GetName(), sizeof(cmd.Speak.m_name));
+		cmd.Speak.m_name[sizeof(cmd.Speak.m_name) - 1] = '\0';
 	}
-	if ( pSrc == NULL || pSrc->IsItem())
+	if (pSrc == NULL || pSrc->IsItem())
 	{
 		cmd.Speak.m_id = 0x0101;
 	}
-	else	// char id only.
+	else    // char id only.
 	{
-		cmd.Speak.m_id = (dynamic_cast <const CChar*>(pSrc))->GetDispID();
+		cmd.Speak.m_id = (dynamic_cast<const CChar*>(pSrc))->GetDispID();
 	}
-	strncpy( cmd.Speak.m_text, pText, MAX_TALK_BUFFER );
-	xSendPkt( &cmd, len );
+	strncpy(cmd.Speak.m_text, textToSend.c_str(), MAX_TALK_BUFFER); // use text here
+	xSendPkt(&cmd, len);
 }
 
 void CClient::addObjMessage( const TCHAR *pMsg, const CObjBaseTemplate * pSrc, COLOR_TYPE color ) // The message when an item is clicked
