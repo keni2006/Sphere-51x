@@ -1,7 +1,7 @@
 ### 📅 Date: 23.10.2024
--Fix some memory leaks due scripts using
--Clean Garbage
--Added multi lang support
+- Fix some memory leaks due scripts using
+- Clean Garbage
+- Added multi lang support
 *TODO* Setup lang via `lang` command(HELP GUMP) for client
 ### 📅 Date: 21.10.2024
 - PVPPOINTS now store correctly in sphereworld
