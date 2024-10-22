@@ -9,7 +9,7 @@ Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before 
 [![Issues](https://img.shields.io/badge/Report-Issue-red.svg)](https://github.com/keni2006/Sphere-51x/issues) 
 [![Contribution](https://img.shields.io/badge/Contribute-Guidelines-green.svg)](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md) 
 
-## 🚀 TODO
+## 🚀 GLOBAL TODO
 
 - Fix some problems with the protocol.
 - Fix server crashes after using incorrect values and parameters in scripts.
@@ -17,19 +17,11 @@ Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before 
 - Implement MySQL data store without `SAVEWORLD`.
 
 
-### 📅 Date: 21.10.2024
-- PVPPOINTS now store correctly in sphereworld
-- Added color output in console
-
-### 📅 Date: 18.10.2024
-
-- Should be tested. Currently not working correctly.  
-*TODO*: Should be saved in `sphereworld` like `PVPPOINTS=VALUE`.  
-
-### 🎉 New Feature:
+### 🎉 Features:
 `src.pvpPoints`
 `color names abyss style`
 `color output console`
+`src.sysmessage Hello world^Привет мир` 
 
 
 
