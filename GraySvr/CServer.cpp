@@ -4,22 +4,39 @@
 //
 #include <windows.h>
 #include "graysvr.h"	// predef header.
-
+#include <fstream>
+#include <string>
 #include <signal.h>
+#include <set>
 
 #ifdef _WIN32
 #include "../common/cassoc.h"
 #endif
-//CHECKNAME TEST///NEED CREATE NORMAL CHECK
-bool CServer::IsNameTaken(const char* name)
-{
-	// example test name ASS
-	if (strcmp(name, "Ass") == 0)
-	{
-		return true; 
+
+//////////////////////////////////////////////////////////
+//CHECKNAME STUFF
+void CServer::LoadNames() {
+	std::ifstream saveFile("C:\\t\\sph\\sphere\\world\\sphereworld.scp"); //do normal path later, now testing
+	if (!saveFile.is_open()) {
+		g_Log.Event(LOGL_ERROR, "Failed to open names file.\n");
+		return;
 	}
-	return false;
+
+	std::string line;
+	while (std::getline(saveFile, line)) {
+		if (line.rfind("NAME=", 0) == 0) {
+			std::string characterName = line.substr(5);
+			m_takenNames.insert(characterName); 
+		}
+	}
+	saveFile.close(); 
 }
+
+bool CServer::IsNameTaken(const char* name) {
+	return m_takenNames.find(name) != m_takenNames.end(); 
+}
+
+
 
 //////////////////////////////////////////////////////////
 // -CProfileData
@@ -949,7 +966,8 @@ CServer::CServer() : CServRef( GRAY_TITLE, SOCKET_LOCAL_ADDRESS )
 	m_iDecay_Item = 30*60*TICK_PER_SEC;
 	m_iDecay_CorpsePlayer = 45*60*TICK_PER_SEC;
 	m_iDecay_CorpseNPC = 15*60*TICK_PER_SEC;
-
+	//Load names check
+	LoadNames();
 	// Accounts
 	m_nClientsMax = FD_SETSIZE-1;
 	m_fRequireEmail = false;

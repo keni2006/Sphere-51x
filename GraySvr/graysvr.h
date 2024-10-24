@@ -29,6 +29,8 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include "../common/cregion.h"
 #include "../common/cgraymap.h"
 #include "CParty.h"
+#include <set>
+#include <string>
 
 #define GRAY_TITLE			"Sphere"	// "Sphere"
 #define GRAY_VERSION		"0.51a"
@@ -5601,11 +5603,14 @@ extern class CServer : public CGSocket, public CServRef, public CTextConsole	// 
 	static const TCHAR * sm_KeyStatsTable[];
 	static const TCHAR * sm_KeyTable[];
 
+
 private:
 	// My base script files that are used frequently.
 	CScript m_Scripts[ SCPFILE_QTY ];
+	
 
 public:
+	void LoadNames();
 	bool IsNameTaken(const char* name); //CHECK NAME FOR DUPLICATES
 	int  m_iExitCode;  // Just some error code to return to system.
 	WORD m_wExitFlag;	// identifies who caused the exit.
@@ -5709,6 +5714,7 @@ public:
 	int  m_iPickUpSpeed;
 
 private:
+	std::set<std::string> m_takenNames; //check dup name
 	// Web status pages.
 	CGObArray <CWebPageDef*> m_WebPages;
 

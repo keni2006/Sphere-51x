@@ -10,6 +10,7 @@ class CGrayCachedMulItem
 private:
 	time_t m_dwTimeRef;		// When in world.GetTime() was this last referenced.
 public:
+	
 	void InitCacheTime()
 	{
 		m_dwTimeRef = 0;
@@ -45,20 +46,34 @@ public:
 	}
 	int GetStaticQty() const
 	{
-		return( m_iStatics );
+		ASSERT(this != nullptr);
+		return (m_iStatics);
 	}
-	const CUOStaticItemRec * GetStatic( int i ) const
+
+	const CUOStaticItemRec* GetStatic(int i) const
 	{
-		ASSERT( i < m_iStatics );
-		return( &m_pStatics[i] );
+		
+		if (m_pStatics == nullptr || i < 0 || i >= m_iStatics)
+		{
+			return nullptr; 
+		}
+		return &(m_pStatics[i]);
 	}
-	bool IsStaticPoint( int i, int xo, int yo ) const
+
+	bool IsStaticPoint(int i, int xo, int yo) const
 	{
-		ASSERT( xo >= 0 && xo < UO_BLOCK_SIZE );
-		ASSERT( yo >= 0 && yo < UO_BLOCK_SIZE );
-		ASSERT( i < m_iStatics );
-		return( m_pStatics[i].m_x == xo && m_pStatics[i].m_y == yo );
+		
+		if (m_pStatics == nullptr || i < 0 || i >= m_iStatics)
+		{
+			return false; 
+		}
+
+		ASSERT(xo >= 0 && xo < UO_BLOCK_SIZE);
+		ASSERT(yo >= 0 && yo < UO_BLOCK_SIZE);
+
+		return (m_pStatics[i].m_x == xo && m_pStatics[i].m_y == yo);
 	}
+
 };
 
 class CGrayMapBlock : public CMemDynamic,	// Cache this from the MUL files. 8x8 block of the world.

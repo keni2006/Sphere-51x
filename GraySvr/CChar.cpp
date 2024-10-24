@@ -2566,7 +2566,7 @@ void CChar::InitPlayer(CEvent* pBin, CClient* pClient)
 	ASSERT(pClient);
 	ASSERT(pBin);
 
-	// check for shit names
+	// check for obscene names
 	if (g_Serv.IsObscene(pBin->Create.m_name))
 	{
 		g_Log.Event(LOGL_WARN, "%x: Unacceptable obscene name '%s' for account '%s'\n",
@@ -2583,6 +2583,10 @@ void CChar::InitPlayer(CEvent* pBin, CClient* pClient)
 	{
 		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
 			pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
+
+		pClient->SysMessage("Name busy try another."); 
+//pClient->Disconnect(); // close connection method, do later
+
 		return;
 	}
 

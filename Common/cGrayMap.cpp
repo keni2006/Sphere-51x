@@ -25,25 +25,42 @@
 //////////////////////////////////////////////////////////////////
 // -CGrayStaticsBlock
 
-void CGrayStaticsBlock::LoadStatics(UINT ulBlockIndex )
+void CGrayStaticsBlock::LoadStatics(UINT ulBlockIndex)
 {
-	// long ulBlockIndex = (bx*UO_BLOCKS_Y + by);
-	// NOTE: What is index.m_wVal3 and index.m_wVal4 in VERFILE_STAIDX ?
-	ASSERT( m_iStatics <= 0 );
+	
+	if (m_pStatics)
+	{
+		delete[] m_pStatics;
+		m_pStatics = nullptr; 
+	}
+
+	m_iStatics = 0; 
 
 	CUOIndexRec index;
-	if ( g_Install.ReadMulIndex( VERFILE_STAIDX, VERFILE_STATICS, ulBlockIndex, index ))
+	if (g_Install.ReadMulIndex(VERFILE_STAIDX, VERFILE_STATICS, ulBlockIndex, index))
 	{
-		m_iStatics = index.GetBlockLength() / sizeof( CUOStaticItemRec );
-		ASSERT( m_iStatics );
-		m_pStatics = new CUOStaticItemRec[ m_iStatics ];
-		ASSERT( m_pStatics );
-		if ( ! g_Install.ReadMulData( VERFILE_STATICS, index, m_pStatics ))
+		
+		m_iStatics = index.GetBlockLength() / sizeof(CUOStaticItemRec);
+		ASSERT(m_iStatics > 0); 
+
+		m_pStatics = new CUOStaticItemRec[m_iStatics];
+		if (!m_pStatics)
 		{
+			m_iStatics = 0; 
+			throw CGrayError(LOGL_CRIT, E_FAIL, "CGrayStatsBlock: Memory allocation failed");
+		}
+
+		if (!g_Install.ReadMulData(VERFILE_STATICS, index, m_pStatics))
+		{
+			delete[] m_pStatics; 
+			m_pStatics = nullptr; 
+			m_iStatics = 0; 
 			throw CGrayError(LOGL_CRIT, E_FAIL, "CGrayMapBlock: Read fStatics0");
 		}
 	}
 }
+
+
 
 //////////////////////////////////////////////////////////////////
 // -CGrayMapBlock
@@ -78,51 +95,60 @@ int CGrayCachedMulItem::GetCacheAge() const
 
 #endif	// GRAY_MAP
 
-void CGrayMapBlock::Load( int bx, int by )
+void CGrayMapBlock::Load(int bx, int by)
 {
-	// Read in all the statics data for this block.
+	
 
 #if defined(GRAY_SVR) || defined(GRAY_MAP)
-	InitCacheTime();		// This is invalid !
+	InitCacheTime(); 
 #endif
 
-	ASSERT( bx < UO_BLOCKS_X );
-	ASSERT( by < UO_BLOCKS_Y );
+	ASSERT(bx < UO_BLOCKS_X);
+	ASSERT(by < UO_BLOCKS_Y);
 
-	long ulBlockIndex = (bx*UO_BLOCKS_Y + by);
+	long ulBlockIndex = (bx * UO_BLOCKS_Y + by);
 
-	CFileBin * pFile;
+	CFileBin* pFile;
 	CUOIndexRec index;
-	if ( g_VerData.FindVerDataBlock( VERFILE_MAP, ulBlockIndex, index ))
+	if (g_VerData.FindVerDataBlock(VERFILE_MAP, ulBlockIndex, index))
 	{
 		pFile = &(g_Install.m_File[VERFILE_VERDATA]);
 	}
 	else
 	{
-		index.SetupIndex( ulBlockIndex * sizeof(CUOMapBlock), sizeof(CUOMapBlock));
+		index.SetupIndex(ulBlockIndex * sizeof(CUOMapBlock), sizeof(CUOMapBlock));
 		pFile = &(g_Install.m_File[VERFILE_MAP]);
 	}
 
-	if ( ! pFile->Seek( index.GetFileOffset()))
+	if (!pFile->Seek(index.GetFileOffset()))
 	{
-		memset( &m_Terrain, 0, sizeof( m_Terrain ));
+		memset(&m_Terrain, 0, sizeof(m_Terrain));
 		throw CGrayError(LOGL_CRIT, E_FAIL, "CGrayMapBlock: Seek Ver");
 	}
-	if ( pFile->Read( &m_Terrain, sizeof(CUOMapBlock)) <= 0 )
+	if (pFile->Read(&m_Terrain, sizeof(CUOMapBlock)) <= 0)
 	{
-		memset( &m_Terrain, 0, sizeof( m_Terrain ));
+		memset(&m_Terrain, 0, sizeof(m_Terrain));
 		throw CGrayError(LOGL_CRIT, E_FAIL, "CGrayMapBlock: Read");
 	}
 
-	LoadStatics( ulBlockIndex );
+	try
+	{
+		LoadStatics(ulBlockIndex);
+	}
+	catch (...)
+	{
+		
+		memset(&m_Terrain, 0, sizeof(m_Terrain));
+		throw; 
+	}
 
 #ifdef GRAY_MAP
-	// figure out the map colors here just once when loaded.
-	memset( m_MapColor, 0, sizeof(m_MapColor));
+	
+	memset(m_MapColor, 0, sizeof(m_MapColor));
 #endif
 
 #if defined(GRAY_SVR) || defined(GRAY_MAP)
-	HitCacheTime();		// validate.
+	HitCacheTime(); 
 #endif
 }
 

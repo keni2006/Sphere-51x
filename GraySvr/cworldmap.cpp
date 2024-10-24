@@ -57,30 +57,32 @@ const CGrayMulti * CWorld::GetMultiItemDefs( ITEMID_TYPE itemid )
 //////////////////////////////////////////////////////////////////
 // Map reading and blocking.
 
-CPointMap CWorld::FindItemTypeNearby( const CPointMap & pt, ITEM_TYPE iType, int iDistance )
+CPointMap CWorld::FindItemTypeNearby(const CPointMap& pt, ITEM_TYPE iType, int iDistance)
 {
 	// Find the closest item of this type.
 
 	CPointMap ptPos;
 
 	// Check dynamics first since they are the easiest.
-	CWorldSearch Area( pt, iDistance );
+	CWorldSearch Area(pt, iDistance);
 	while (true)
 	{
-		CItem * pItem = Area.GetItem();
-		if ( pItem == NULL ) 
-			break;
-		if ( pItem->m_pDef->m_type != iType ) 
+		CItem* pItem = Area.GetItem();
+		if (pItem == nullptr || pItem->m_pDef == nullptr)  //created nullptr check because memory leaking while chechking account name
 			continue;
 
+		if (pItem->m_pDef->m_type != iType)
+			continue;
+
+
 		int iTestDistance = pt.GetDist(pItem->GetTopPoint());
-		if ( iTestDistance > iDistance ) 
+		if (iTestDistance > iDistance)
 			continue;
 
 		ptPos = pItem->GetTopPoint();
 		iDistance = iTestDistance;	// tighten up the search.
-		if ( ! iDistance ) 
-			return( ptPos );
+		if (!iDistance)
+			return(ptPos);
 	}
 
 	// Check for appropriate terrain type
