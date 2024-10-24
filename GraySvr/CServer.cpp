@@ -10,6 +10,16 @@
 #ifdef _WIN32
 #include "../common/cassoc.h"
 #endif
+//CHECKNAME TEST///NEED CREATE NORMAL CHECK
+bool CServer::IsNameTaken(const char* name)
+{
+	// example test name ASS
+	if (strcmp(name, "Ass") == 0)
+	{
+		return true; 
+	}
+	return false;
+}
 
 //////////////////////////////////////////////////////////
 // -CProfileData

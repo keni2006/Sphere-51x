@@ -2561,160 +2561,162 @@ basicform:
 	return( true );
 }
 
-void CChar::InitPlayer( CEvent * pBin, CClient * pClient )
+void CChar::InitPlayer(CEvent* pBin, CClient* pClient)
 {
-	// Create a brand new Player char.
 	ASSERT(pClient);
 	ASSERT(pBin);
 
-	SetID( ( pBin->Create.m_sex == 0 ) ? CREID_MAN : CREID_WOMAN );
+	// check for shit names
+	if (g_Serv.IsObscene(pBin->Create.m_name))
+	{
+		g_Log.Event(LOGL_WARN, "%x: Unacceptable obscene name '%s' for account '%s'\n",
+			pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
+		return;
+	}
 
-	if ( g_Serv.IsObscene(pBin->Create.m_name))	// Is the name unacceptable?
+	char name[MAX_NAME_SIZE];
+	int len = GetBareText(name, strip_extra_spaces(pBin->Create.m_name, true), sizeof(name),
+		"!\"#$%&()*,/:;<=>?@[\\]^{|}~_+");
+
+	// check busy names
+	if (len < 1 || g_Serv.IsNameTaken(name))
 	{
-		g_Log.Event( LOGL_WARN, "%x:Unacceptable obscene name '%s' for account '%s'\n", pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName() ); 
-		SetName( "unnamed" );
+		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
+			pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
+		return;
 	}
-	else
-	{
-		char name[MAX_NAME_SIZE];
-		//we absolutely don't want those chars on a player name, also we must avoid potential issues with things like [eof] or such, if the name is made only of those, just skip to unnamed and launch a warning in console/log
-		//ALSO - trim leading, ending and extra spaces, we don't need them, just the name and internal single spaces are OK
-		int len = GetBareText(name, strip_extra_spaces(pBin->Create.m_name, true), sizeof(name), "!\"#$%&()*,/:;<=>?@[\\]^{|}~_+");//underscore shouldn't be allowed too? anyway it's not good to have such chars, those will be stripped from name
-		if (len < 1)
-		{
-			g_Log.Event(LOGL_WARN, "%x:Probable unacceptable chars on name '%s' for account '%s'\n", pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
-			SetName("unnamed");
-		}
-		else
-			SetName(name);
-	}
+
+	SetName(name);
+
+
+	SetID((pBin->Create.m_sex == 0) ? CREID_MAN : CREID_WOMAN);
 
 	COLOR_TYPE color;
 	color = pBin->Create.m_color | COLOR_UNDERWEAR;
-	if ( color < (COLOR_UNDERWEAR|COLOR_SKIN_LOW) || color > (COLOR_UNDERWEAR|COLOR_SKIN_HIGH))
+	if (color < (COLOR_UNDERWEAR | COLOR_SKIN_LOW) || color >(COLOR_UNDERWEAR | COLOR_SKIN_HIGH))
 	{
-		color = COLOR_UNDERWEAR|COLOR_SKIN_LOW;
+		color = COLOR_UNDERWEAR | COLOR_SKIN_LOW;
 	}
-	SetColor( color );
+	SetColor(color);
 	m_fonttype = FONT_NORMAL;
 
-	int iStartLoc = pBin->Create.m_startloc-1;
-	if ( ! g_Serv.m_StartDefs.IsValidIndex( iStartLoc ))
+	int iStartLoc = pBin->Create.m_startloc - 1;
+	if (!g_Serv.m_StartDefs.IsValidIndex(iStartLoc))
 		iStartLoc = 0;
 	m_Home = g_Serv.m_StartDefs[iStartLoc]->m_p;
 
-	if ( ! m_Home.IsValid())
+	if (!m_Home.IsValid())
 	{
-		if ( g_Serv.m_StartDefs.GetCount())
+		if (g_Serv.m_StartDefs.GetCount())
 		{
 			m_Home = g_Serv.m_StartDefs[0]->m_p;
 		}
-		DEBUG_ERR(( "Invalid start location for character!\n" ));
+		DEBUG_ERR(("Invalid start location for character!\n"));
 	}
 
-	SetUnkPoint( m_Home );	// Don't actaully put me in the world yet.
+	SetUnkPoint(m_Home);	// Don't actaully put me in the world yet.
 
 	// randomize the skills first.
 	int i = 0;
-	for ( ; i < g_Serv.SKILL_MAX; i++ )
+	for (; i < g_Serv.SKILL_MAX; i++)
 	{
-		Skill_SetBase( (SKILL_TYPE)i, GetRandVal( g_Serv.m_iMaxBaseSkill ));
+		Skill_SetBase((SKILL_TYPE)i, GetRandVal(g_Serv.m_iMaxBaseSkill));
 	}
 
-	if ( pBin->Create.m_str + pBin->Create.m_dex + pBin->Create.m_int > 66 )
+	if (pBin->Create.m_str + pBin->Create.m_dex + pBin->Create.m_int > 66)
 	{
 		// ! Cheater !
 		pBin->Create.m_str = 10;
 		pBin->Create.m_dex = 10;
 		pBin->Create.m_int = 10;
 
-		g_Log.Event( LOGL_WARN|LOGM_CHEAT, "%x:Cheater '%s' is submitting hacked char stats\n", pClient->GetSocket(), pClient->GetAccount()->GetName());
+		g_Log.Event(LOGL_WARN | LOGM_CHEAT, "%x:Cheater '%s' is submitting hacked char stats\n", pClient->GetSocket(), pClient->GetAccount()->GetName());
 	}
-	Stat_Set( STAT_STR, pBin->Create.m_str + 1 );
-	Stat_Set( STAT_DEX, pBin->Create.m_dex + 1 );
-	Stat_Set( STAT_INT, pBin->Create.m_int + 1 );
+	Stat_Set(STAT_STR, pBin->Create.m_str + 1);
+	Stat_Set(STAT_DEX, pBin->Create.m_dex + 1);
+	Stat_Set(STAT_INT, pBin->Create.m_int + 1);
 
-	if ( pBin->Create.m_val1 > 70 ||
+	if (pBin->Create.m_val1 > 70 ||
 		pBin->Create.m_val2 > 70 ||
 		pBin->Create.m_val3 > 70 ||
-		pBin->Create.m_val1 + pBin->Create.m_val2 + pBin->Create.m_val3 > 211 )
+		pBin->Create.m_val1 + pBin->Create.m_val2 + pBin->Create.m_val3 > 211)
 	{
 		// ! Cheater !
 		pBin->Create.m_val1 = 33;
 		pBin->Create.m_val2 = 33;
 		pBin->Create.m_val3 = 33;
 
-		g_Log.Event( LOGL_WARN|LOGM_CHEAT, "%x:Cheater '%s' is submitting hacked char skills\n", pClient->GetSocket(), pClient->GetAccount()->GetName());
+		g_Log.Event(LOGL_WARN | LOGM_CHEAT, "%x:Cheater '%s' is submitting hacked char skills\n", pClient->GetSocket(), pClient->GetAccount()->GetName());
 	}
 
-	if ( IsSkillBase((SKILL_TYPE) pBin->Create.m_skill1))
-		Skill_SetBase( (SKILL_TYPE) pBin->Create.m_skill1, pBin->Create.m_val1*10 );
-	if ( IsSkillBase((SKILL_TYPE) pBin->Create.m_skill2))
-		Skill_SetBase( (SKILL_TYPE) pBin->Create.m_skill2, pBin->Create.m_val2*10 );
-	if ( IsSkillBase((SKILL_TYPE) pBin->Create.m_skill3))
-		Skill_SetBase( (SKILL_TYPE) pBin->Create.m_skill3, pBin->Create.m_val3*10 );
+	if (IsSkillBase((SKILL_TYPE)pBin->Create.m_skill1))
+		Skill_SetBase((SKILL_TYPE)pBin->Create.m_skill1, pBin->Create.m_val1 * 10);
+	if (IsSkillBase((SKILL_TYPE)pBin->Create.m_skill2))
+		Skill_SetBase((SKILL_TYPE)pBin->Create.m_skill2, pBin->Create.m_val2 * 10);
+	if (IsSkillBase((SKILL_TYPE)pBin->Create.m_skill3))
+		Skill_SetBase((SKILL_TYPE)pBin->Create.m_skill3, pBin->Create.m_val3 * 10);
 
-	ITEMID_TYPE id = (ITEMID_TYPE)(WORD) pBin->Create.m_hairid;
-	if ( FindID( id, Item_Hair, COUNTOF(Item_Hair)) != -1 )
+	ITEMID_TYPE id = (ITEMID_TYPE)(WORD)pBin->Create.m_hairid;
+	if (FindID(id, Item_Hair, COUNTOF(Item_Hair)) != -1)
 	{
-		CItem * pHair = CItem::CreateScript( id );
+		CItem* pHair = CItem::CreateScript(id);
 		color = pBin->Create.m_haircolor;
-		if ( color<COLOR_HAIR_LOW || color > COLOR_HAIR_HIGH )
+		if (color<COLOR_HAIR_LOW || color > COLOR_HAIR_HIGH)
 		{
 			color = COLOR_HAIR_LOW;
 		}
-		pHair->SetColor( color );
-		pHair->m_Attr |= ATTR_NEWBIE|ATTR_MOVE_NEVER;
-		LayerAdd( pHair );	// add content
+		pHair->SetColor(color);
+		pHair->m_Attr |= ATTR_NEWBIE | ATTR_MOVE_NEVER;
+		LayerAdd(pHair);	// add content
 	}
 
-	id = (ITEMID_TYPE)(WORD) pBin->Create.m_beardid;
-	if ( FindID( id, Item_Beards, COUNTOF(Item_Beards)) != -1 && GetID() == CREID_MAN )
+	id = (ITEMID_TYPE)(WORD)pBin->Create.m_beardid;
+	if (FindID(id, Item_Beards, COUNTOF(Item_Beards)) != -1 && GetID() == CREID_MAN)
 	{
-		CItem * pBeard = CItem::CreateScript( id );
+		CItem* pBeard = CItem::CreateScript(id);
 		color = pBin->Create.m_beardcolor;
-		if ( color < COLOR_HAIR_LOW || color > COLOR_HAIR_HIGH )
+		if (color < COLOR_HAIR_LOW || color > COLOR_HAIR_HIGH)
 		{
 			color = COLOR_HAIR_LOW;
 		}
-		pBeard->SetColor( color );
-		pBeard->m_Attr |= ATTR_NEWBIE|ATTR_MOVE_NEVER;
-		LayerAdd( pBeard );	// add content
+		pBeard->SetColor(color);
+		pBeard->m_Attr |= ATTR_NEWBIE | ATTR_MOVE_NEVER;
+		LayerAdd(pBeard);	// add content
 	}
 
 	// Create the bank box.
-	CItemContainer * pBankBox = GetBank( LAYER_BANKBOX );
+	CItemContainer* pBankBox = GetBank(LAYER_BANKBOX);
 	// Create the pack.
-	CItemContainer * pPack = GetPackSafe();
+	CItemContainer* pPack = GetPackSafe();
 
 	// Get special equip for the starting skills.
 	CScript s;
-	if ( ! s.OpenFind( GRAY_FILE "newb" ))
+	if (!s.OpenFind(GRAY_FILE "newb"))
 		return;
-	for ( i=0; i<4; i++ )
+	for (i = 0; i < 4; i++)
 	{
 		int skill;
-		const TCHAR * pszSkill;
+		const TCHAR* pszSkill;
 		if (i)
 		{
-			switch ( i )
+			switch (i)
 			{
 			case 1: skill = pBin->Create.m_skill1; break;
 			case 2: skill = pBin->Create.m_skill2; break;
 			case 3: skill = pBin->Create.m_skill3; break;
 			}
-			pszSkill = g_Serv.m_SkillDefs[ skill ]->GetKey();
+			pszSkill = g_Serv.m_SkillDefs[skill]->GetKey();
 		}
 		else
 		{
-			pszSkill = ( pBin->Create.m_sex == 0 ) ? "MALE_DEFAULT" : "FEMALE_DEFAULT";
+			pszSkill = (pBin->Create.m_sex == 0) ? "MALE_DEFAULT" : "FEMALE_DEFAULT";
 		}
-		if ( ! s.FindSection( pszSkill ))
+		if (!s.FindSection(pszSkill))
 		{
 			continue;
 		}
 
-		ReadScript( s, false, true );
+		ReadScript(s, false, true);
 	}
 
 	CreateNewCharCheck();

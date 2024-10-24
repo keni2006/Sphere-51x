@@ -5606,6 +5606,7 @@ private:
 	CScript m_Scripts[ SCPFILE_QTY ];
 
 public:
+	bool IsNameTaken(const char* name); //CHECK NAME FOR DUPLICATES
 	int  m_iExitCode;  // Just some error code to return to system.
 	WORD m_wExitFlag;	// identifies who caused the exit.
 
