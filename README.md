@@ -22,7 +22,7 @@ Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before 
 `color names abyss style`
 `color output console`
 `src.sysmessage Hello world^Привет мир` 
-
+`no duplicates names on character`
 
 
 
