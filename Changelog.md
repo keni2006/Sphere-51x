@@ -1,3 +1,6 @@
+### 📅 Date: 24.10.2024
+- Check for duplicate names added
+- *TODO* create normal check via method `IsNameTaken`
 ### 📅 Date: 23.10.2024
 - Fix some memory leaks due scripts using
 - Clean Garbage
