@@ -3054,6 +3054,19 @@ void CClient::Setup_Start( CChar * pChar ) // Send character startup stuff to pl
 	CharDisconnect();	// I'm already logged in as someone else ?
 
 	g_Log.Event( LOGM_CLIENTS_LOG, "%x:Setup_Start acct='%s', char='%s'\n", GetSocket(), m_pAccount->GetName(), pChar->GetName());
+	
+	//CHECKNAME DUPLICAT
+	if (g_Serv.IsNameTaken(pChar->GetName()))
+	{
+		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
+			GetSocket(), pChar->GetName(), m_pAccount->GetName());
+
+		addSysMessage("Name busy, try another.");
+		CharDisconnect();
+		return;
+	}
+
+
 
 #ifndef NDEBUG
 	srand( getclock()); // Perform randomize
