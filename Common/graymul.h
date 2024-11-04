@@ -1539,6 +1539,9 @@ ITEMID_CHISELS_1	= 0x1026,
 	
 	ITEMID_QTY			= 0x8000,
 	ITEMID_TEMPLATE		= 0xFFFF,	// container item templates are beyond here.
+	//ABYSS STUFF
+	ITEMID_NECRO_BOOK   = 0x2593    //ABYSS NECRO BOOK
+
 };
 
 // Door ID Attribute flags. 
