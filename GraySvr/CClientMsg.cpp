@@ -3056,15 +3056,15 @@ void CClient::Setup_Start( CChar * pChar ) // Send character startup stuff to pl
 	g_Log.Event( LOGM_CLIENTS_LOG, "%x:Setup_Start acct='%s', char='%s'\n", GetSocket(), m_pAccount->GetName(), pChar->GetName());
 	
 	//CHECKNAME DUPLICAT
-	if (g_Serv.IsNameTaken(pChar->GetName()))
-	{
-		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
-			GetSocket(), pChar->GetName(), m_pAccount->GetName());
+	//if (g_Serv.IsNameTaken(pChar->GetName()))
+	//{
+	//	g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
+	//		GetSocket(), pChar->GetName(), m_pAccount->GetName());
 
-		addSysMessage("Name busy, try another.");
-		CharDisconnect();
-		return;
-	}
+	//	addSysMessage("Name busy, try another.");
+	//	CharDisconnect();
+	//	return;
+	//}
 
 
 
@@ -3205,16 +3205,16 @@ void CClient::Setup_Start( CChar * pChar ) // Send character startup stuff to pl
 
 void CClient::Setup_CreateDialog() // All the character creation stuff
 {
-	ASSERT( m_pAccount );
-	if ( g_Log.IsLogged( LOGL_TRACE ))
+	ASSERT(m_pAccount);
+	if (g_Log.IsLogged(LOGL_TRACE))
 	{
-		DEBUG_MSG(( "%x:Setup_CreateDialog acct='%s'\n", GetSocket(), m_pAccount->GetName()));
+		DEBUG_MSG(("%x:Setup_CreateDialog acct='%s'\n", GetSocket(), m_pAccount->GetName()));
 	}
-	if ( m_pChar != NULL )
+	if (m_pChar != NULL)
 	{
 		// Loggin in as a new player while already on line !
-		addSysMessage( "Already on line" );
-		DEBUG_ERR(( "%x:Setup_CreateDialog acct='%s' already on line!\n", GetSocket(), m_pAccount->GetName()));
+		addSysMessage("Already on line");
+		DEBUG_ERR(("%x:Setup_CreateDialog acct='%s' already on line!\n", GetSocket(), m_pAccount->GetName()));
 		return;
 	}
 	if (Check_HasMaxChars(m_pChar))
@@ -3223,11 +3223,24 @@ void CClient::Setup_CreateDialog() // All the character creation stuff
 		DEBUG_ERR(("%x:Setup_CreateDialog acct='%s' already max players on account!\n", GetSocket(), m_pAccount->GetName()));
 		return;
 	}
+
+
 	// ??? Make sure they don't already have too many chars !
 
-	CChar * pChar = CChar::CreateBasic( CREID_MAN );
-	pChar->InitPlayer( &m_bin, this );
-	Setup_Start( pChar );
+	CChar* pChar = CChar::CreateBasic(CREID_MAN);
+	pChar->InitPlayer(&m_bin, this);
+
+	// CHECKNAME DUPLICAT - now here
+	if (g_Serv.IsNameTaken(pChar->GetName()))
+	{
+		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
+			GetSocket(), pChar->GetName(), m_pAccount->GetName());
+
+		addSysMessage("Name busy, try another.");
+		return; //just return later add packet with bad login etc
+	}
+
+	Setup_Start(pChar);
 }
 
 
