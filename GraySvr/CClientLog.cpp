@@ -533,7 +533,7 @@ bool CClient::Login_Relay( int iRelay ) // Relay player to a selected IP
 	if ( GetTargMode() != TARGMODE_SETUP_SERVERS )
 		return false;
 
-	if ( m_Crypt.GetClientVersion() >= 12600 )
+	if ( ! m_Crypt.GetClientVersion() || m_Crypt.GetClientVersion() >= 12600 )
 	{
 		// Must be 1 based index for some reason.
 		iRelay --;
@@ -612,7 +612,7 @@ void CClient::Login_ServerList( char * pszAccount, char * pszPassword ) // Initi
 	cmd.ServerList.m_Cmd = XCMD_ServerList;
 
 	int indexoffset = 1;
-	if ( m_Crypt.GetClientVersion() >= 12600 )
+	if ( ! m_Crypt.GetClientVersion() || m_Crypt.GetClientVersion() >= 12600 )
 	{
 		indexoffset = 2;
 	}

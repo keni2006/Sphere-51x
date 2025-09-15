@@ -650,7 +650,7 @@ bool CClient::Event_WalkingCheck(UINT dwEcho)
 {
 	// look for the walk code, and remove it
 
-	if ( m_Crypt.GetClientVersion() < 12600 )
+	if ( m_Crypt.GetClientVersion() && m_Crypt.GetClientVersion() < 12600 )
 		return( true );
 
 	if ( ! ( g_Serv.m_wDebugFlags & DEBUGF_WALKCODES ))
@@ -2044,7 +2044,7 @@ void CClient::Event_SetName( CObjUID uid )
 	if ( g_Serv.IsObscene( m_bin.CharName.m_name ))
 		return;
 
-	if (ChkStr((char*)&pChar[0], "\n\r[]@\\^£$%&=#§*<>|1234567890,.-;:_/\"!?()°+ηςΰωθιμ"))
+	if (ChkStr((char*)&pChar[0], "\n\r[]@\\^Β£$%&=#Β§*<>|1234567890,.-;:_/\"!?()Β°+Γ§Γ²Γ ΓΉΓ¨Γ©Γ¬"))
 		return;
 
 	//name must not contain any unwanted spaces
@@ -3112,7 +3112,7 @@ bool CClient::xDispatchMsg()
 	switch ( m_bin.Default.m_Cmd )
 	{
 	case XCMD_Create: // Character Create
-		if ( m_Crypt.GetClientVersion() >= 12600 )
+		if ( ! m_Crypt.GetClientVersion() || m_Crypt.GetClientVersion() >= 12600 )
 		{
 			if ( ! xCheckSize( sizeof( m_bin.Create ))) return(false);
 		}
@@ -3151,7 +3151,7 @@ bool CClient::xDispatchMsg()
 	switch ( m_bin.Default.m_Cmd )
 	{
 	case XCMD_Walk: // Walk
-		if ( m_Crypt.GetClientVersion() >= 12600 )
+		if ( ! m_Crypt.GetClientVersion() || m_Crypt.GetClientVersion() >= 12600 )
 		{
 			if ( ! xCheckSize( sizeof( m_bin.Walk_v26 ))) return(false);
 			Event_Walking( m_bin.Walk_v26.m_dir, m_bin.Walk_v26.m_count, m_bin.Walk_v26.m_cryptcode );
@@ -3260,7 +3260,7 @@ bool CClient::xDispatchMsg()
 		Event_MenuChoice();
 		break;
 	case XCMD_BookOpen:	// Change a books title/author.
-		if ( m_Crypt.GetClientVersion() >= 12600 )
+		if ( ! m_Crypt.GetClientVersion() || m_Crypt.GetClientVersion() >= 12600 )
 		{
 			if ( ! xCheckSize( sizeof( m_bin.BookOpen_v26 ))) return(false);
 			Event_Book_Title( (UINT) m_bin.BookOpen_v26.m_UID, m_bin.BookOpen_v26.m_title, m_bin.BookOpen_v26.m_author );
@@ -3344,7 +3344,60 @@ bool CClient::xDispatchMsg()
 		if ( ! xCheckSize(3)) return(false);
 		if ( ! xCheckSize(m_bin.ClientVersion.m_len)) return(false);
 		SetPrivFlags( PRIV_T2A );
-		// DEBUG_MSG(( "%x:XCMD_ClientVersion\n", GetSocket()));
+		{
+			size_t uiPacketLen = m_bin.ClientVersion.m_len;
+			if ( uiPacketLen < 3 )
+				uiPacketLen = 3;
+			size_t uiTextLen = uiPacketLen - 3;
+			if ( uiTextLen > sizeof(m_bin.ClientVersion.m_text) )
+				uiTextLen = sizeof(m_bin.ClientVersion.m_text);
+
+			char szVersion[ sizeof(m_bin.ClientVersion.m_text) + 1 ];
+			memcpy( szVersion, m_bin.ClientVersion.m_text, uiTextLen );
+			szVersion[ uiTextLen ] = '\0';
+
+			int aiParts[3] = { 0, 0, 0 };
+			int iPart = 0;
+			bool fHasDigits = false;
+			for ( size_t i = 0; i < uiTextLen && szVersion[i] != '\0'; ++i )
+			{
+				char ch = szVersion[i];
+				if ( ch >= '0' && ch <= '9' )
+				{
+					if ( iPart >= 3 )
+						continue;
+					aiParts[iPart] = ( aiParts[iPart] * 10 ) + ( ch - '0' );
+					fHasDigits = true;
+				}
+				else
+				{
+					if ( fHasDigits )
+					{
+						++iPart;
+						fHasDigits = false;
+						if ( iPart >= 3 )
+							break;
+					}
+				}
+			}
+			if ( fHasDigits && iPart < 3 )
+				++iPart;
+
+			if ( aiParts[1] > 99 )
+				aiParts[1] = 99;
+			if ( aiParts[2] > 99 )
+				aiParts[2] = 99;
+
+			int iParsedVersion = 0;
+			if ( iPart >= 1 )
+				iParsedVersion = aiParts[0] * 10000;
+			if ( iPart >= 2 )
+				iParsedVersion += aiParts[1] * 100;
+			if ( iPart >= 3 )
+				iParsedVersion += aiParts[2];
+
+			m_Crypt.SetClientVersion( iParsedVersion );
+		}
 		break;
 	case XCMD_ExtData:	// Add someone to the party system.
 		if ( ! xCheckSize(3)) return(false);

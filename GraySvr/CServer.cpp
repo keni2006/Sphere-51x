@@ -3539,8 +3539,7 @@ bool CServer::Load()
 	g_Log.Event( LOGM_INIT, _TEXT("Client Version: '%s'\n"), szVersion );
 	if ( ! m_ClientVersion.IsValid())
 	{
-		g_Log.Event( LOGL_FATAL|LOGM_INIT, "Bad Client Version '%s'\n", szVersion );
-		return( false );
+		g_Log.Event( LOGL_WARN|LOGM_INIT, "Bad Client Version '%s', falling back to automatic detection.\n", szVersion );
 	}
 
 	// Load the verdata cache.
