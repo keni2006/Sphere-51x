@@ -457,70 +457,54 @@ int CCryptBase::WriteClientVersion( TCHAR * pszVersion )
 bool CCryptBase::SetClientVersion( int iVer )
 {
 	m_fInit = false;
-	switch ( iVer )
+	if ( iVer <= 0 )
 	{
-	case 0:	// This turns off crypt.
-		break;
-	case 20000:	// 4/17/2000
-		m_MasterHi = CLIKEY_20000_HI;
-		m_MasterLo = CLIKEY_20000_LO;
-		break;
-	case 12604:	// 1/27/00 by Westy
-		m_MasterHi = CLIKEY_12604_HI;
-		m_MasterLo = CLIKEY_12604_LO;
-		break;
-	case 12603:	// 1/18/00 by Westy and Beosil (beosil@mcb.at)
-		m_MasterHi = CLIKEY_12603_HI;
-		m_MasterLo = CLIKEY_12603_LO;
-		break;
-	case 12602:	// 11/23/99 by Westy and Beosil (beosil@mcb.at)
-		m_MasterHi = CLIKEY_12602_HI;
-		m_MasterLo = CLIKEY_12602_LO;
-		break;
-	case 12601:	// 09/09/99 by Westy and Beosil (beosil@mcb.at)
-		m_MasterHi = CLIKEY_12601_HI;
-		m_MasterLo = CLIKEY_12601_LO;
-		break;
-	case 12600:	// 08/35/99 by Westy and Beosil (beosil@mcb.at)
-		m_MasterHi = CLIKEY_12600_HI;
-		m_MasterLo = CLIKEY_12600_LO;
-		break;
-	case 12537:	// 03/18/99 by Westy and Beosil (beosil@mcb.at)
-		m_MasterHi = CLIKEY_12537_HI;
-		m_MasterLo = CLIKEY_12537_LO;
-		break;
-	case 12536:	// 12/1/98 by Beosil (beosil@mcb.at)
-		// Special multi key.
-		m_MasterHi = CLIKEY_12536_HI1;
-		m_MasterLo = CLIKEY_12536_LO1;
-		break;
-	case 12535:	// Released on the T2A CD.
-		m_MasterHi = CLIKEY_12535_HI;
-		m_MasterLo = CLIKEY_12535_LO;
-		break;
-	case 12534:
-		m_MasterHi = CLIKEY_12534_HI;
-		m_MasterLo = CLIKEY_12534_LO;
-		break;
-	case 12533:
-		m_MasterHi = CLIKEY_12533_HI;
-		m_MasterLo = CLIKEY_12533_LO;
-		break;
-	case 12532:
-		m_MasterHi = CLIKEY_12532_HI;
-		m_MasterLo = CLIKEY_12532_LO;
-		break;
-	case 12531:
-		m_MasterHi = CLIKEY_12531_HI;
-		m_MasterLo = CLIKEY_12531_LO;
-		break;
-	default:
-		DEBUG_ERR(( "Unsupported ClientVersion %i\n", iVer ));
-		m_iClientVersion = -1;
-		return( false );
+		m_MasterHi = 0;
+		m_MasterLo = 0;
+		m_iClientVersion = 0;
+		return true;
 	}
-	m_iClientVersion = iVer;
-	return( true );
+
+	struct CLIENTVER
+	{
+		int m_iVer;
+		UINT m_MasterHi;
+		UINT m_MasterLo;
+	};
+
+	static const CLIENTVER sm_ClientKeys[] =
+	{
+		{ 20000, CLIKEY_20000_HI, CLIKEY_20000_LO },
+		{ 12604, CLIKEY_12604_HI, CLIKEY_12604_LO },
+		{ 12603, CLIKEY_12603_HI, CLIKEY_12603_LO },
+		{ 12602, CLIKEY_12602_HI, CLIKEY_12602_LO },
+		{ 12601, CLIKEY_12601_HI, CLIKEY_12601_LO },
+		{ 12600, CLIKEY_12600_HI, CLIKEY_12600_LO },
+		{ 12537, CLIKEY_12537_HI, CLIKEY_12537_LO },
+		{ 12536, CLIKEY_12536_HI1, CLIKEY_12536_LO1 },
+		{ 12535, CLIKEY_12535_HI, CLIKEY_12535_LO },
+		{ 12534, CLIKEY_12534_HI, CLIKEY_12534_LO },
+		{ 12533, CLIKEY_12533_HI, CLIKEY_12533_LO },
+		{ 12532, CLIKEY_12532_HI, CLIKEY_12532_LO },
+		{ 12531, CLIKEY_12531_HI, CLIKEY_12531_LO },
+	};
+
+	for ( size_t i = 0; i < COUNTOF(sm_ClientKeys); ++i )
+	{
+		if ( sm_ClientKeys[i].m_iVer == iVer )
+		{
+			m_MasterHi = sm_ClientKeys[i].m_MasterHi;
+			m_MasterLo = sm_ClientKeys[i].m_MasterLo;
+			m_iClientVersion = iVer;
+			return true;
+		}
+	}
+
+        DEBUG_WARN(( "Unsupported ClientVersion %i, disabling encryption.\n", iVer ));
+        m_MasterHi = 0;
+        m_MasterLo = 0;
+        m_iClientVersion = 0;
+        return false;
 }
 
 void CCryptBase::Decrypt( BYTE * pOutput, const BYTE * pInput, int iLen )
