@@ -1,0 +1,10 @@
+//
+//	Class:	CCPropsItem
+//	Set:	attributes
+//	Prefix:	(special) PROPIT_
+//
+
+ADDPROP(LAVAINFUSED,	"LAVAINFUSED",		RDS_HS)
+//rarity, AOS
+ADDPROP(SHIPWRECKITEM,	"SHIPWRECKITEM",	RDS_HS)
+ADDPROP(UNLUCKY,		"UNLUCKY",			RDS_AOS) // have Luck set to negative -100. 
