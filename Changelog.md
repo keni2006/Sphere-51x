@@ -1,3 +1,6 @@
+### 📅 Date: 04.11.2024
+- Necro book pre setup
+- *TODO* do normal book wih wisp etc. 
 ### 📅 Date: 25.10.2024
 - Duplicate names function released 
 - *TODO* Create normal path for locating sphereworld.scp, create msg fuction for client when name duplicate.
