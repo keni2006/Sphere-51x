@@ -147,6 +147,7 @@
   <ItemGroup>
     <ClCompile Include="..\common\carray.cpp" />
     <ClCompile Include="..\common\ccrypt.cpp" />
+    <ClCompile Include="..\common\ccryptkeys.cpp" />
     <ClCompile Include="..\common\cexpression.cpp" />
     <ClCompile Include="..\common\cfile.cpp" />
     <ClCompile Include="..\common\cfilelist.cpp" />
@@ -200,6 +201,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\common\carray.h" />
+    <ClInclude Include="..\common\ccryptkeys.h" />
     <ClInclude Include="..\common\cassoc.h" />
     <ClInclude Include="..\common\cexpression.h" />
     <ClInclude Include="..\common\cfile.h" />

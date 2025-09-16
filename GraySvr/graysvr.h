@@ -25,6 +25,7 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include "../common/graycom.h"	// put slashes this way for LINUX, WIN32 does not care.
 #include "../common/graymul.h"
 #include "../common/grayproto.h"
+#include "../common/ccryptkeys.h"
 #include "../common/cgrayinst.h"
 #include "../common/cregion.h"
 #include "../common/cgraymap.h"
@@ -5782,9 +5783,10 @@ public:
 #endif
 
 private:
-	bool LoadDefs();
-	bool LoadTables();
-	bool LoadScripts();
+        bool LoadDefs();
+        bool LoadTables();
+        bool LoadScripts();
+        bool LoadCryptIni();
 
 	void SetSignals();
 	void LoadChangedFiles();
