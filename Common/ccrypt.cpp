@@ -829,23 +829,284 @@ unsigned int CCrypt::s_table[CRYPT_GAMEKEY_COUNT][1024];
 
 bool CCrypt::m_bTablesReady = false;
 
-// Class Implementation
-
-void CCrypt::Init( const BYTE * pSeed, SERVER_TYPE type )
+CCrypt::CCrypt()
 {
-	CCryptBase::Init( pSeed );
+	m_fRelayPacket = false;
+	m_ConnectType = CONNECT_NONE;
+	m_GameEnc = ENC_NONE;
+	memset(m_gameSeed, 0, sizeof(m_gameSeed));
+	memset(m_gameSeed_outgoing, 0, sizeof(m_gameSeed_outgoing));
+	m_gameTable = CRYPT_GAMETABLE_START;
+	m_gameBlockPos = 0;
+	m_gameStreamPos = 0;
+	m_tfPosition = 0;
+	memset(m_tfCipherTable, 0, sizeof(m_tfCipherTable));
+	m_md5_position = 0;
+	memset(m_md5_digest, 0, sizeof(m_md5_digest));
+}
 
-	m_type = type;
-	if ( type!= SERVER_Login )
+void CCrypt::SetConnectType( CONNECT_TYPE type )
+{
+	m_ConnectType = type;
+}
+
+void CCrypt::SetEncryptionType( ENCRYPTION_TYPE type )
+{
+	m_GameEnc = type;
+}
+
+CONNECT_TYPE CCrypt::GetConnectType() const
+{
+	return m_ConnectType;
+}
+
+ENCRYPTION_TYPE CCrypt::GetEncryptionType() const
+{
+	return m_GameEnc;
+}
+
+void CCrypt::ResetGameStream()
+{
+	m_gameBlockPos = 0;
+	m_gameStreamPos = 0;
+}
+
+void CCrypt::InitBlowFish()
+{
+	if ( !m_bTablesReady )
+		InitTables();
+	m_gameTable = CRYPT_GAMETABLE_START;
+	memcpy(m_gameSeed, seed_table[0][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
+	memcpy(m_gameSeed_outgoing, seed_table[0][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
+	ResetGameStream();
+}
+
+void CCrypt::InitSeed( int iTable )
+{
+	memcpy(m_gameSeed, seed_table[iTable][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
+	memcpy(m_gameSeed_outgoing, seed_table[iTable][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
+	ResetGameStream();
+}
+
+void CCrypt::InitTwoFish()
+{
+	m_tfPosition = 0;
+	memset(m_tfCipherTable, 0, sizeof(m_tfCipherTable));
+}
+
+void CCrypt::InitMD5( unsigned char * ucInitialize )
+{
+	(void)ucInitialize;
+	m_md5_position = 0;
+	memset(m_md5_digest, 0, sizeof(m_md5_digest));
+}
+
+bool CCrypt::DecryptLogin( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen )
+{
+	if ( inLen > outLen )
+		return false;
+	CCryptBase::Decrypt( pOutput, pInput, static_cast<int>( inLen ) );
+	return true;
+}
+
+bool CCrypt::DecryptTwoFish( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen )
+{
+	if ( inLen > outLen )
+		return false;
+	if ( pOutput != pInput )
+		memcpy( pOutput, pInput, inLen );
+	return true;
+}
+
+bool CCrypt::EncryptMD5( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen )
+{
+	if ( inLen > outLen )
+		return false;
+	if ( pOutput != pInput )
+		memcpy( pOutput, pInput, inLen );
+	return true;
+}
+
+void CCrypt::InitFast( DWORD dwIP, CONNECT_TYPE ctInit, bool fRelay )
+{
+	SetConnectType( ctInit );
+	m_seed = dwIP;
+	if ( ctInit == CONNECT_GAME )
 	{
-		if(!m_bTablesReady) InitTables();
-
-		m_gameTable = CRYPT_GAMETABLE_START;
-		memcpy(m_gameSeed, seed_table[0][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
-		memcpy(m_gameSeed_outgoing, seed_table[0][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
-		m_gameStreamPos = 0;
-		m_gameBlockPos = 0;
+		InitBlowFish();
+		InitTwoFish();
 	}
+	m_fRelayPacket = fRelay;
+	SetInitState( true );
+}
+
+bool CCrypt::Init( const BYTE * pvSeed, size_t iLen, SERVER_TYPE type, bool fIsClientKR )
+{
+	if ( pvSeed == NULL )
+		return false;
+	if ( iLen < 4 )
+		iLen = 4;
+	const BYTE * pSeed = pvSeed;
+	DWORD dwIP = 0;
+	N2L( pSeed, dwIP );
+	SetInitState( false );
+	bool bReturn = true;
+	switch ( type )
+	{
+	case SERVER_Login:
+		bReturn = LoginCryptStart( dwIP, pvSeed, iLen );
+		break;
+	case SERVER_Game:
+		if ( iLen <= 4 )
+		{
+			InitFast( dwIP, CONNECT_GAME, false );
+		}
+		else
+		{
+			bReturn = GameCryptStart( dwIP, pvSeed, iLen );
+		}
+		break;
+	case SERVER_Auto:
+	default:
+		if ( fIsClientKR )
+		{
+			m_seed = dwIP;
+			SetConnectType( CONNECT_GAME );
+			SetEncryptionType( ENC_NONE );
+			SetInitState( true );
+			break;
+		}
+		if ( iLen == 62 )
+		{
+			bReturn = LoginCryptStart( dwIP, pvSeed, iLen );
+		}
+		else if ( iLen == 65 || iLen == 69 )
+		{
+			bReturn = GameCryptStart( dwIP, pvSeed, iLen );
+		}
+		else
+		{
+			bReturn = false;
+		}
+		break;
+	}
+	m_fRelayPacket = false;
+	return bReturn;
+}
+
+bool CCrypt::LoginCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen )
+{
+	SetConnectType( CONNECT_LOGIN );
+	m_seed = dwIP;
+	DWORD maskLo = (((~m_seed) ^ 0x00001357) << 16) | ((( m_seed) ^ 0xffffaaaa) & 0x0000ffff);
+	DWORD maskHi = ((( m_seed) ^ 0x43210000) >> 16) | (((~m_seed) ^ 0xabcdffff) & 0xffff0000);
+	BYTE buffer[MAX_BUFFER];
+	if ( inLen > sizeof(buffer) )
+		return false;
+	const CCryptKeysManager & manager = CCryptKeysManager::GetInstance();
+	for ( size_t i = 0; i < manager.GetKeyCount(); ++i )
+	{
+		const CCryptClientKey * key = manager.GetKey( i );
+		if ( key == NULL )
+			continue;
+		if ( !SetClientVersion( static_cast<int>( key->m_uiClientVersion )))
+			continue;
+		SetEncryptionType( static_cast<ENCRYPTION_TYPE>( key->m_EncType ));
+		m_CryptMaskLo = maskLo;
+		m_CryptMaskHi = maskHi;
+		memcpy( buffer, pEvent, inLen );
+		if ( !DecryptLogin( buffer, pEvent, sizeof(buffer), inLen ))
+			return false;
+		bool fValid = ( inLen >= 61 && buffer[0] == 0x80 && buffer[30] == 0x00 && buffer[60] == 0x00 );
+		if ( fValid )
+		{
+			for ( size_t check = 21; check <= 30 && (check + 30) < inLen; ++check )
+			{
+				if ( buffer[check] != 0x00 || buffer[check+30] != 0x00 )
+				{
+					fValid = false;
+					break;
+				}
+			}
+		}
+		if ( fValid )
+		{
+			m_CryptMaskLo = maskLo;
+			m_CryptMaskHi = maskHi;
+			SetInitState( true );
+			return true;
+		}
+	return true;
+}
+
+bool CCrypt::GameCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen )
+{
+	SetConnectType( CONNECT_GAME );
+	m_seed = dwIP;
+	BYTE buffer[MAX_BUFFER];
+	if ( inLen > sizeof(buffer) )
+		return false;
+	const ENCRYPTION_TYPE tryTypes[] = { ENC_NONE, ENC_BFISH, ENC_BTFISH };
+	for ( size_t i = 0; i < sizeof(tryTypes)/sizeof(tryTypes[0]); ++i )
+	{
+		SetEncryptionType( tryTypes[i] );
+		if ( tryTypes[i] == ENC_BFISH || tryTypes[i] == ENC_BTFISH )
+		{
+			InitBlowFish();
+		}
+		else
+		{
+			ResetGameStream();
+		}
+		memcpy( buffer, pEvent, inLen );
+		m_fRelayPacket = false;
+		if ( !Decrypt( buffer, pEvent, sizeof(buffer), inLen ))
+			return false;
+		if ( inLen > 64 && buffer[0] == 0x91 && buffer[34] == 0x00 && buffer[64] == 0x00 )
+		{
+			if ( tryTypes[i] == ENC_BFISH || tryTypes[i] == ENC_BTFISH )
+				InitBlowFish();
+			SetInitState( true );
+			return true;
+		}
+	}
+	DWORD maskLo = (((~m_seed) ^ 0x00001357) << 16) | ((( m_seed) ^ 0xffffaaaa) & 0x0000ffff);
+	DWORD maskHi = ((( m_seed) ^ 0x43210000) >> 16) | (((~m_seed) ^ 0xabcdffff) & 0xffff0000);
+	const CCryptKeysManager & manager = CCryptKeysManager::GetInstance();
+	for ( size_t i = 0; i < manager.GetKeyCount(); ++i )
+	{
+		const CCryptClientKey * key = manager.GetKey( i );
+		if ( key == NULL )
+			continue;
+		if ( key->m_EncType != CRYPT_LOGIN )
+			continue;
+		if ( !SetClientVersion( static_cast<int>( key->m_uiClientVersion )))
+			continue;
+		SetEncryptionType( ENC_LOGIN );
+		m_CryptMaskLo = maskLo;
+		m_CryptMaskHi = maskHi;
+		memcpy( buffer, pEvent, inLen );
+		if ( !DecryptLogin( buffer, pEvent, sizeof(buffer), inLen ))
+			return false;
+		if ( inLen > 64 && buffer[0] == 0x91 && buffer[34] == 0x00 && buffer[64] == 0x00 )
+		{
+			m_CryptMaskLo = maskLo;
+			m_CryptMaskHi = maskHi;
+			SetInitState( true );
+			return true;
+		}
+	}
+	SetEncryptionType( ENC_NONE );
+	SetInitState( true );
+	return true;
+}
+
+bool CCrypt::RelayGameCryptStart( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen )
+{
+	m_fRelayPacket = false;
+	if ( !Decrypt( pOutput, pInput, outLen, inLen ))
+		return false;
+	return DecryptLogin( pOutput, pOutput, outLen, inLen );
 }
 
 void CCrypt::InitTables()
@@ -862,7 +1123,7 @@ void CCrypt::InitTables()
 		int i;
 		for(i = 0; i < 18; i++)
 		{
-			unsigned int mask = *pAct++;		
+			unsigned int mask = *pAct++;
 			if(pAct >= pEnd) pAct = key_table[tempKey];
 
 			mask = ( mask << 8) | *pAct++;
@@ -901,9 +1162,9 @@ void CCrypt::InitTables()
 #define ROUND(LL, R, S, P) \
 	LL ^= P; \
 	LL ^= ((S[          (R >> 24)        ]  + \
-	        S[0x0100 + ((R >> 16) & 0xff)]) ^ \
-	        S[0x0200 + ((R >> 8 ) & 0xff)]) + \
-	        S[0x0300 + ((R      ) & 0xff)];
+		S[0x0100 + ((R >> 16) & 0xff)]) ^ \
+		S[0x0200 + ((R >> 8 ) & 0xff)]) + \
+		S[0x0300 + ((R      ) & 0xff)]);
 
 void CCrypt::RawDecrypt(unsigned int *pValues, int table)
 {
@@ -935,130 +1196,120 @@ void CCrypt::RawDecrypt(unsigned int *pValues, int table)
 	pValues[0] = right;
 }
 
-void CCrypt::Decrypt( BYTE * pOutput, const BYTE * pInput, int iLen)
+bool CCrypt::DecryptBlowFish( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen )
 {
-	if ( ! iLen ) return;
-	if ( m_type == SERVER_Auto )
+	if ( inLen > outLen )
+		return false;
+	for ( size_t i = 0; i < inLen; ++i )
 	{
-		if(((*pInput ^ (BYTE)m_CryptMaskLo)) == CRYPT_AUTO_VALUE) 
-			m_type = SERVER_Login;
-		else
-			m_type = SERVER_Game;
-	}
-
-	if ( m_type == SERVER_Login || GetClientVersion() < 12600 )
-	{
-		CCryptBase::Decrypt( pOutput, pInput, iLen );
-	}
-	else
-	{
-		if(m_gameStreamPos + iLen > CRYPT_GAMETABLE_TRIGGER)
+		if ( m_gameStreamPos >= CRYPT_GAMETABLE_TRIGGER )
 		{
-			int lenOld = CRYPT_GAMETABLE_TRIGGER - m_gameStreamPos;
-
-			Decrypt(pOutput, pInput, lenOld);
-
 			m_gameTable = (m_gameTable + CRYPT_GAMETABLE_STEP) % CRYPT_GAMETABLE_MODULO;
-			memcpy(m_gameSeed, seed_table[1][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
-			memcpy(m_gameSeed_outgoing, seed_table[1][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
-			m_gameStreamPos = 0;
-			m_gameBlockPos = 0;
-
-			pInput += lenOld;
-			pOutput += lenOld;
-			iLen -= lenOld;
+			InitSeed( 1 );
 		}
-
-		int tempPos;
-		for(tempPos = 0; tempPos < iLen; tempPos++)
+		if ( m_gameBlockPos == 0 )
 		{
-			if(!m_gameBlockPos)
-			{
-				unsigned int values[2];
-
-				unsigned char *pKey = m_gameSeed;
-				N2L(pKey, values[0]);
-				N2L(pKey, values[1]);
-
-				RawDecrypt((unsigned int *)values, m_gameTable);
-
-				pKey = m_gameSeed;
-				L2N(values[0], pKey);
-				L2N(values[1], pKey);
-			}
-
-			unsigned char c = *pInput++;
-			*pOutput++ = m_gameSeed[m_gameBlockPos] ^ c;
-			m_gameSeed[m_gameBlockPos] = c;
-
-			m_gameBlockPos = (m_gameBlockPos + 1) & 0x07;
+			unsigned int values[2];
+			unsigned char * pKey = m_gameSeed;
+			N2L( pKey, values[0] );
+			N2L( pKey, values[1] );
+			RawDecrypt( values, m_gameTable );
+			pKey = m_gameSeed;
+			L2N( values[0], pKey );
+			L2N( values[1], pKey );
 		}
-
-		m_gameStreamPos += iLen;
+		unsigned char c = *pInput++;
+		*pOutput++ = m_gameSeed[m_gameBlockPos] ^ c;
+		m_gameSeed[m_gameBlockPos] = c;
+		m_gameBlockPos = (m_gameBlockPos + 1) & 0x07;
+		++m_gameStreamPos;
 	}
+	return true;
 }
 
-void CCrypt::Encrypt( BYTE * pOutput, const BYTE * pInput, int iLen)
+bool CCrypt::Decrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen )
 {
-	if ( ! iLen ) 
-		return;
-	if ( m_type == SERVER_Auto )
+	if ( inLen == 0 )
+		return false;
+	ENCRYPTION_TYPE enc = GetEncryptionType();
+	if ( m_ConnectType == CONNECT_LOGIN || enc == ENC_LOGIN )
+		return DecryptLogin( pOutput, pInput, outLen, inLen );
+	if ( m_fRelayPacket )
+		return RelayGameCryptStart( pOutput, pInput, outLen, inLen );
+	if ( enc == ENC_NONE )
 	{
-		if(((*pInput ^ (BYTE)m_CryptMaskLo)) == CRYPT_AUTO_VALUE) 
-			m_type = SERVER_Login;
-		else
-			m_type = SERVER_Game;
+		if ( inLen > outLen )
+			return false;
+		if ( pOutput != pInput )
+			memcpy( pOutput, pInput, inLen );
+		return true;
 	}
-
-	if ( m_type == SERVER_Login || GetClientVersion() < 12600 )
+	if ( enc == ENC_TFISH || enc == ENC_BTFISH )
 	{
-		CCryptBase::Encrypt( pOutput, pInput, iLen );
+		if ( !DecryptTwoFish( pOutput, pInput, outLen, inLen ))
+			return false;
 	}
-	else
+	if ( enc == ENC_BFISH || enc == ENC_BTFISH )
 	{
-		if(m_gameStreamPos + iLen > CRYPT_GAMETABLE_TRIGGER)
+		return DecryptBlowFish( pOutput, (enc == ENC_BTFISH) ? pOutput : pInput, outLen, inLen );
+	}
+	return true;
+}
+
+bool CCrypt::Encrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen )
+{
+	if ( inLen == 0 )
+		return false;
+	if ( inLen > outLen )
+		return false;
+	ENCRYPTION_TYPE enc = GetEncryptionType();
+	if ( m_ConnectType == CONNECT_LOGIN || enc == ENC_LOGIN )
+	{
+		CCryptBase::Encrypt( pOutput, pInput, static_cast<int>( inLen ) );
+		return true;
+	}
+	if ( enc == ENC_TFISH )
+		return EncryptMD5( pOutput, pInput, outLen, inLen );
+	if ( enc == ENC_NONE )
+	{
+		if ( pOutput != pInput )
+			memcpy( pOutput, pInput, inLen );
+		return true;
+	}
+	if ( enc == ENC_BFISH || enc == ENC_BTFISH )
+	{
+		const BYTE * pSrc = pInput;
+		BYTE * pDst = pOutput;
+		for ( size_t i = 0; i < inLen; ++i )
 		{
-			int lenOld = CRYPT_GAMETABLE_TRIGGER - m_gameStreamPos;
-
-			Encrypt(pOutput, pInput, lenOld);
-
-			m_gameTable = (m_gameTable + CRYPT_GAMETABLE_STEP) % CRYPT_GAMETABLE_MODULO;
-			memcpy(m_gameSeed_outgoing, seed_table[1][m_gameTable][0], CRYPT_GAMESEED_LENGTH);
-			m_gameStreamPos = 0;
-			m_gameBlockPos = 0;
-
-			pInput += lenOld;
-			pOutput += lenOld;
-			iLen -= lenOld;
-		}
-
-		int tempPos;
-		for(tempPos = 0; tempPos < iLen; tempPos++)
-		{
-			if(!m_gameBlockPos)
+			if ( m_gameStreamPos >= CRYPT_GAMETABLE_TRIGGER )
+			{
+				m_gameTable = (m_gameTable + CRYPT_GAMETABLE_STEP) % CRYPT_GAMETABLE_MODULO;
+				InitSeed( 1 );
+			}
+			if ( m_gameBlockPos == 0 )
 			{
 				unsigned int values[2];
-
-				unsigned char *pKey = m_gameSeed_outgoing;
-				N2L(pKey, values[0]);
-				N2L(pKey, values[1]);
-
-				RawDecrypt((unsigned int *)values, m_gameTable);
-
+				unsigned char * pKey = m_gameSeed_outgoing;
+				N2L( pKey, values[0] );
+				N2L( pKey, values[1] );
+				RawDecrypt( values, m_gameTable );
 				pKey = m_gameSeed_outgoing;
-				L2N(values[0], pKey);
-				L2N(values[1], pKey);
+				L2N( values[0], pKey );
+				L2N( values[1], pKey );
 			}
-
-			unsigned char c = *pInput++;
-			*pOutput++ = m_gameSeed_outgoing[m_gameBlockPos] ^ c;
-			m_gameSeed_outgoing[m_gameBlockPos] = *(pOutput - 1);
-
+			unsigned char c = *pSrc++;
+			unsigned char out = m_gameSeed_outgoing[m_gameBlockPos] ^ c;
+			*pDst++ = out;
+			m_gameSeed_outgoing[m_gameBlockPos] = out;
 			m_gameBlockPos = (m_gameBlockPos + 1) & 0x07;
+			++m_gameStreamPos;
 		}
-
-		m_gameStreamPos += iLen;
+		return true;
 	}
+	if ( pOutput != pInput )
+		memcpy( pOutput, pInput, inLen );
+	return true;
 }
 
 /*
