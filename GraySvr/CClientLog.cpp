@@ -444,18 +444,20 @@ bool CClient::xRecvData() // Receive message from client
 		bool fGame = false;
 		if ( count == 66 ) // SERVER_Login 1.26.0
 		{
-			m_Crypt.Init( m_bin.m_Raw, SERVER_Login ); // Init decryption table
+			if ( !m_Crypt.Init( m_bin.m_Raw, count, SERVER_Login ))
+				return false;
 		}
 		else if ( count == 69 )	// Auto-registering server sending us info.
 		{
-			m_Crypt.Init( m_bin.m_Raw, SERVER_Game ); // Init decryption table
+			if ( !m_Crypt.Init( m_bin.m_Raw, count, SERVER_Game ))
+				return false;
 			fGame = true;
 		}
 		else	// probably this is a login server.
 		{
-			m_Crypt.Init( m_bin.m_Raw ); // Init decryption table
+			if ( !m_Crypt.Init( m_bin.m_Raw, count ))
+				return false;
 		}
-
 		if ( IsBlockedIP())
 		{
 			addLoginErr( LOGIN_ERR_BLOCKED );
@@ -471,7 +473,8 @@ bool CClient::xRecvData() // Receive message from client
 	// g_Log.Event( LOGL_TRACE, "Before\n" );
 	// g_Log.Dump( m_bin.m_Raw, m_bin_len );
 
-	m_Crypt.Decrypt( m_bin.m_Raw+iPrev, m_bin.m_Raw+iPrev, m_bin_len-iPrev );
+	if ( !m_Crypt.Decrypt( m_bin.m_Raw+iPrev, m_bin.m_Raw+iPrev, m_bin_len-iPrev, m_bin_len-iPrev ))
+		return false;
 
 	// g_Log.Event( LOGL_TRACE, "After\n" );
 	// g_Log.Dump( m_bin.m_Raw, m_bin_len );
@@ -587,7 +590,8 @@ bool CClient::Login_Relay( int iRelay ) // Relay player to a selected IP
 	m_Targ_Mode = TARGMODE_SETUP_RELAY;
 
 	// just in case they are on the same machine, change over to the new game encrypt
-	m_Crypt.Init( cmd.Relay.m_ip, SERVER_Game ); // Init decryption table
+	if ( !m_Crypt.Init( cmd.Relay.m_ip, sizeof(cmd.Relay.m_ip), SERVER_Game ))
+		return false;
 	return( true );
 }
 

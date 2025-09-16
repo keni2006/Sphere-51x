@@ -329,6 +329,10 @@ protected:
 	UINT m_CryptMaskLo;
 
 	UINT m_seed;	// seed we got from the client.
+	void SetInitState( bool fInit )
+	{
+		m_fInit = fInit;
+	}
 
 public:
 	CCryptBase()
@@ -357,6 +361,30 @@ public:
 
 enum SERVER_TYPE { SERVER_Login, SERVER_Game, SERVER_Auto };
 
+enum CONNECT_TYPE
+{
+	CONNECT_NONE,
+	CONNECT_UNK,
+	CONNECT_CRYPT,
+	CONNECT_LOGIN,
+	CONNECT_GAME,
+	CONNECT_HTTP,
+	CONNECT_TELNET,
+	CONNECT_UOG,
+	CONNECT_AXIS,
+	CONNECT_QTY
+};
+
+enum ENCRYPTION_TYPE
+{
+	ENC_NONE = 0,
+	ENC_BFISH,
+	ENC_BTFISH,
+	ENC_TFISH,
+	ENC_LOGIN,
+	ENC_QTY
+};
+
 class CCrypt : public CCryptBase
 {
 #define CRYPT_AUTO_VALUE	0x80
@@ -370,17 +398,23 @@ class CCrypt : public CCryptBase
 #define CRYPT_GAMETABLE_START	1
 #define CRYPT_GAMETABLE_STEP	3
 #define CRYPT_GAMETABLE_MODULO	11
-#define CRYPT_GAMETABLE_TRIGGER	21036
+#define CRYPT_GAMETABLE_TRIGGER 21036
 
 protected:
-	static bool		m_bTablesReady;
+	static bool	m_bTablesReady;
 private:
-	SERVER_TYPE		m_type;
-	unsigned char	m_gameSeed[CRYPT_GAMESEED_LENGTH]; // game server needs this.
-	unsigned char	m_gameSeed_outgoing[CRYPT_GAMESEED_LENGTH]; // game uses this.
-	int				m_gameTable;
-	int				m_gameBlockPos;
-	int				m_gameStreamPos;
+	bool	m_fRelayPacket;
+	CONNECT_TYPE	m_ConnectType;
+	ENCRYPTION_TYPE	m_GameEnc;
+	unsigned char	m_gameSeed[CRYPT_GAMESEED_LENGTH];
+	unsigned char	m_gameSeed_outgoing[CRYPT_GAMESEED_LENGTH];
+	int	m_gameTable;
+	int	m_gameBlockPos;
+	size_t	m_gameStreamPos;
+	int	m_tfPosition;
+	unsigned char	m_tfCipherTable[0x100];
+	unsigned int	m_md5_position;
+	unsigned char	m_md5_digest[16];
 
 	static const UINT sm_p_box[];
 	static const BYTE  sm_b_box[];
@@ -392,12 +426,30 @@ private:
 	static unsigned char seed_table[2][CRYPT_GAMESEED_COUNT][2][CRYPT_GAMESEED_LENGTH];
 
 private:
+	void SetConnectType( CONNECT_TYPE type );
+	void SetEncryptionType( ENCRYPTION_TYPE type );
+	CONNECT_TYPE GetConnectType() const;
+	ENCRYPTION_TYPE GetEncryptionType() const;
+	void ResetGameStream();
+	void InitBlowFish();
+	void InitTwoFish();
+	void InitMD5( unsigned char * ucInitialize );
+	bool DecryptLogin( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
+	bool DecryptBlowFish( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
+	bool DecryptTwoFish( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
+	bool EncryptMD5( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
+	bool LoginCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen );
+	bool GameCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen );
+	bool RelayGameCryptStart( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
 	void RawDecrypt(unsigned int *pValues, int table);
 	void InitTables();
+	void InitSeed( int iTable );
 public:
-	void Init( const BYTE *pvSeed, SERVER_TYPE type = SERVER_Auto );
-	void Decrypt( BYTE * pOutput, const BYTE * pInput, int iLen );
-	void Encrypt( BYTE * pOutput, const BYTE * pInput, int iLen );
+	CCrypt();
+	void InitFast( DWORD dwIP, CONNECT_TYPE ctInit, bool fRelay = true );
+	bool Init( const BYTE *pvSeed, size_t iLen = 0, SERVER_TYPE type = SERVER_Auto, bool fIsClientKR = false );
+	bool Decrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
+	bool Encrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
 };
 
 class CCompressTree
