@@ -41,6 +41,7 @@ SRC	:= 	caccount.cpp \
 
 COMMONSRC	:=	../common/carray.cpp \
 			../common/ccrypt.cpp \
+			../common/ccryptkeys.cpp \
 			../common/cexpression.cpp \
 			../common/cfile.cpp \
 			../common/cgrayinst.cpp \
