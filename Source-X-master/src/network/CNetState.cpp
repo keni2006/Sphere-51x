@@ -10,6 +10,8 @@
 #include "CNetworkThread.h"
 #include "CNetState.h"
 
+#include <string>
+
 #ifdef _LIBEV
     extern LinuxEv g_NetworkEvent;
 #endif
@@ -30,6 +32,7 @@ CNetState::CNetState(int id) :
     m_clientType = CLIENTTYPE_2D;
     m_clientVersionNumber = 0;
     m_reportedVersionNumber = 0;
+    m_reportedVersionMismatchLogged = false;
     m_isInUse = false;
     m_parent = nullptr;
 
@@ -141,6 +144,7 @@ void CNetState::clear(void)
     m_newseed = false;
     m_seed = 0;
     m_clientVersionNumber = m_reportedVersionNumber = 0;
+    m_reportedVersionMismatchLogged = false;
     m_clientType = CLIENTTYPE_2D;
     m_isSendingAsync = false;
     m_packetExceptions = 0;
@@ -412,4 +416,91 @@ bool CNetState::isClientReportedLessVersionNumber(dword version) const
 bool CNetState::isClientLessVersionNumber(dword version) const
 {
     return isCryptLessVersionNumber(version) || isClientReportedLessVersionNumber(version);
+}
+
+
+bool CNetState::setCryptVersionNumber(dword version)
+{
+    m_clientVersionNumber = version;
+
+    if (version == 0)
+    {
+        m_reportedVersionMismatchLogged = false;
+        return true;
+    }
+
+    if (m_client != nullptr)
+    {
+        if (CAccount* account = m_client->GetAccount())
+            account->m_TagDefs.SetNum("clientversion", m_clientVersionNumber);
+    }
+
+    return reconcileClientVersions();
+}
+
+bool CNetState::setReportedVersionNumber(dword version)
+{
+    m_reportedVersionNumber = version;
+
+    if (version == 0)
+    {
+        m_reportedVersionMismatchLogged = false;
+        return true;
+    }
+
+    persistReportedVersion();
+    return reconcileClientVersions();
+}
+
+bool CNetState::setReportedVersion(const CUOClientVersion& version)
+{
+    return setReportedVersionNumber(version.GetLegacyVersionNumber());
+}
+
+void CNetState::persistReportedVersion() const
+{
+    if (m_client == nullptr || m_reportedVersionNumber == 0)
+        return;
+
+    m_client->m_TagDefs.SetNum("reportedcliver", m_reportedVersionNumber);
+
+    if (CAccount* account = m_client->GetAccount())
+    {
+        account->m_TagDefs.SetNum("reportedcliver", m_reportedVersionNumber);
+        account->m_TagDefs.SetNum("ReportedCliVer", m_reportedVersionNumber);
+    }
+}
+
+bool CNetState::reconcileClientVersions()
+{
+    if (m_clientVersionNumber == 0 || m_reportedVersionNumber == 0)
+        return true;
+
+    const CUOClientVersion cryptVersion(m_clientVersionNumber);
+    const CUOClientVersion reportedVersion(m_reportedVersionNumber);
+
+    if (cryptVersion == reportedVersion)
+    {
+        m_reportedVersionMismatchLogged = false;
+        return true;
+    }
+
+    if (!m_reportedVersionMismatchLogged)
+    {
+        const std::string reportedStr = reportedVersion.GetVersionString();
+        const std::string cryptStr = cryptVersion.GetVersionString();
+        const CAccount* account = (m_client != nullptr) ? m_client->GetAccount() : nullptr;
+        const lpctstr accountName = (account != nullptr) ? account->GetName() : "unknown";
+
+        g_Log.EventWarn("%x:Client version mismatch (reported %s [%u] vs crypt %s [%u]) for account '%s'.
+",
+            id(), reportedStr.c_str(), m_reportedVersionNumber, cryptStr.c_str(), m_clientVersionNumber, accountName);
+
+        m_reportedVersionMismatchLogged = true;
+    }
+
+    if (m_client != nullptr && m_client->GetConnectType() != CONNECT_GAME)
+        m_client->addLoginErr(PacketLoginError::BadVersion);
+
+    return false;
 }
