@@ -1199,6 +1199,9 @@ private:
 
 	// encrypt/decrypt stuff.
 	CCrypt m_Crypt;			// Client source communications are always encrypted.
+	CONNECT_TYPE m_iConnectType;	// Cached connection type negotiated with the client.
+	ENCRYPTION_TYPE m_iEncryptionType;	// Cached encryption type negotiated with the client.
+	bool m_fExpectingRelayCrypt;	// Expect the next packet to be double-encrypted.
 	static CCompressTree sm_xComp;
 	bool m_fGameServer;		// compress the output. (not a login server)
 
@@ -1228,6 +1231,8 @@ private:
 	void xSend( const void *pData, int length ); // Buffering send function
 	void xSendReady( const void *pData, int length ); // We could send the packet now if we wanted to but wait til we have more.
 	bool xCheckSize( int len );	// check packet.
+	bool xProcessClientSetup( CEvent * pEvent, int len );
+	void SyncCryptState();
 
 #ifdef NDEBUG
 	void xInit_DeCrypt_FindKey( const BYTE * pCryptData, int len );
@@ -1496,6 +1501,14 @@ public:
 	CAccount * GetAccount() const
 	{
 		return( m_pAccount );
+	}
+	CONNECT_TYPE GetConnectType() const
+	{
+		return( m_iConnectType );
+	}
+	ENCRYPTION_TYPE GetEncryptionType() const
+	{
+		return( m_iEncryptionType );
 	}
 	bool IsPriv( WORD flag ) const
 	{	// PRIV_GM
