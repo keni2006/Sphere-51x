@@ -1029,14 +1029,15 @@ bool CCrypt::LoginCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen )
 				}
 			}
 		}
-		if ( fValid )
-		{
-			m_CryptMaskLo = maskLo;
-			m_CryptMaskHi = maskHi;
-			SetInitState( true );
-			return true;
-		}
-	return true;
+                if ( fValid )
+                {
+                        m_CryptMaskLo = maskLo;
+                        m_CryptMaskHi = maskHi;
+                        SetInitState( true );
+                        return true;
+                }
+        }
+        return false;
 }
 
 bool CCrypt::GameCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen )
@@ -1103,10 +1104,15 @@ bool CCrypt::GameCryptStart( DWORD dwIP, const BYTE * pEvent, size_t inLen )
 
 bool CCrypt::RelayGameCryptStart( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen )
 {
-	m_fRelayPacket = false;
-	if ( !Decrypt( pOutput, pInput, outLen, inLen ))
-		return false;
-	return DecryptLogin( pOutput, pOutput, outLen, inLen );
+        m_fRelayPacket = false;
+        if ( !Decrypt( pOutput, pInput, outLen, inLen ))
+                return false;
+        return DecryptLogin( pOutput, pOutput, outLen, inLen );
+}
+
+bool CCrypt::DecryptRelayGame( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen )
+{
+        return RelayGameCryptStart( pOutput, pInput, outLen, inLen );
 }
 
 void CCrypt::InitTables()
