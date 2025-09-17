@@ -73,7 +73,7 @@ void CCryptKeysManager::AddNoCryptKey()
         m_clientKeys.Add(key);
 }
 
-void CCryptKeysManager::AddKey(const CCryptClientKey & key)
+void CCryptKeysManager::AddKey(CCryptClientKey key)
 {
         for ( int i = 0; i < m_clientKeys.GetCount(); ++i )
         {

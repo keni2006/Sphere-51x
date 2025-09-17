@@ -449,6 +449,7 @@ public:
         CONNECT_TYPE GetConnectType() const;
         ENCRYPTION_TYPE GetEncryptionType() const;
         bool Decrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
+        bool DecryptRelayGame( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
         bool Encrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
 };
 
