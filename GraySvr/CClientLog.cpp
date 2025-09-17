@@ -186,6 +186,46 @@ void CClient::xInit_DeCrypt_FindKey( const BYTE * pCryptData, int len )
 
 #endif
 
+void CClient::SyncCryptState()
+{
+	CONNECT_TYPE prevType = m_iConnectType;
+	m_iConnectType = m_Crypt.GetConnectType();
+	m_iEncryptionType = m_Crypt.GetEncryptionType();
+	m_fExpectingRelayCrypt = ( prevType == CONNECT_LOGIN && m_iConnectType == CONNECT_GAME );
+}
+
+bool CClient::xProcessClientSetup( CEvent * pEvent, int len )
+{
+	ASSERT( pEvent != NULL );
+	if ( len <= 0 )
+		return( false );
+
+	if ( ! xCheckSize( sizeof( pEvent->m_CryptHeader )))
+		return( false );
+
+	SERVER_TYPE serverType = SERVER_Auto;
+	if ( len == 66 )
+	{
+		serverType = SERVER_Login;
+	}
+	else if ( len == 69 )
+	{
+		serverType = SERVER_Game;
+	}
+
+	bool fInit = m_Crypt.Init( pEvent->m_Raw, len, serverType );
+	if ( !fInit && serverType != SERVER_Auto )
+	{
+		fInit = m_Crypt.Init( pEvent->m_Raw, len );
+	}
+	if ( !fInit )
+		return( false );
+
+	SyncCryptState();
+	xProcess( true );
+	return( true );
+}
+
 bool CClient::IsBlockedIP() const
 {
 	struct sockaddr_in Name;
@@ -438,33 +478,13 @@ bool CClient::xRecvData() // Receive message from client
 		}
 #endif
 		// Assume it's a normal client log in.
-		xCheckSize( sizeof( m_bin.m_CryptHeader ));
-
-		// DEBUG_MSG(( "%x:CCrypt:Init %d.%d.%d.%d\n", GetSocket(), pDeCryptID[0], pDeCryptID[1], pDeCryptID[2], pDeCryptID[3] ));
-		bool fGame = false;
-		if ( count == 66 ) // SERVER_Login 1.26.0
-		{
-			if ( !m_Crypt.Init( m_bin.m_Raw, count, SERVER_Login ))
-				return false;
-		}
-		else if ( count == 69 )	// Auto-registering server sending us info.
-		{
-			if ( !m_Crypt.Init( m_bin.m_Raw, count, SERVER_Game ))
-				return false;
-			fGame = true;
-		}
-		else	// probably this is a login server.
-		{
-			if ( !m_Crypt.Init( m_bin.m_Raw, count ))
-				return false;
-		}
+		if ( !xProcessClientSetup( &m_bin, m_bin_len ))
+			return( false );
 		if ( IsBlockedIP())
 		{
 			addLoginErr( LOGIN_ERR_BLOCKED );
 			return( false );
 		}
-
-		xProcess( true );
 	}
 
 	// Decrypt the data.
@@ -473,8 +493,24 @@ bool CClient::xRecvData() // Receive message from client
 	// g_Log.Event( LOGL_TRACE, "Before\n" );
 	// g_Log.Dump( m_bin.m_Raw, m_bin_len );
 
-	if ( !m_Crypt.Decrypt( m_bin.m_Raw+iPrev, m_bin.m_Raw+iPrev, m_bin_len-iPrev, m_bin_len-iPrev ))
-		return false;
+	int iDecryptLen = m_bin_len - iPrev;
+	if ( iDecryptLen > 0 )
+	{
+		BYTE * pDecrypt = m_bin.m_Raw + iPrev;
+		if ( m_fExpectingRelayCrypt )
+		{
+			if ( !m_Crypt.RelayGameCryptStart( pDecrypt, pDecrypt, iDecryptLen, iDecryptLen ))
+				return false;
+			m_fExpectingRelayCrypt = false;
+		}
+		else
+		{
+			if ( !m_Crypt.Decrypt( pDecrypt, pDecrypt, iDecryptLen, iDecryptLen ))
+				return false;
+		}
+		m_iConnectType = m_Crypt.GetConnectType();
+		m_iEncryptionType = m_Crypt.GetEncryptionType();
+	}
 
 	// g_Log.Event( LOGL_TRACE, "After\n" );
 	// g_Log.Dump( m_bin.m_Raw, m_bin_len );
@@ -590,9 +626,10 @@ bool CClient::Login_Relay( int iRelay ) // Relay player to a selected IP
 	m_Targ_Mode = TARGMODE_SETUP_RELAY;
 
 	// just in case they are on the same machine, change over to the new game encrypt
-	if ( !m_Crypt.Init( cmd.Relay.m_ip, sizeof(cmd.Relay.m_ip), SERVER_Game ))
-		return false;
-	return( true );
+        if ( !m_Crypt.Init( cmd.Relay.m_ip, sizeof(cmd.Relay.m_ip), SERVER_Game ))
+                return false;
+        SyncCryptState();
+        return( true );
 }
 
 void CClient::Login_ServerList( char * pszAccount, char * pszPassword ) // Initial login (Login on "loginserver", new format)
