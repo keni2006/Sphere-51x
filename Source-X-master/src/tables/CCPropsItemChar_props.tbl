@@ -1,7 +1,0 @@
-//
-//	Class:	CCPropsItemChar
-//	Set:	attributes
-//	Prefix:	(special) PROPITCH_
-//
-
-ADDPROP(WEIGHTREDUCTION,	"WEIGHTREDUCTION",	RDS_AOS) //FIXME: expansion?
