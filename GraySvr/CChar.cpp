@@ -2579,7 +2579,7 @@ void CChar::InitPlayer(CEvent* pBin, CClient* pClient)
 		"!\"#$%&()*,/:;<=>?@[\\]^{|}~_+");
 
 	// check busy names
-	if (len < 1 || g_Serv.IsNameTaken(name))
+	if (len < 1 || g_Serv.IsNameTaken(name, this))
 	{
 		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
 			pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
