@@ -2585,12 +2585,12 @@ scp_secure:
 
 bool CServer::LoadIni()
 {
-        CScriptLock s;
-        if ( ! s.OpenFind( GRAY_FILE ".ini" )) // Open script file
-        {
-                g_Log.Event( LOGL_FATAL|LOGM_INIT, "Can't open " GRAY_FILE ".ini\n" );
-                return( false );
-        }
+	CScriptLock s;
+	if ( ! s.OpenFind( GRAY_FILE ".ini" )) // Open script file
+	{
+		g_Log.Event( LOGL_FATAL|LOGM_INIT, "Can't open " GRAY_FILE ".ini\n" );
+		return( false );
+	}
 
 	while (s.FindNextSection())
 	{
@@ -2679,37 +2679,7 @@ bool CServer::LoadIni()
 			SetName( szName );
 	}
 
-        return( true );
-}
-
-bool CServer::LoadCryptIni()
-{
-        CScriptLock s;
-        if ( ! s.OpenFind( GRAY_FILE "Crypt.ini" ) )
-        {
-                if ( ! s.OpenFind( "SphereCrypt.ini" ))
-                {
-                        g_Log.Event( LOGL_WARN|LOGM_INIT, "Could not open " GRAY_FILE "Crypt.ini, using built-in client keys.\n" );
-                        CCryptKeysManager::GetInstance().ResetToDefaults();
-                        return false;
-                }
-        }
-
-        bool fLoaded = CCryptKeysManager::GetInstance().LoadKeyTable( s );
-        if ( ! fLoaded )
-        {
-                g_Log.Event( LOGL_WARN|LOGM_INIT, "No valid entries in " GRAY_FILE "Crypt.ini, using built-in client keys.\n" );
-                return false;
-        }
-
-        g_Log.Event( LOGM_INIT, "Loaded %u client encryption keys.\n", (UINT)CCryptKeysManager::GetInstance().GetKeyCount() );
-
-        if ( m_ClientVersion.GetClientVersion() > 0 )
-        {
-                m_ClientVersion.SetClientVersion( m_ClientVersion.GetClientVersion() );
-        }
-
-        return true;
+	return( true );
 }
 
 void CServer::SysMessage( const TCHAR * pStr ) const
@@ -3557,19 +3527,17 @@ bool CServer::Load()
 
 	if ( ! LoadIni())
 		return( false );
-        if ( ! LoadDefs())
-                return( false );
-        if ( ! LoadTables())
-                return( false );
-        if ( ! LoadScripts())
-                return( false );
+	if ( ! LoadDefs())
+		return( false );
+	if ( ! LoadTables())
+		return( false );
+	if ( ! LoadScripts())
+		return( false );
 
-        LoadCryptIni();
-
-        TCHAR szVersion[ 256 ];
-        m_ClientVersion.WriteClientVersion( szVersion );
-        g_Log.Event( LOGM_INIT, _TEXT("Client Version: '%s'\n"), szVersion );
-        if ( ! m_ClientVersion.IsValid())
+	TCHAR szVersion[ 256 ];
+	m_ClientVersion.WriteClientVersion( szVersion );
+	g_Log.Event( LOGM_INIT, _TEXT("Client Version: '%s'\n"), szVersion );
+	if ( ! m_ClientVersion.IsValid())
 	{
 		g_Log.Event( LOGL_WARN|LOGM_INIT, "Bad Client Version '%s', falling back to automatic detection.\n", szVersion );
 	}

@@ -12,7 +12,6 @@
 #include "graycom.h"
 #include "graymul.h"
 #include "grayproto.h"
-#include "ccryptkeys.h"
 #endif
 
 const WORD Packet_Lengths_20000[XCMD_QTY] =	// from client 2.0.0 @offset 010e700
@@ -457,23 +456,49 @@ int CCryptBase::WriteClientVersion( TCHAR * pszVersion )
 
 bool CCryptBase::SetClientVersion( int iVer )
 {
-        m_fInit = false;
-        if ( iVer <= 0 )
-        {
-                m_MasterHi = 0;
-                m_MasterLo = 0;
-                m_iClientVersion = 0;
-                return true;
-        }
+	m_fInit = false;
+	if ( iVer <= 0 )
+	{
+		m_MasterHi = 0;
+		m_MasterLo = 0;
+		m_iClientVersion = 0;
+		return true;
+	}
 
-        CCryptClientKey key;
-        if ( CCryptKeysManager::GetInstance().FindKeyForVersion( static_cast<DWORD>(iVer), key ))
-        {
-                m_MasterHi = key.m_MasterHi;
-                m_MasterLo = key.m_MasterLo;
-                m_iClientVersion = static_cast<int>( key.m_uiClientVersion );
-                return true;
-        }
+	struct CLIENTVER
+	{
+		int m_iVer;
+		UINT m_MasterHi;
+		UINT m_MasterLo;
+	};
+
+	static const CLIENTVER sm_ClientKeys[] =
+	{
+		{ 20000, CLIKEY_20000_HI, CLIKEY_20000_LO },
+		{ 12604, CLIKEY_12604_HI, CLIKEY_12604_LO },
+		{ 12603, CLIKEY_12603_HI, CLIKEY_12603_LO },
+		{ 12602, CLIKEY_12602_HI, CLIKEY_12602_LO },
+		{ 12601, CLIKEY_12601_HI, CLIKEY_12601_LO },
+		{ 12600, CLIKEY_12600_HI, CLIKEY_12600_LO },
+		{ 12537, CLIKEY_12537_HI, CLIKEY_12537_LO },
+		{ 12536, CLIKEY_12536_HI1, CLIKEY_12536_LO1 },
+		{ 12535, CLIKEY_12535_HI, CLIKEY_12535_LO },
+		{ 12534, CLIKEY_12534_HI, CLIKEY_12534_LO },
+		{ 12533, CLIKEY_12533_HI, CLIKEY_12533_LO },
+		{ 12532, CLIKEY_12532_HI, CLIKEY_12532_LO },
+		{ 12531, CLIKEY_12531_HI, CLIKEY_12531_LO },
+	};
+
+	for ( size_t i = 0; i < COUNTOF(sm_ClientKeys); ++i )
+	{
+		if ( sm_ClientKeys[i].m_iVer == iVer )
+		{
+			m_MasterHi = sm_ClientKeys[i].m_MasterHi;
+			m_MasterLo = sm_ClientKeys[i].m_MasterLo;
+			m_iClientVersion = iVer;
+			return true;
+		}
+	}
 
         DEBUG_WARN(( "Unsupported ClientVersion %i, disabling encryption.\n", iVer ));
         m_MasterHi = 0;
