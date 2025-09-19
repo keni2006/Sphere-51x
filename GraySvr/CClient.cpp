@@ -11,7 +11,7 @@ CClient::CClient( SOCKET client ) : CGSocket( client )
 {
 	m_pChar = NULL;
 	m_pAccount = NULL;
-	m_Crypt.SetClientVersion( 0 );
+	m_Crypt.SetClientVersion( g_Serv.m_ClientVersion.GetClientVersion());
 
 	m_fGameServer = false;	// act like a login server first.
 	m_pGMPage = NULL;

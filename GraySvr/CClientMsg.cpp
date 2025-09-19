@@ -1382,7 +1382,7 @@ bool CClient::addBookOpen( CItem * pBook )
 	}
 
 	CCommand cmd;
-	if ( ! m_Crypt.GetClientVersion() || m_Crypt.GetClientVersion() >= 12600 )
+	if ( m_Crypt.GetClientVersion() >= 12600 )
 	{
 		cmd.BookOpen_v26.m_Cmd = XCMD_BookOpen;
 		cmd.BookOpen_v26.m_UID = pBook->GetUID();
@@ -2999,7 +2999,7 @@ bool CClient::addWalkCode( EXTDATA_TYPE iType, int iCodes )
 {
 	// RETURN: true = new codes where sent.
 
-	if ( m_Crypt.GetClientVersion() && m_Crypt.GetClientVersion() < 12600 )
+	if ( m_Crypt.GetClientVersion() < 12600 )
 		return false;
 	if ( ! ( g_Serv.m_wDebugFlags & DEBUGF_WALKCODES ))
 		return( false );
