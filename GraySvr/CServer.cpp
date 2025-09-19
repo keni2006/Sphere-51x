@@ -1802,7 +1802,7 @@ bool CServer::r_LoadVal( CScript &s )
 		m_nClientsMax = s.GetArgVal();
 		break;
 	case SC_CLIENTVERSION:
-		m_ClientVersion.SetClientVersionStr( s.GetArgStr());
+		m_ClientVersion.SetClientVersion( s.GetArgVal());
 		break;
 	case SC_CORPSENPCDECAY:
 		m_iDecay_CorpseNPC = s.GetArgVal()*60*TICK_PER_SEC;

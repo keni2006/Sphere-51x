@@ -15,10 +15,6 @@
 #include "ccryptkeys.h"
 #endif
 
-#include <ctype.h>
-#include <stdlib.h>
-#include <string.h>
-
 const WORD Packet_Lengths_20000[XCMD_QTY] =	// from client 2.0.0 @offset 010e700
 {
 	// if it's == 0xFFFF then it's variable len, or >= 08000
@@ -459,80 +455,6 @@ int CCryptBase::WriteClientVersion( TCHAR * pszVersion )
 		iClientVersion%100 );
 }
 
-namespace
-{
-        int ParseClientVersionString( const TCHAR * pszVersion )
-        {
-                if ( pszVersion == NULL )
-                        return 0;
-
-                while ( *pszVersion != '\0' && isspace(static_cast<unsigned char>(*pszVersion)) )
-                        ++pszVersion;
-
-                if ( *pszVersion == '\0' )
-                        return 0;
-
-                bool fHasSeparator = false;
-                for ( const TCHAR * pCheck = pszVersion; *pCheck != '\0'; ++pCheck )
-                {
-                        if ( *pCheck == '.' || *pCheck == ',' )
-                        {
-                                fHasSeparator = true;
-                                break;
-                        }
-                }
-
-                if ( !fHasSeparator )
-                        return atoi( pszVersion );
-
-                char szVersion[ 64 ];
-                size_t uiLen = strlen( pszVersion );
-                if ( uiLen >= COUNTOF(szVersion) )
-                        uiLen = COUNTOF(szVersion) - 1;
-
-                for ( size_t i = 0; i < uiLen; ++i )
-                {
-                        char ch = static_cast<char>( pszVersion[i] );
-                        if ( ch == ',' )
-                                ch = '.';
-                        szVersion[i] = ch;
-                }
-                szVersion[ uiLen ] = '\0';
-
-                int aiParts[3] = { 0, 0, 0 };
-                int iPart = 0;
-                bool fHasDigits = false;
-                for ( char * pParse = szVersion; *pParse != '\0'; ++pParse )
-                {
-                        if ( isdigit(static_cast<unsigned char>(*pParse)) )
-                        {
-                                aiParts[iPart] = ( aiParts[iPart] * 10 ) + ( *pParse - '0' );
-                                fHasDigits = true;
-                        }
-                        else if ( *pParse == '.' )
-                        {
-                                if ( !fHasDigits )
-                                        continue;
-                                if ( iPart >= 2 )
-                                        break;
-                                ++iPart;
-                                fHasDigits = false;
-                        }
-                        else if ( isspace(static_cast<unsigned char>(*pParse)) )
-                        {
-                                break;
-                        }
-                        else
-                        {
-                                // stop at the first unsupported character (such as revision letters)
-                                break;
-                        }
-                }
-
-                return ( aiParts[0] * 10000 ) + ( aiParts[1] * 100 ) + aiParts[2];
-        }
-}
-
 bool CCryptBase::SetClientVersion( int iVer )
 {
         m_fInit = false;
@@ -558,19 +480,6 @@ bool CCryptBase::SetClientVersion( int iVer )
         m_MasterLo = 0;
         m_iClientVersion = 0;
         return false;
-}
-
-bool CCryptBase::SetClientVersionStr( const TCHAR * pszVersion )
-{
-        int iVer = ParseClientVersionString( pszVersion );
-        if ( iVer <= 0 )
-        {
-                if ( pszVersion == NULL )
-                        return SetClientVersion( 0 );
-
-                return SetClientVersion( atoi( pszVersion ));
-        }
-        return SetClientVersion( iVer );
 }
 
 void CCryptBase::Decrypt( BYTE * pOutput, const BYTE * pInput, int iLen )
