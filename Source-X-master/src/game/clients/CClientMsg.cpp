@@ -3120,20 +3120,8 @@ byte CClient::LogIn( CAccount * pAccount, CSString & sMsg )
 		return (PacketLoginError::Blocked);
 	}
 
-		m_pAccount = pAccount;
-
-		if (CNetState* netState = GetNetState())
-		{
-			const dword reportedVersion = netState->getReportedVersion();
-			if (reportedVersion != 0)
-				netState->setReportedVersionNumber(reportedVersion);
-
-			const dword cryptVersion = netState->getCryptVersion();
-			if (cryptVersion != 0)
-				netState->setCryptVersionNumber(cryptVersion);
-		}
-
-		pAccount->OnLogin( this );
+	m_pAccount = pAccount;
+	pAccount->OnLogin( this );
 
 	return( PacketLoginError::Success );
 }

@@ -7,7 +7,6 @@
 #define _INC_CNETSTATE_H
 
 #include "../common/sphere_library/CSQueue.h"
-#include "../common/CUOClientVersion.h"
 #include "../common/sphereproto.h"
 #include "../sphere/containers.h"
 #include "CSocket.h"
@@ -90,12 +89,7 @@ public:
     GAMECLIENT_TYPE m_clientType;	// type of client
     dword m_clientVersionNumber;			// client version (encryption)
     dword m_reportedVersionNumber;		// client version (reported)
-    bool m_reportedVersionMismatchLogged;	// has a mismatch already been handled
     byte m_sequence;				// movement sequence
-
-protected:
-    void persistReportedVersion() const;
-    bool reconcileClientVersions();
 
 public:
     explicit CNetState(int id);
@@ -127,10 +121,6 @@ public:
     GAMECLIENT_TYPE getClientType(void) const { return m_clientType; };	// determined client type
     dword getCryptVersion(void) const { return m_clientVersionNumber; };		// version as determined by encryption
     dword getReportedVersion(void) const { return m_reportedVersionNumber; }; // version as reported by client
-
-    bool setCryptVersionNumber(dword version);          // update encryption-derived version
-    bool setReportedVersionNumber(dword version);       // update reported version
-    bool setReportedVersion(const CUOClientVersion& version);   // update reported version from CUOClientVersion
 
     void markReadClosed(void) volatile;		// mark socket as closed by read thread
     void markWriteClosed(void) volatile;	// mark socket as closed by write thread

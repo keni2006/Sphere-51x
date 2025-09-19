@@ -2485,17 +2485,17 @@ bool PacketClientVersion::onReceive(CNetState* net)
 		CClient* client = net->getClient();
 		ASSERT(client);
 
-		const CUOClientVersion version(versionStr);
-		net->setReportedVersion(version);
+		dword version = CUOClientVersion(versionStr).GetLegacyVersionNumber();
+		net->m_reportedVersionNumber = version;
 		net->detectAsyncMode();
 
-		const dword reportedVersion = net->getReportedVersion();
-
-		DEBUG_MSG(("Getting CliVersionReported %u\n", reportedVersion));
-		if ((g_Serv.m_ClientVersion.GetClientVerNumber() != 0) && (g_Serv.m_ClientVersion.GetClientVerNumber() != reportedVersion))
-                        client->addLoginErr(PacketLoginError::BadVersion);
-		// CNetState::setReportedVersion() stores the reported version for account/session tags
-        }
+		DEBUG_MSG(("Getting CliVersionReported %u\n", version));
+		if ((g_Serv.m_ClientVersion.GetClientVerNumber() != 0) && (g_Serv.m_ClientVersion.GetClientVerNumber() != version))
+			client->addLoginErr(PacketLoginError::BadVersion);
+        //we have asked client version in serverlist to configure character list and game feature.
+        if ( client->m_pAccount )
+                    client->m_pAccount->m_TagDefs.SetNum("ReportedCliVer", version);
+	}
 
 	return true;
 }
