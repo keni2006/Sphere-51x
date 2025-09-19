@@ -2561,34 +2561,34 @@ basicform:
 	return( true );
 }
 
-void CChar::InitPlayer(CEvent* pBin, CClient* pClient)
+bool CChar::InitPlayer(CEvent* pBin, CClient* pClient)
 {
-	ASSERT(pClient);
-	ASSERT(pBin);
+        ASSERT(pClient);
+        ASSERT(pBin);
 
-	// check for obscene names
-	if (g_Serv.IsObscene(pBin->Create.m_name))
-	{
-		g_Log.Event(LOGL_WARN, "%x: Unacceptable obscene name '%s' for account '%s'\n",
-			pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
-		return;
-	}
+        // check for obscene names
+        if (g_Serv.IsObscene(pBin->Create.m_name))
+        {
+                g_Log.Event(LOGL_WARN, "%x: Unacceptable obscene name '%s' for account '%s'\n",
+                        pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
+                return false;
+        }
 
 	char name[MAX_NAME_SIZE];
 	int len = GetBareText(name, strip_extra_spaces(pBin->Create.m_name, true), sizeof(name),
 		"!\"#$%&()*,/:;<=>?@[\\]^{|}~_+");
 
 	// check busy names
-	if (len < 1 || g_Serv.IsNameTaken(name))
-	{
-		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
-			pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
+        if (len < 1 || g_Serv.IsNameTaken(name, this))
+        {
+                g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
+                        pClient->GetSocket(), pBin->Create.m_name, pClient->GetAccount()->GetName());
 
-		pClient->SysMessage("Name busy try another."); 
+                pClient->SysMessage("Name busy try another.");
 //pClient->Disconnect(); // close connection method, do later
 
-		return;
-	}
+                return false;
+        }
 
 	SetName(name);
 
@@ -2695,35 +2695,41 @@ void CChar::InitPlayer(CEvent* pBin, CClient* pClient)
 
 	// Get special equip for the starting skills.
 	CScript s;
-	if (!s.OpenFind(GRAY_FILE "newb"))
-		return;
-	for (i = 0; i < 4; i++)
-	{
-		int skill;
-		const TCHAR* pszSkill;
-		if (i)
-		{
-			switch (i)
-			{
-			case 1: skill = pBin->Create.m_skill1; break;
-			case 2: skill = pBin->Create.m_skill2; break;
-			case 3: skill = pBin->Create.m_skill3; break;
-			}
-			pszSkill = g_Serv.m_SkillDefs[skill]->GetKey();
-		}
-		else
-		{
-			pszSkill = (pBin->Create.m_sex == 0) ? "MALE_DEFAULT" : "FEMALE_DEFAULT";
-		}
-		if (!s.FindSection(pszSkill))
-		{
-			continue;
-		}
+        if (s.OpenFind(GRAY_FILE "newb"))
+        {
+                for (i = 0; i < 4; i++)
+                {
+                        int skill;
+                        const TCHAR* pszSkill;
+                        if (i)
+                        {
+                                switch (i)
+                                {
+                                case 1: skill = pBin->Create.m_skill1; break;
+                                case 2: skill = pBin->Create.m_skill2; break;
+                                case 3: skill = pBin->Create.m_skill3; break;
+                                }
+                                pszSkill = g_Serv.m_SkillDefs[skill]->GetKey();
+                        }
+                        else
+                        {
+                                pszSkill = (pBin->Create.m_sex == 0) ? "MALE_DEFAULT" : "FEMALE_DEFAULT";
+                        }
+                        if (!s.FindSection(pszSkill))
+                        {
+                                continue;
+                        }
 
-		ReadScript(s, false, true);
-	}
+                        ReadScript(s, false, true);
+                }
+        }
+        else
+        {
+                g_Log.Event(LOGL_WARN, "Unable to open new player script '%s'.\n", GRAY_FILE "newb" GRAY_SCRIPT);
+        }
 
-	CreateNewCharCheck();
+        CreateNewCharCheck();
+        return true;
 }
 
 void CChar::UpdateDrag( CItem * pItem, CObjBase * pCont, CPointMap * ppt )
