@@ -3227,18 +3227,23 @@ void CClient::Setup_CreateDialog() // All the character creation stuff
 
 	// ??? Make sure they don't already have too many chars !
 
-	CChar* pChar = CChar::CreateBasic(CREID_MAN);
-	pChar->InitPlayer(&m_bin, this);
+        CChar* pChar = CChar::CreateBasic(CREID_MAN);
+        if (!pChar->InitPlayer(&m_bin, this))
+        {
+                pChar->Delete();
+                return;
+        }
 
-	// CHECKNAME DUPLICAT - now here
-	if (g_Serv.IsNameTaken(pChar->GetName()))
-	{
-		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
-			GetSocket(), pChar->GetName(), m_pAccount->GetName());
+        // CHECKNAME DUPLICAT - now here
+        if (g_Serv.IsNameTaken(pChar->GetName(), pChar))
+        {
+                g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
+                        GetSocket(), pChar->GetName(), m_pAccount->GetName());
 
-		addSysMessage("Name busy, try another.");
-		return; //just return later add packet with bad login etc
-	}
+                addSysMessage("Name busy, try another.");
+                pChar->Delete();
+                return; //just return later add packet with bad login etc
+        }
 
 	Setup_Start(pChar);
 }
