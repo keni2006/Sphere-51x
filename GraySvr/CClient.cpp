@@ -12,9 +12,6 @@ CClient::CClient( SOCKET client ) : CGSocket( client )
 	m_pChar = NULL;
 	m_pAccount = NULL;
 	m_Crypt.SetClientVersion( 0 );
-	m_iConnectType = CONNECT_UNK;
-	m_iEncryptionType = ENC_NONE;
-	m_fExpectingRelayCrypt = false;
 
 	m_fGameServer = false;	// act like a login server first.
 	m_pGMPage = NULL;

@@ -426,13 +426,15 @@ private:
 	static unsigned char seed_table[2][CRYPT_GAMESEED_COUNT][2][CRYPT_GAMESEED_LENGTH];
 
 private:
-        void SetConnectType( CONNECT_TYPE type );
-        void SetEncryptionType( ENCRYPTION_TYPE type );
-        void ResetGameStream();
-        void InitBlowFish();
-        void InitTwoFish();
-        void InitMD5( unsigned char * ucInitialize );
-        bool DecryptLogin( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
+	void SetConnectType( CONNECT_TYPE type );
+	void SetEncryptionType( ENCRYPTION_TYPE type );
+	CONNECT_TYPE GetConnectType() const;
+	ENCRYPTION_TYPE GetEncryptionType() const;
+	void ResetGameStream();
+	void InitBlowFish();
+	void InitTwoFish();
+	void InitMD5( unsigned char * ucInitialize );
+	bool DecryptLogin( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
 	bool DecryptBlowFish( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
 	bool DecryptTwoFish( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
 	bool EncryptMD5( unsigned char * pOutput, const unsigned char * pInput, size_t outLen, size_t inLen );
@@ -443,13 +445,11 @@ private:
 	void InitTables();
 	void InitSeed( int iTable );
 public:
-        CCrypt();
-        void InitFast( DWORD dwIP, CONNECT_TYPE ctInit, bool fRelay = true );
-        bool Init( const BYTE *pvSeed, size_t iLen = 0, SERVER_TYPE type = SERVER_Auto, bool fIsClientKR = false );
-        CONNECT_TYPE GetConnectType() const;
-        ENCRYPTION_TYPE GetEncryptionType() const;
-        bool Decrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
-        bool Encrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
+	CCrypt();
+	void InitFast( DWORD dwIP, CONNECT_TYPE ctInit, bool fRelay = true );
+	bool Init( const BYTE *pvSeed, size_t iLen = 0, SERVER_TYPE type = SERVER_Auto, bool fIsClientKR = false );
+	bool Decrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
+	bool Encrypt( BYTE * pOutput, const BYTE * pInput, size_t outLen, size_t inLen );
 };
 
 class CCompressTree
