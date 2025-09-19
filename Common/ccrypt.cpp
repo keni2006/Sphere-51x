@@ -1166,11 +1166,11 @@ void CCrypt::InitTables()
 }
 
 #define ROUND(LL, R, S, P) \
-        LL ^= P; \
-        LL ^= (((S[          (R >> 24)        ]  + \
-                S[0x0100 + ((R >> 16) & 0xff)]) ^ \
-                S[0x0200 + ((R >> 8 ) & 0xff)]) + \
-                S[0x0300 + ((R      ) & 0xff)]);
+	LL ^= P; \
+	LL ^= ((S[          (R >> 24)        ]  + \
+		S[0x0100 + ((R >> 16) & 0xff)]) ^ \
+		S[0x0200 + ((R >> 8 ) & 0xff)]) + \
+		S[0x0300 + ((R      ) & 0xff)]);
 
 void CCrypt::RawDecrypt(unsigned int *pValues, int table)
 {
