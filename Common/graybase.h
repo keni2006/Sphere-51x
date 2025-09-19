@@ -341,7 +341,6 @@ public:
 		m_iClientVersion = 0;	// GRAY_CLIENT_VER
 	}
 	bool SetClientVersion( int iVer );
-	bool SetClientVersionStr( const TCHAR * pszVersion );
 	int GetClientVersion() const
 	{
 		return( m_iClientVersion );
