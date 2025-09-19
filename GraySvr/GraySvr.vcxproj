@@ -72,6 +72,7 @@
       <OmitFramePointers>true</OmitFramePointers>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <IntrinsicFunctions>true</IntrinsicFunctions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\common;$(MYSQL_INCLUDE_DIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Midl>
       <TypeLibraryName>.\Release\GraySvr.tlb</TypeLibraryName>
@@ -90,7 +91,8 @@
       <SubSystem>Console</SubSystem>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
       <OutputFile>.\Release\GraySvr.exe</OutputFile>
-      <AdditionalDependencies>wsock32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(MYSQL_LIB_DIR);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>wsock32.lib;libmysql.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <Version>0.10</Version>
     </Link>
   </ItemDefinitionGroup>
@@ -116,6 +118,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ExceptionHandling>Sync</ExceptionHandling>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\common;$(MYSQL_INCLUDE_DIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Midl>
       <TypeLibraryName>.\Debug\GraySvr.tlb</TypeLibraryName>
@@ -134,7 +137,8 @@
       <SubSystem>Console</SubSystem>
       <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
       <OutputFile>.\Debug\GraySvr.exe</OutputFile>
-      <AdditionalDependencies>wsock32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(MYSQL_LIB_DIR);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>wsock32.lib;libmysql.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <Version>0.12</Version>
     </Link>
   </ItemDefinitionGroup>
@@ -189,6 +193,7 @@
     <ClCompile Include="CServer.cpp" />
     <ClCompile Include="cvendoritem.cpp" />
     <ClCompile Include="CWorld.cpp" />
+    <ClCompile Include="CWorldStorageMySQL.cpp" />
     <ClCompile Include="cworldimport.cpp" />
     <ClCompile Include="cworldmap.cpp" />
     <ClCompile Include="graysvr.cpp" />
@@ -214,6 +219,7 @@
     <ClInclude Include="..\common\graymul.h" />
     <ClInclude Include="..\common\grayproto.h" />
     <ClInclude Include="CParty.h" />
+    <ClInclude Include="CWorldStorageMySQL.h" />
     <ClInclude Include="graysvr.h" />
   </ItemGroup>
   <ItemGroup>

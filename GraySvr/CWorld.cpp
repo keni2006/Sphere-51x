@@ -4,6 +4,7 @@
 //
 
 #include "graysvr.h"	// predef header.
+#include "CWorldStorageMySQL.h"
 
 bool World_fDeleteCycle = false;
 
@@ -217,6 +218,21 @@ CWorld::CWorld()
 	m_Clock_PrevSys = 0;
 	m_Clock_Time = 0;
 	m_Clock_Startup = 0;
+}
+
+CWorld::~CWorld()
+{
+	Close();
+}
+
+CWorldStorageMySQL * CWorld::Storage()
+{
+	return m_pStorage.get();
+}
+
+const CWorldStorageMySQL * CWorld::Storage() const
+{
+	return m_pStorage.get();
 }
 
 UINT CWorld::AllocUID(UINT dwIndex, CObjBase * pObj )
@@ -575,6 +591,30 @@ bool CWorld::Load() // Load world from script
 	if ( ! LoadAccounts( false ))
 		return( false );
 
+	bool fMySQLConnected = false;
+	const CServer::MySQLConfig & mySQLConfig = g_Serv.GetMySQLConfig();
+	if ( mySQLConfig.m_fEnable )
+	{
+		if ( ! m_pStorage )
+		{
+			m_pStorage.reset( new CWorldStorageMySQL());
+		}
+
+		if ( ! m_pStorage->Connect( mySQLConfig ))
+		{
+			const TCHAR * pszHost = mySQLConfig.m_sHost.IsEmpty() ? _TEXT("localhost") : (const TCHAR *) mySQLConfig.m_sHost;
+			g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to connect to MySQL server %s:%d (database '%s').\n", pszHost, mySQLConfig.m_iPort, (const TCHAR *) mySQLConfig.m_sDatabase );
+			goto mysql_fail;
+		}
+
+		fMySQLConnected = true;
+	}
+	else if ( m_pStorage )
+	{
+		m_pStorage->Disconnect();
+		m_pStorage.reset();
+	}
+
 	CGString sSaveName;
 	sSaveName.Format( "%s" GRAY_FILE "world", (const TCHAR*) g_Serv.m_sWorldBaseDir );
 
@@ -600,11 +640,11 @@ bool CWorld::Load() // Load world from script
 			{
 				try
 				{
-					if ( ! LoadSection())
-					{
-						g_Log.SetScriptContext( NULL );
-						return( false );
-					}
+                                if ( ! LoadSection())
+                                {
+                                        g_Log.SetScriptContext( NULL );
+                                        goto mysql_fail;
+                                }
 				}
 				catch (...)	// catch all
 				{
@@ -613,11 +653,11 @@ bool CWorld::Load() // Load world from script
 			}
 			else
 			{
-				if ( ! LoadSection())
-				{
-					g_Log.SetScriptContext( NULL );
-					return( false );
-				}
+                                if ( ! LoadSection())
+                                {
+                                        g_Log.SetScriptContext( NULL );
+                                        goto mysql_fail;
+                                }
 			}
 		}
 		m_File.Close();
@@ -655,6 +695,19 @@ bool CWorld::Load() // Load world from script
 	// Set the current version now.
 	r_SetVal( "VERSION", GRAY_VERSION );	// Set m_iSaveVersion
 	return( true );
+
+mysql_fail:
+	g_Log.SetScriptContext( NULL );
+	if ( m_File.IsFileOpen())
+	{
+		m_File.Close();
+	}
+	if ( fMySQLConnected && m_pStorage )
+	{
+		m_pStorage->Disconnect();
+		m_pStorage.reset();
+	}
+	return( false );
 }
 
 void CWorld::ReLoadBases()
@@ -778,6 +831,12 @@ void CWorld::Close()
 	for ( int i = 0; i<SECTOR_QTY; i++ )
 	{
 		m_Sectors[i].Close();
+	}
+
+	if ( m_pStorage )
+	{
+		m_pStorage->Disconnect();
+		m_pStorage.reset();
 	}
 
 	m_ObjDelete.DeleteAll();	// clean up our delete list.

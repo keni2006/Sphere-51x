@@ -34,10 +34,11 @@ SRC	:= 	caccount.cpp \
 		citembase.cpp \
 		citemsp.cpp \
 		citemstone.cpp \
-		cmail.cpp \
-		cserver.cpp \
-		cworld.cpp \
-		graysvr.cpp
+                cmail.cpp \
+                cserver.cpp \
+                cworldstoragemysql.cpp \
+                cworld.cpp \
+                graysvr.cpp
 
 COMMONSRC	:=	../common/carray.cpp \
 			../common/ccrypt.cpp \
@@ -49,9 +50,9 @@ COMMONSRC	:=	../common/carray.cpp \
 			../common/cscript.cpp \
 			../common/cstring.cpp 
 
-INCLUDE	= -I/usr/ea/h -I../common
+INCLUDE	= -I/usr/ea/h -I../common -I/usr/include/mysql
 
-LIBS = -L/usr/lib
+LIBS = -L/usr/lib -L/usr/lib/mysql -lmysqlclient
 
 DEFINES = -DGRAY_SVR
 

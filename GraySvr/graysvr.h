@@ -29,6 +29,7 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include "../common/cregion.h"
 #include "../common/cgraymap.h"
 #include "CParty.h"
+#include <memory>
 #include <set>
 #include <string>
 
@@ -45,6 +46,36 @@ class CAccount;
 class CItemContainer;
 class CItemMessage;
 class CItemMap;
+
+struct CServerMySQLConfig
+{
+        bool m_fEnable;
+        CGString m_sHost;
+        int m_iPort;
+        CGString m_sDatabase;
+        CGString m_sUser;
+        CGString m_sPassword;
+        CGString m_sTablePrefix;
+        bool m_fAutoReconnect;
+        int m_iReconnectTries;
+        int m_iReconnectDelay;
+
+        CServerMySQLConfig()
+        {
+                m_fEnable = false;
+                m_sHost = "localhost";
+                m_iPort = 3306;
+                m_sDatabase.Empty();
+                m_sUser.Empty();
+                m_sPassword.Empty();
+                m_sTablePrefix.Empty();
+                m_fAutoReconnect = true;
+                m_iReconnectTries = 3;
+                m_iReconnectDelay = 5;
+        }
+};
+
+class CWorldStorageMySQL;
 
 ///////////////////////////////////////////////
 
@@ -4837,7 +4868,9 @@ public:
 	CGTypedArray<CPointBase,CPointBase&> m_MoonGates;	// The array of moongates.
 	CGPtrTypeArray<CItemStone*> m_Stones;	// links to leige stones.
 	CAccountArray m_Accounts;	// All the player accounts. name sorted
-	CMultiDefArray m_MultiDefs;
+        CMultiDefArray m_MultiDefs;
+
+        std::unique_ptr<CWorldStorageMySQL> m_pStorage;
 
 	static const TCHAR * sm_KeyTable[];
 
@@ -4854,11 +4887,8 @@ private:
 	void SaveForce(); // Save world state
 
 public:
-	CWorld();
-	~CWorld()
-	{
-		Close();
-	}
+        CWorld();
+        ~CWorld();
 	bool IsSaving() const
 	{
 		return( m_File.IsFileOpen() && m_File.IsWriteMode());
@@ -4970,8 +5000,11 @@ public:
 	bool Export( const TCHAR * pszFilename, const CChar* pSrc, WORD iModeFlags = 1, int iDist = 0xFFFF, int dx = 0, int dy = 0 );
 	bool Import( const TCHAR * pszFilename, const CChar* pSrc, WORD iModeFlags = 1, int iDist = 0xFFFF, TCHAR *pszAgs1 = NULL, TCHAR *pszAgs2 = NULL );
 	void Save( bool fForceImmediate ); // Save world state
-	bool Load();
-	void Close();
+        bool Load();
+        void Close();
+
+        CWorldStorageMySQL * Storage();
+        const CWorldStorageMySQL * Storage() const;
 
 	const TCHAR * GetName() const { return( "World" ); }
 
@@ -5610,12 +5643,23 @@ private:
 	
 
 public:
-	void LoadNames();
+        struct MySQLConfig : public CServerMySQLConfig
+        {
+                MySQLConfig() = default;
+        };
+
+        const MySQLConfig & GetMySQLConfig() const
+        {
+                return m_mySQLConfig;
+        }
+
+        void LoadNames();
 	bool IsNameTaken(const char* name, const CChar* pIgnore = NULL); //CHECK NAME FOR DUPLICATES
 	int  m_iExitCode;  // Just some error code to return to system.
 	WORD m_wExitFlag;	// identifies who caused the exit.
 
-	// Begin INI file options.
+        // Begin INI file options.
+        MySQLConfig m_mySQLConfig;
 	bool m_fUseNTService;
 	int  m_iPollServers;		// background polling of peer servers. (minutes)
 	CGString m_sRegisterServer;	// GRAY_MAIN_SERVER
