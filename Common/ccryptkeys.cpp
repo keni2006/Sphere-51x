@@ -49,7 +49,7 @@ void CCryptKeysManager::LoadDefaults()
         AddNoCryptKey();
         for ( size_t i = 0; i < COUNTOF(k_DefaultKeys); ++i )
         {
-                CCryptClientKey key = {};
+                CCryptClientKey key;
                 key.m_uiClientVersion = k_DefaultKeys[i].m_uiClientVersion;
                 key.m_MasterHi = k_DefaultKeys[i].m_MasterHi;
                 key.m_MasterLo = k_DefaultKeys[i].m_MasterLo;
@@ -65,7 +65,7 @@ void CCryptKeysManager::ResetToDefaults()
 
 void CCryptKeysManager::AddNoCryptKey()
 {
-        CCryptClientKey key = {};
+        CCryptClientKey key;
         key.m_uiClientVersion = 0;
         key.m_MasterHi = 0;
         key.m_MasterLo = 0;
@@ -174,7 +174,7 @@ bool CCryptKeysManager::LoadKeyTable(CScript & script)
                                 if ( iArgCount < 2 )
                                         continue;
 
-                                CCryptClientKey key = {};
+                                CCryptClientKey key;
                                 key.m_uiClientVersion = static_cast<DWORD>(iVersion);
                                 key.m_MasterHi = strtoul( ppArgs[0], NULL, 16 );
                                 key.m_MasterLo = strtoul( ppArgs[1], NULL, 16 );
