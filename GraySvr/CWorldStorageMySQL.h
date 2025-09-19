@@ -25,12 +25,23 @@ public:
 	bool IsConnected() const;
 	MYSQL * GetHandle() const;
 
+	bool EnsureSchema();
+	int GetSchemaVersion();
+
 	const CGString & GetTablePrefix() const
 	{
 		return m_sTablePrefix;
 	}
 
 private:
+	bool Query( const CGString & query, MYSQL_RES ** ppResult = NULL );
+	bool ExecuteQuery( const CGString & query );
+	bool EnsureSchemaVersionTable();
+	bool SetSchemaVersion( int version );
+	bool ApplyMigration( int fromVersion );
+	bool ApplyMigration_0_1();
+	CGString GetPrefixedTableName( const char * name ) const;
+
 	void LogMySQLError( const char * context );
 
 	MYSQL * m_pConnection;
@@ -41,3 +52,4 @@ private:
 };
 
 #endif // _CWORLD_STORAGE_MYSQL_H_
+

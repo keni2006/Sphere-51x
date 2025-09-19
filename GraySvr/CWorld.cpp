@@ -608,6 +608,12 @@ bool CWorld::Load() // Load world from script
 		}
 
 		fMySQLConnected = true;
+
+		if ( m_pStorage && ! m_pStorage->EnsureSchema())
+		{
+			g_Log.Event( LOGM_INIT|LOGL_FATAL, "Failed to initialize MySQL schema.\n" );
+			goto mysql_fail;
+		}
 	}
 	else if ( m_pStorage )
 	{
