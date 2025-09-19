@@ -497,12 +497,12 @@ bool CClient::xRecvData() // Receive message from client
 	if ( iDecryptLen > 0 )
 	{
 		BYTE * pDecrypt = m_bin.m_Raw + iPrev;
-                if ( m_fExpectingRelayCrypt )
-                {
-                        if ( !m_Crypt.DecryptRelayGame( pDecrypt, pDecrypt, iDecryptLen, iDecryptLen ))
-                                return false;
-                        m_fExpectingRelayCrypt = false;
-                }
+		if ( m_fExpectingRelayCrypt )
+		{
+			if ( !m_Crypt.RelayGameCryptStart( pDecrypt, pDecrypt, iDecryptLen, iDecryptLen ))
+				return false;
+			m_fExpectingRelayCrypt = false;
+		}
 		else
 		{
 			if ( !m_Crypt.Decrypt( pDecrypt, pDecrypt, iDecryptLen, iDecryptLen ))

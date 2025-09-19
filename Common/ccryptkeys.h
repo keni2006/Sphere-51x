@@ -33,7 +33,7 @@ public:
         static CCryptKeysManager & GetInstance();
 
         void ResetToDefaults();
-        void AddKey(CCryptClientKey key);
+        void AddKey(const CCryptClientKey & key);
         bool FindKeyForVersion(DWORD uiVersion, CCryptClientKey & outKey) const;
         const CCryptClientKey * GetKey(size_t index) const;
         size_t GetKeyCount() const;
