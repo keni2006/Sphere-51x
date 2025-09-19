@@ -8,168 +8,32 @@
 #include <string>
 #include <signal.h>
 #include <set>
-#include <algorithm>
-#include <cctype>
 
 #ifdef _WIN32
 #include "../common/cassoc.h"
 #endif
 
 //////////////////////////////////////////////////////////
-namespace
-{
-        static void TrimString(std::string &text)
-        {
-                size_t first = text.find_first_not_of(" \t\r\n");
-                if ( first == std::string::npos )
-                {
-                        text.clear();
-                        return;
-                }
-
-                size_t last = text.find_last_not_of(" \t\r\n");
-                text = text.substr(first, last - first + 1);
-        }
-
-        static std::string ToLowerCopy(const std::string &text)
-        {
-                std::string lower = text;
-                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char ch)
-                {
-                        return static_cast<char>( ::tolower(ch) );
-                });
-                return lower;
-        }
-}
-
 //CHECKNAME STUFF
-void CServer::LoadNames()
-{
-        m_takenNames.clear();
+void CServer::LoadNames() {
+	std::ifstream saveFile("C:\\t\\sph\\sphere\\world\\sphereworld.scp"); //do normal path later, now testing
+	if (!saveFile.is_open()) {
+		g_Log.Event(LOGL_ERROR, "Failed to open names file.\n");
+		return;
+	}
 
-        if ( m_sWorldBaseDir.IsEmpty())
-        {
-                g_Log.Event( LOGL_WARN, "World base directory not set. Unable to load character names.\n" );
-                return;
-        }
-
-        const char * const sNameFiles[] =
-        {
-                GRAY_FILE "world" GRAY_SCRIPT,
-                GRAY_FILE "chars" GRAY_SCRIPT
-        };
-
-        for ( size_t i = 0; i < COUNTOF(sNameFiles); ++i )
-        {
-                CGString sFilePath;
-                sFilePath.Format( "%s%s", (const TCHAR *) m_sWorldBaseDir, sNameFiles[i] );
-
-                std::ifstream saveFile( sFilePath );
-                if ( ! saveFile.is_open())
-                {
-                        g_Log.Event( LOGL_WARN, "Failed to open names file '%s'.\n", (const TCHAR *) sFilePath );
-                        continue;
-                }
-
-                std::string line;
-                bool fInWorldCharSection = false;
-                while ( std::getline( saveFile, line ))
-                {
-                        std::string::size_type commentPos = line.find( "//" );
-                        if ( commentPos != std::string::npos )
-                                line.erase( commentPos );
-
-                        TrimString( line );
-                        if ( line.empty())
-                                continue;
-
-                        if ( line[0] == ';' )
-                                continue;
-
-                        if ( line[0] == '[' )
-                        {
-                                size_t endPos = line.find( ']' );
-                                if ( endPos != std::string::npos )
-                                {
-                                        std::string section = line.substr( 1, endPos - 1 );
-                                        TrimString( section );
-                                        std::string lowerSection = ToLowerCopy( section );
-                                        fInWorldCharSection = ( lowerSection.compare( 0, 9, "worldchar" ) == 0 );
-                                }
-                                else
-                                {
-                                        fInWorldCharSection = false;
-                                }
-                                continue;
-                        }
-
-                        if ( ! fInWorldCharSection )
-                                continue;
-
-                        size_t equalPos = line.find( '=' );
-                        if ( equalPos == std::string::npos )
-                                continue;
-
-                        std::string key = line.substr( 0, equalPos );
-                        TrimString( key );
-                        std::string lowerKey = ToLowerCopy( key );
-                        if ( lowerKey != "name" )
-                                continue;
-
-                        std::string value = line.substr( equalPos + 1 );
-                        TrimString( value );
-                        if ( value.size() >= 2 &&
-                                (( value.front() == '"' && value.back() == '"' ) || ( value.front() == '\'' && value.back() == '\'' )))
-                        {
-                                value = value.substr( 1, value.size() - 2 );
-                        }
-                        TrimString( value );
-                        if ( value.empty())
-                                continue;
-
-                        m_takenNames.insert( ToLowerCopy( value ));
-                }
-        }
-
-        m_fNamesLoaded = true;
+	std::string line;
+	while (std::getline(saveFile, line)) {
+		if (line.rfind("NAME=", 0) == 0) {
+			std::string characterName = line.substr(5);
+			m_takenNames.insert(characterName); 
+		}
+	}
+	saveFile.close(); 
 }
 
-bool CServer::IsNameTaken( const char * name, const CChar * pIgnore )
-{
-        if ( name == NULL || name[0] == '\0' )
-                return false;
-
-        if ( ! m_fNamesLoaded )
-        {
-                LoadNames();
-        }
-
-        UINT uiCount = g_World.GetUIDCount();
-        for ( UINT i = 1; i < uiCount; ++i )
-        {
-                CObjBase * pObj = g_World.FindUID( i );
-                if ( pObj == NULL )
-                        continue;
-                if ( ! pObj->IsChar())
-                        continue;
-
-                CChar * pChar = STATIC_CAST <CChar *> ( pObj );
-                if ( pChar == pIgnore )
-                        continue;
-
-                const char * pszCharName = pChar->GetName();
-                if ( pszCharName == NULL || pszCharName[0] == '\0' )
-                        continue;
-                if ( ! strcmpi( pszCharName, name ))
-                        return true;
-        }
-
-        std::string lowerName( name );
-        std::transform( lowerName.begin(), lowerName.end(), lowerName.begin(), []( unsigned char ch )
-        {
-                return static_cast<char>( ::tolower( ch ));
-        });
-        return( m_takenNames.find( lowerName ) != m_takenNames.end());
+bool CServer::IsNameTaken(const char* name) {
+	return m_takenNames.find(name) != m_takenNames.end(); 
 }
 
 
@@ -1081,8 +945,6 @@ CServer::CServer() : CServRef( GRAY_TITLE, SOCKET_LOCAL_ADDRESS )
 	m_iMapCacheTime = 2 * 60 * TICK_PER_SEC;
 	m_iSectorSleepMask = 0x1ff;
 
-	m_fNamesLoaded = false;
-
 	m_wDebugFlags = 0; //DEBUGF_NPC_EMOTE
 	m_fSecure = true;
 	m_iFreezeRestartTime = 10*TICK_PER_SEC;
@@ -1104,7 +966,9 @@ CServer::CServer() : CServRef( GRAY_TITLE, SOCKET_LOCAL_ADDRESS )
 	m_iDecay_Item = 30*60*TICK_PER_SEC;
 	m_iDecay_CorpsePlayer = 45*60*TICK_PER_SEC;
 	m_iDecay_CorpseNPC = 15*60*TICK_PER_SEC;
-        // Accounts
+	//Load names check
+	LoadNames();
+	// Accounts
 	m_nClientsMax = FD_SETSIZE-1;
 	m_fRequireEmail = false;
 	m_nGuestsMax = 0;

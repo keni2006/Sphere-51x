@@ -3231,7 +3231,7 @@ void CClient::Setup_CreateDialog() // All the character creation stuff
 	pChar->InitPlayer(&m_bin, this);
 
 	// CHECKNAME DUPLICAT - now here
-	if (g_Serv.IsNameTaken(pChar->GetName(), pChar))
+	if (g_Serv.IsNameTaken(pChar->GetName()))
 	{
 		g_Log.Event(LOGL_WARN, "%x: Name '%s' is already taken for account '%s'\n",
 			GetSocket(), pChar->GetName(), m_pAccount->GetName());
