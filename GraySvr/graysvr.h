@@ -5611,7 +5611,7 @@ private:
 
 public:
 	void LoadNames();
-	bool IsNameTaken(const char* name, const CChar* pIgnore = NULL); //CHECK NAME FOR DUPLICATES
+	bool IsNameTaken(const char* name); //CHECK NAME FOR DUPLICATES
 	int  m_iExitCode;  // Just some error code to return to system.
 	WORD m_wExitFlag;	// identifies who caused the exit.
 
@@ -5714,8 +5714,7 @@ public:
 	int  m_iPickUpSpeed;
 
 private:
-	std::set<std::string> m_takenNames; // cached character names from save files
-	bool m_fNamesLoaded;
+	std::set<std::string> m_takenNames; //check dup name
 	// Web status pages.
 	CGObArray <CWebPageDef*> m_WebPages;
 
