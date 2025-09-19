@@ -1166,6 +1166,17 @@ CServer::CServer() : CServRef( GRAY_TITLE, SOCKET_LOCAL_ADDRESS )
 		m_iPlayerStatMod[i] = 1;
 	}
 	m_iPickUpSpeed = 200;//200ms minimum from one pick to another one
+
+	m_mySQLConfig.m_fEnable = false;
+	m_mySQLConfig.m_sHost = "localhost";
+	m_mySQLConfig.m_iPort = 3306;
+	m_mySQLConfig.m_sDatabase.Empty();
+	m_mySQLConfig.m_sUser.Empty();
+	m_mySQLConfig.m_sPassword.Empty();
+	m_mySQLConfig.m_sTablePrefix.Empty();
+	m_mySQLConfig.m_fAutoReconnect = true;
+	m_mySQLConfig.m_iReconnectTries = 3;
+	m_mySQLConfig.m_iReconnectDelay = 5;
 }
 
 CServer::~CServer()
@@ -1775,7 +1786,14 @@ enum SC_TYPE
 	SC_MONSTERFIGHT,
 	SC_MULFILES,
 	SC_MURDERDECAYTIME,		// m_iMurderDecayTime;
-	SC_MURDERMINCOUNT,		// m_iMurderMinCount;		// amount of murders before we get title.
+	SC_MURDERMINCOUNT,              // m_iMurderMinCount;           // amount of murders before we get title.
+        SC_MYSQL,
+        SC_MYSQLDB,
+        SC_MYSQLHOST,
+        SC_MYSQLPASS,
+        SC_MYSQLPORT,
+        SC_MYSQLPREFIX,
+        SC_MYSQLUSER,
 	SC_NOWEATHER,				// m_fNoWeather
 	SC_NPCTRAINMAX,			// m_iTrainSkillMax
 	SC_NPCTRAINPERCENT,			// m_iTrainSkillPercent
@@ -1867,6 +1885,13 @@ const TCHAR * CServer::sm_KeyTable[SC_QTY] =
 	"MULFILES",
 	"MURDERDECAYTIME",		// m_iMurderDecayTime;
 	"MURDERMINCOUNT",		// m_iMurderMinCount;		// amount of murders before we get title.
+        "MYSQL",
+        "MYSQLDB",
+        "MYSQLHOST",
+        "MYSQLPASS",
+        "MYSQLPORT",
+        "MYSQLPREFIX",
+        "MYSQLUSER",
 	"NOWEATHER",				// m_fNoWeather
 	"NPCTRAINMAX",			// m_iTrainSkillMax
 	"NPCTRAINPERCENT",			// m_iTrainSkillPercent
@@ -2063,6 +2088,27 @@ do_mulfiles:
 		break;
 	case SC_MURDERDECAYTIME:
 		m_iMurderDecayTime = s.GetArgVal() * TICK_PER_SEC;
+		break;
+	case SC_MYSQL:
+		m_mySQLConfig.m_fEnable = s.GetArgVal() != 0;
+		break;
+	case SC_MYSQLDB:
+		m_mySQLConfig.m_sDatabase = s.GetArgStr();
+		break;
+	case SC_MYSQLHOST:
+		m_mySQLConfig.m_sHost = s.GetArgStr();
+		break;
+	case SC_MYSQLPASS:
+		m_mySQLConfig.m_sPassword = s.GetArgStr();
+		break;
+	case SC_MYSQLPORT:
+		m_mySQLConfig.m_iPort = s.GetArgVal();
+		break;
+	case SC_MYSQLPREFIX:
+		m_mySQLConfig.m_sTablePrefix = s.GetArgStr();
+		break;
+	case SC_MYSQLUSER:
+		m_mySQLConfig.m_sUser = s.GetArgStr();
 		break;
 	case SC_NPCTRAINPERCENT:
 		m_iTrainSkillPercent = s.GetArgVal();
@@ -2406,6 +2452,27 @@ do_mulfiles:
 		break;
 	case SC_MURDERDECAYTIME:
 		sVal.FormatVal( m_iMurderDecayTime / (TICK_PER_SEC ));
+		break;
+	case SC_MYSQL:
+		sVal.FormatVal( m_mySQLConfig.m_fEnable );
+		break;
+	case SC_MYSQLDB:
+		sVal = m_mySQLConfig.m_sDatabase;
+		break;
+	case SC_MYSQLHOST:
+		sVal = m_mySQLConfig.m_sHost;
+		break;
+	case SC_MYSQLPASS:
+		sVal = m_mySQLConfig.m_sPassword;
+		break;
+	case SC_MYSQLPORT:
+		sVal.FormatVal( m_mySQLConfig.m_iPort );
+		break;
+	case SC_MYSQLPREFIX:
+		sVal = m_mySQLConfig.m_sTablePrefix;
+		break;
+	case SC_MYSQLUSER:
+		sVal = m_mySQLConfig.m_sUser;
 		break;
 	case SC_MAXCHARSPERACCOUNT:
 		sVal.FormatVal( m_iMaxCharsPerAccount );

@@ -37,6 +37,11 @@ SRC := $(wildcard *.cpp)
 
 # Exe file
 # INCLUDE = -Ih -I/usr/ea/h
+INCLUDE += -I/usr/include/mysql
+
+# Default libraries
+LIBS += -L/usr/lib/mysql
+LIBS += -lmysqlclient
 
 #LIBS += -lc_p
 #LIBS += -lefence
