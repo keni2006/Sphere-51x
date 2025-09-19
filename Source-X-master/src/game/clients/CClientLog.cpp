@@ -177,7 +177,7 @@ bool CClient::addLoginErr(byte code)
 			break;
 	}
 
-	if ( GetNetState()->getCryptVersion() || GetNetState()->getReportedVersion() )	// only reply the packet to valid clients
+	if ( GetNetState()->m_clientVersionNumber || GetNetState()->m_reportedVersionNumber )	// only reply the packet to valid clients
 		new PacketLoginError(this, static_cast<PacketLoginError::Reason>(code));
 	GetNetState()->markReadClosed();
 	return false;
@@ -873,8 +873,6 @@ bool CClient::xProcessClientSetup( CEvent * pEvent, uint uiLen )
 	GetNetState()->detectAsyncMode();
 	SetConnectType( m_Crypt.GetConnectType() );
 
-	GetNetState()->setCryptVersionNumber(m_Crypt.GetClientVerNumber());
-
 	if ( !xCanEncLogin() )
 	{
 		addLoginErr((uchar)((m_Crypt.GetEncryptionType() == ENC_NONE? PacketLoginError::EncNoCrypt : PacketLoginError::EncCrypt) ));
@@ -966,12 +964,12 @@ bool CClient::xProcessClientSetup( CEvent * pEvent, uint uiLen )
 
 						if ( tmVerReported != 0 )
 						{
-							GetNetState()->setReportedVersionNumber(tmVerReported);
+							GetNetState()->m_reportedVersionNumber = tmVerReported;
 						}
 						else if ( tmVer != 0 )
 						{
 							m_Crypt.SetClientVerFromNumber(tmVer, false);
-							GetNetState()->setCryptVersionNumber(tmVer);
+							GetNetState()->m_clientVersionNumber = tmVer;
 						}
 
 						// client version change may toggle async mode, it's important to flush pending data to the client before this happens

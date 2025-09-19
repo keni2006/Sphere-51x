@@ -606,7 +606,7 @@ bool CNetworkInput::processUnknownClientData(CNetState* state, Packet* buffer)
                 const dword versionRevision = buffer->readInt32();
                 const dword versionPatch = buffer->readInt32();
                 const CUOClientVersion cver(versionMajor, versionMinor, versionRevision, versionPatch);
-                state->setReportedVersion(cver);
+                state->m_reportedVersionNumber = cver.GetLegacyVersionNumber();
 
                 DEBUG_MSG(("%x:New Login Handshake Detected. Client Version: %u.%u.%u.%u\n",
                     state->id(), versionMajor, versionMinor, versionRevision, versionPatch));
@@ -631,7 +631,7 @@ bool CNetworkInput::processUnknownClientData(CNetState* state, Packet* buffer)
             seed = buffer->readInt32();
         }
 
-        DEBUGNETWORK(("%x:Client connected with a seed of 0x%x (new handshake=%d, version=%u).\n", state->id(), seed, state->m_newseed ? 1 : 0, state->getReportedVersion()));
+        DEBUGNETWORK(("%x:Client connected with a seed of 0x%x (new handshake=%d, version=%u).\n", state->id(), seed, state->m_newseed ? 1 : 0, state->m_reportedVersionNumber));
 
         if (seed == 0)
         {
