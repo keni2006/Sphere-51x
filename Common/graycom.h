@@ -37,8 +37,9 @@
 #define STRICT			// strict conversion of handles and pointers.
 #endif	// STRICT
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
-#include <winsock.h>
 #include <dos.h>
 #include <limits.h>
 #include <conio.h>
