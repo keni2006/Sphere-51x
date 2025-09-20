@@ -288,9 +288,6 @@ private:
         bool ClearTable( const CGString & table );
         CGString GetAccountNameById( unsigned int accountId );
 
-        WORD GetMySQLErrorLogMask( LOGL_TYPE level ) const;
-        void LogMySQLError( const char * context );
-
         MYSQL * m_pConnection;
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
