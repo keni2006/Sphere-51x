@@ -5762,6 +5762,23 @@ public:
                 return m_mySQLConfig;
         }
 
+        UINT StatGet( SERV_STAT_TYPE i ) const
+        {
+                return CServRef::StatGet( i );
+        }
+        void StatInc( SERV_STAT_TYPE i )
+        {
+                CServRef::StatInc( i );
+        }
+        void StatDec( SERV_STAT_TYPE i )
+        {
+                CServRef::StatDec( i );
+        }
+        void StatChange( SERV_STAT_TYPE i, int iChange )
+        {
+                CServRef::StatChange( i, iChange );
+        }
+
         void LoadNames();
 	bool IsNameTaken(const char* name, const CChar* pIgnore = NULL); //CHECK NAME FOR DUPLICATES
 	int  m_iExitCode;  // Just some error code to return to system.
