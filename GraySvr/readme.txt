@@ -1,71 +1,87 @@
-Welcome to TUS
+SphereServer 0.51x Quick Start
+==============================
 
-copyright Menasoft
-http://www.menasoft.com/tus/
+This document summarises the options that need to be reviewed before the
+GraySvr executable can be launched. It focuses on the modern MySQL backed
+persistence layer that replaces the legacy `*.scp` save files.
 
+1. Configure `spheredef.ini`
+----------------------------
 
- This is a brief instruction on what to do to get started.
+Open `GraySvr/spheredef.ini` and update the following keys in the `[SPHERE]`
+section:
 
- The server will not run locally as it is, you will need to set a few options.  It is set to IP# 127.0.0.1, which is a local address. And set to port 2593, which is the default port used by TUSsvr.
-Edit your TUS.INI using a text editor .. notepad is the safest.
+- `SERVIP`, `SERVPORT`, `SERVNAME`, `TIMEZONE`, `ADMINEMAIL` – the standard
+  networking and reporting settings.
+- `MULFILES`, `SCPFILES`, `SPEECHFILES`, `WORLDSAVE`, `LOG` – absolute paths to
+  the client data, script packs and optional backup folders.
+- `MYSQL` and its companion parameters – see the next section for details.
 
-Here are the entries you will need to change or add:
+> **Tip:** `WORLDSAVE` is still used for compatibility reasons (account script
+> imports, backups). World state persistence no longer depends on
+> `sphereworld.scp` or `sphereaccu.scp` when MySQL is enabled.
 
-* ADMINEMAIL=	Put in your email addy for reporting on your server, not required 
-* CLIENTVERSION=	change support to different client versions. 1.25.36 ; 1.26.01 ( 1.26.01 is the most current client version)
-* FILES=		Alternate: MULFILES=	this should point to your UO folder, or if you move the necessary files (which is recommended) It should point to that folder
-* SCPFILES=		Place the path to your TUS scripts, usually the folder you unzipped it into. 
-* SERVNAME=		Place the server name here, for reporting to the central server, not required. 
-* SERVIP=		Place your server IP here, for reporting to central server, not required  
-* SERVPORT=		Place your server port here, for reporting to central server, not required 
-* SPEECHFILES=	Location of the new speechfiles, assuming you downloaded them. Most place thim in the same folder as the other scripts.
-* TIMEZONE=		Place your server zone here, for reporting to central server. default is 5, not required 
-* URL=		Place your web page address here, for reporting to central server, not required  
-* WORLDSAVE=	Points to the location of TUSworld.scp, TUSaccu.scp, and TUSacct.scp
+2. MySQL backend settings
+-------------------------
 
-These web settings are only needed if you have a web site, and usually the server must be on the same machine
-* WEBPAGEUPDATE=	How often to update the web page (in seconds) 
-* WEBPAGEFILE=	Path and name of the web page
-* WEBPAGEFILE2=	Uses TUSSTATUSBASE2.HTM to make a second update page, different from the first  
-* WEBCLIENTLISTFORM=<tr><td>%NAME%</td><td>%REGION.NAME%</td></tr>	Frame Layout and variables for the server list, don't change unless you know HTML
-* WEBSERVERLISTFORM=<tr><td>%SERVNAME%</td><td>%STATUS%</td></tr>  
+The server can now persist accounts, world objects, GM pages, timers and server
+listings to MySQL. Minimum requirements:
 
-There are a few files to create and/or edit using a text editor. Here they are:
+- MySQL Server **5.7** (or MariaDB **10.3**) with InnoDB and `utf8mb4`.
+- MySQL Connector/C (libmysqlclient) **5.7**+ or an equivalent MariaDB client
+  library available at build time.
 
-* TUSacct.scp	Place this in the folder where you set in WORLDSAVE=  You may wish to download the sample one from Menasoft to get you started.
-* TUSaccu.scp	Place this in the folder where you set in WORLDSAVE=
-* TUSworld.scp	Place this in the folder where you set in WORLDSAVE=   You can use the one from the Menasoft site, or create an empty one. If you create an empty one, it must contain one line:  [EOF]
-* TUSitem2.scp	Create an empty one and place in the folder with TUSitem.scp
-* TUSchar2.scp	Create an empty one and place in the folder with TUSchar.scp
+Configuration keys (`[SPHERE]` section of `spheredef.ini`):
 
- In order for your UO client to find the server, you need to edit your login.cfg  It is located in your UO folder. Usually in one of two places  C:\UO  or C:\PROGRAM FILES\ULTIMA ONLINE  (DOS name C:\PROGRA~1\ULTIMA~1 )
+| Key          | Description |
+| ------------ | ----------- |
+| `MYSQL`      | Enables the database backend when set to `1`. A value of `0` keeps the classic flat-file behaviour. |
+| `MYSQLHOST`  | Host name or IP address. Defaults to `localhost`. |
+| `MYSQLPORT`  | Port number, default `3306`. |
+| `MYSQLUSER`  | Database user that has privileges to create tables and run DDL/DML. |
+| `MYSQLPASS`  | Password for the user above. |
+| `MYSQLDB`    | Database/schema name where tables are created. |
+| `MYSQLPREFIX`| Optional string prepended to every table (e.g. `sphere_`). Leave blank to skip the prefix. |
 
- Open the file using any text editor (notepad is fine), you should see something like the following:
+During compilation make sure the MySQL headers and import libraries are
+available. The Visual Studio project honours the `MYSQL_INCLUDE_DIR` and
+`MYSQL_LIB_DIR` environment variables but you may also edit the project settings
+manually.
 
-;Loginservers for Ultima Online
-;Do not edit this file or patching will fail!  Always save a backup.
-LoginServer=login.owo.com,7775
-LoginServer=login.owo.com,7775
-LoginServer=login.owo.com,7776
-LoginServer=login.owo.com,7776
+3. First boot and migration workflow
+------------------------------------
 
- You will need to place semi-colons (;) in front of the OWO lines and add this one:
+1. Start the database server and confirm that the configured user can create
+   tables inside the chosen schema.
+2. Launch GraySvr. On the first run with `MYSQL=1` the server runs the
+   migrations in `CWorldStorageMySQL.cpp`. The resulting schema is documented in
+   `docs/database-schema.md` and the example `docs/mysql-schema.sql` script.
+3. Account data is imported automatically the first time the server connects to
+   MySQL **while** the legacy `sphereaccu.scp` / `sphereacct.scp` files are still
+   available in `WORLDSAVE`. Existing rows are preserved.
+4. Trigger a save (`SAVE 0`) or wait for the periodic saver. This uploads the
+   complete world state to the database, replacing the `sphereworld.scp` flow.
+   Interrupted saves resume on the next run.
+5. Verify the migration status with:
 
-LoginServer=127.0.0.1,2593
+   ```sql
+   SELECT id, version FROM `<prefix>schema_version` ORDER BY id;
+   ```
 
- This makes it possible for the client to find the server. The TUS Hand of God Tool (HoG) found at the Menasoft site can do this for you, so you don't have to edit the file each time you want to change servers.
+   - `id = 1` reflects the schema revision (should be **3**).
+   - `id = 2` flips to **1** after the legacy account import finishes.
+   - `id = 3` stores the world save counter.
+   - `id = 4` indicates whether the last world save completed successfully.
 
-Save and exit.
+4. Additional notes
+-------------------
 
- You are now ready to try it. Dbl-clk on the TUS Server icon that is on your desktop. When you see the message in the server console that says..
+- The console will log failures if the server cannot reach MySQL; in that case
+  it falls back to the flat-file loader and leaves the database untouched.
+- Use `/ACCOUNT UPDATE` after the first import to push recent account changes to
+  MySQL.
+- GM pages, server listings and timers are also mirrored in MySQL. The
+  `Ensure*Columns` routines in `CWorldStorageMySQL.cpp` will extend existing
+  tables automatically when newer builds add fields.
 
-All Items Accounted for, Startup Complete
-
-... you are ready to run the client
-
- I recommend you run the client by using CLIENT.EXE from your UO folder, not UO.EXE which runs the patch program each time. Only run UOPATCH.EXE to get your client up to the current version that TUS supports. If they change the client encryption and you patch, you will not be ble to connect to you own shard.
-
-You can login in using a predefined account from the sample account file (TUSaccu.scp).
- Login: Administrator  and Password: Admin
-
- From here on out it is Play and Learn. Be sure to read the documentation on how do do all the neat stuff available and how to add-to/change the account file. You will want to change all the account names because if you setup a server with outside access you don't want to still have the default accounts active for anyone to login with.
+Good luck and welcome back to 0.51x shard development!
