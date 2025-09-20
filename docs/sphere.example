@@ -1,0 +1,25 @@
+Example for connect ur sphere to mysql
+
+
+// Enable the MySQL/MariaDB backend. 
+MYSQL=1
+
+// Connection settings for the MariaDB server.
+MYSQLHOST=127.0.0.1
+MYSQLPORT=3306
+MYSQLUSER=sphere_user
+MYSQLPASS=ChangeMeStrongPassword
+MYSQLDB=sphere_world
+
+// Optional prefix that will be prepended to every table created by SphereServer.
+// Leave blank if you do not need it.
+MYSQLPREFIX=sphere_
+
+// Leave profiling enabled for troubleshooting; disable in production if desired.
+PROFILE=1
+VERBOSE=0
+
+// Keep the default save timer.
+SAVEPERIOD=15
+
+// End of example configuration.
