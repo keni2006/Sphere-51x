@@ -30,6 +30,7 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include "../common/cgraymap.h"
 #include "CParty.h"
 #include "CWorldStorageMySQL.h"
+#include "CVarDefMap.h"
 #include <memory>
 #include <set>
 #include <string>
@@ -452,6 +453,9 @@ class CObjBase : public CObjBaseTemplate, public CScriptObj
 private:
 	time_t	m_timeout;		// when does this rot away ? or other action. 0 = never, else system time
 	COLOR_TYPE m_color;		// Hue or skin color. (CItems must be < 0x4ff or so)
+	CVarDefMap m_TagDefs;		// Dynamic TAG values assigned to the object
+	CVarDefMap m_BaseDefs;	// Script VAR/KEY values assigned to the object
+	CObjUID m_uidOwner;		// Script visible owner reference
 
 public:
 	static int sm_iCount;
@@ -465,6 +469,9 @@ protected:
 		CObjBaseTemplate::DupeCopy( pObj );
 		m_color  = pObj->GetColor();
 		// m_timeout = pObj->m_timeout;
+		m_TagDefs.Copy( pObj->GetTagDefs());
+		m_BaseDefs.Copy( pObj->GetBaseDefs());
+		m_uidOwner = pObj->GetOwnerObj();
 	}
 
 public:
@@ -489,6 +496,50 @@ public:
 	{
 		return( CObjBaseTemplate::GetName());
 	}
+
+	// Dynamic tag/key helpers
+	size_t GetTagCount() const
+	{
+		return m_TagDefs.GetCount();
+	}
+	size_t GetKeyCount() const
+	{
+		return m_BaseDefs.GetCount();
+	}
+	const CVarDefMap * GetTagDefs() const
+	{
+		return &m_TagDefs;
+	}
+	CVarDefMap * GetTagDefs()
+	{
+		return &m_TagDefs;
+	}
+	const CVarDefMap * GetBaseDefs() const
+	{
+		return &m_BaseDefs;
+	}
+	CVarDefMap * GetBaseDefs()
+	{
+		return &m_BaseDefs;
+	}
+	long GetTagVal(LPCTSTR pszKey) const;
+	LPCTSTR GetTagStr(LPCTSTR pszKey, bool fZero = false) const;
+	void SetTagNum(LPCTSTR pszKey, long lVal, bool fZero = false);
+	void SetTagStr(LPCTSTR pszKey, LPCTSTR pszVal, bool fQuoted = false, bool fZero = false);
+	void DeleteTag(LPCTSTR pszKey);
+
+	long GetKeyNum(LPCTSTR pszKey) const;
+	LPCTSTR GetKeyStr(LPCTSTR pszKey, bool fZero = true) const;
+	void SetKeyNum(LPCTSTR pszKey, long lVal, bool fZero = false);
+	void SetKeyStr(LPCTSTR pszKey, LPCTSTR pszVal, bool fQuoted = false, bool fZero = false);
+	void DeleteKey(LPCTSTR pszKey);
+
+	CObjUID GetOwnerObj() const
+	{
+		return m_uidOwner;
+	}
+	void SetOwnerObj(CObjUID uid);
+	void ClearOwnerObj();
 
 public:
 	// Color

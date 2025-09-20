@@ -271,6 +271,7 @@ CObjBase::CObjBase( bool fItem )
 	sm_iCount ++;
 	m_color=COLOR_DEFAULT;
 	m_timeout=0;
+	m_uidOwner.ClearUID();
 
 	if ( g_Serv.IsLoading())
 	{
@@ -571,8 +572,83 @@ const TCHAR * CObjBase::sm_KeyTable[] =
 
 bool CObjBase::r_WriteVal( const TCHAR *pKey, CGString &sVal, CTextConsole * pSrc )
 {
-	switch ( FindTableSorted( pKey, sm_KeyTable, COUNTOF( sm_KeyTable )))
+	if ( ! strnicmp( pKey, "TAG", 3 ))
 	{
+		if ( ! strcmpi( pKey, "TAGCOUNT" ))
+		{
+			sVal.FormatVal( GetTagCount());
+			return( true );
+		}
+		if ( ! strcmpi( pKey, "TAGLIST" ))
+		{
+			sVal.Empty();
+			for ( size_t i = 0; i < GetTagCount(); ++i )
+			{
+				const CVarDefCont * pVar = m_TagDefs.GetAt(i);
+				if ( pVar == NULL )
+					continue;
+				if ( ! sVal.IsEmpty())
+					sVal += ",";
+				sVal += pVar->GetKey();
+			}
+			return( true );
+		}
+		const TCHAR * pszTag = pKey + 3;
+		bool fZero = false;
+		if ( *pszTag == '0' )
+		{
+			fZero = true;
+			++pszTag;
+		}
+		if ( *pszTag == '.' )
+		{
+			++pszTag;
+			sVal = GetTagStr( pszTag, fZero );
+			return( true );
+		}
+	}
+	if ( ! strnicmp( pKey, "VAR", 3 ))
+	{
+		if ( ! strcmpi( pKey, "VARCOUNT" ))
+		{
+			sVal.FormatVal( GetKeyCount());
+			return( true );
+		}
+		if ( ! strcmpi( pKey, "VARLIST" ))
+		{
+			sVal.Empty();
+			for ( size_t i = 0; i < GetKeyCount(); ++i )
+			{
+				const CVarDefCont * pVar = m_BaseDefs.GetAt(i);
+				if ( pVar == NULL )
+					continue;
+				if ( ! sVal.IsEmpty())
+					sVal += ",";
+				sVal += pVar->GetKey();
+			}
+			return( true );
+		}
+		const TCHAR * pszVar = pKey + 3;
+		bool fZero = false;
+		if ( *pszVar == '0' )
+		{
+			fZero = true;
+			++pszVar;
+		}
+		if ( *pszVar == '.' )
+		{
+			++pszVar;
+			sVal = GetKeyStr( pszVar, fZero );
+			return( true );
+		}
+	}
+	if ( ! strcmpi( pKey, "OWNER" ))
+	{
+		sVal.FormatHex( GetOwnerObj());
+		return( true );
+	}
+	switch ( FindTableSorted( pKey, sm_KeyTable, COUNTOF( sm_KeyTable )))
+{
 	case 0:	// "COLOR"
 		sVal.FormatHex( GetColor()); 
 		break;
@@ -618,6 +694,47 @@ scp_uid:
 bool CObjBase::r_LoadVal( CScript & s )
 {
 	// load the basic stuff.
+
+	const TCHAR * pszKey = s.GetKey();
+	if ( ! strnicmp( pszKey, "TAG", 3 ))
+	{
+		bool fZero = false;
+		pszKey += 3;
+		if ( *pszKey == '0' )
+		{
+			fZero = true;
+			++pszKey;
+		}
+		if ( *pszKey == '.' )
+		{
+			++pszKey;
+			bool fQuoted = false;
+			SetTagStr( pszKey, s.GetArgStr( &fQuoted ), fQuoted, fZero );
+			return( true );
+		}
+	}
+	if ( ! strnicmp( pszKey, "VAR", 3 ))
+	{
+		bool fZero = false;
+		pszKey += 3;
+		if ( *pszKey == '0' )
+		{
+			fZero = true;
+			++pszKey;
+		}
+		if ( *pszKey == '.' )
+		{
+			++pszKey;
+			bool fQuoted = false;
+			SetKeyStr( pszKey, s.GetArgStr( &fQuoted ), fQuoted, fZero );
+			return( true );
+		}
+	}
+	if ( ! strcmpi( s.GetKey(), "OWNER" ))
+	{
+		SetOwnerObj( CObjUID( s.GetArgHex()));
+		return( true );
+	}
 
 	switch ( FindTableSorted( s.GetKey(), sm_KeyTable, COUNTOF( sm_KeyTable )))
 	{
@@ -688,6 +805,12 @@ void CObjBase::r_Write( CScript & s )
 		s.WriteKeyHex( "COLOR", GetColor());
 	if ( m_timeout )
 		s.WriteKeyVal( "TIMER", GetTimerAdjusted());
+	if ( GetTagCount())
+		m_TagDefs.r_WritePrefix( s, "TAG" );
+	if ( GetKeyCount())
+		m_BaseDefs.r_WritePrefix( s, "VAR" );
+	if ( GetOwnerObj().IsValidUID())
+		s.WriteKeyHex( "OWNER", GetOwnerObj());
 }
 
 enum OV_TYPE
@@ -771,6 +894,31 @@ bool CObjBase::r_Verb( CScript & s, CTextConsole * pSrc ) // Execute command fro
 	ASSERT(pSrc);
 	CChar * pCharSrc = pSrc->GetChar();
 	CClient * pClientSrc = (pCharSrc && pCharSrc->IsClient()) ? (pCharSrc->GetClient()) : NULL ;
+
+	if ( ! strcmpi( s.GetKey(), "CLEARTAGS" ))
+	{
+		LPCTSTR pszArg = s.GetArgStr();
+		SKIP_SEPERATORS( pszArg );
+		m_TagDefs.ClearKeys( pszArg );
+		return( true );
+	}
+	if ( ! strcmpi( s.GetKey(), "CLEARVARS" ))
+	{
+		LPCTSTR pszArg = s.GetArgStr();
+		SKIP_SEPERATORS( pszArg );
+		m_BaseDefs.ClearKeys( pszArg );
+		return( true );
+	}
+	if ( ! strcmpi( s.GetKey(), "TAGLIST" ))
+	{
+		m_TagDefs.DumpKeys( pSrc, "TAG." );
+		return( true );
+	}
+	if ( ! strcmpi( s.GetKey(), "VARLIST" ))
+	{
+		m_BaseDefs.DumpKeys( pSrc, "VAR." );
+		return( true );
+	}
 
 	switch ( FindTableSorted( s.GetKey(), table, COUNTOF(table)))
 	{
@@ -1175,6 +1323,9 @@ void CObjBase::DeletePrepare()
 	// Prepare to delete.
 	RemoveFromView();
 	RemoveSelf();	// Must remove early or else virtuals will fail.
+	m_TagDefs.ClearKeys();
+	m_BaseDefs.ClearKeys();
+	m_uidOwner.ClearUID();
 	ASSERT( GetParent() == NULL );
 	ASSERT( IsDisconnected());	// It is no place in the world.
 }
@@ -1186,3 +1337,64 @@ void CObjBase::Delete()
 	g_World.m_ObjDelete.InsertAfter(this);
 }
 
+
+
+long CObjBase::GetTagVal( LPCTSTR pszKey ) const
+{
+        return m_TagDefs.GetKeyNum( pszKey );
+}
+
+LPCTSTR CObjBase::GetTagStr( LPCTSTR pszKey, bool fZero ) const
+{
+        return m_TagDefs.GetKeyStr( pszKey, fZero );
+}
+
+void CObjBase::SetTagNum( LPCTSTR pszKey, long lVal, bool fZero )
+{
+        m_TagDefs.SetNum( pszKey, lVal, fZero );
+}
+
+void CObjBase::SetTagStr( LPCTSTR pszKey, LPCTSTR pszVal, bool fQuoted, bool fZero )
+{
+        m_TagDefs.SetStr( pszKey, fQuoted, pszVal, fZero );
+}
+
+void CObjBase::DeleteTag( LPCTSTR pszKey )
+{
+        m_TagDefs.DeleteKey( pszKey );
+}
+
+long CObjBase::GetKeyNum( LPCTSTR pszKey ) const
+{
+        return m_BaseDefs.GetKeyNum( pszKey );
+}
+
+LPCTSTR CObjBase::GetKeyStr( LPCTSTR pszKey, bool fZero ) const
+{
+        return m_BaseDefs.GetKeyStr( pszKey, fZero );
+}
+
+void CObjBase::SetKeyNum( LPCTSTR pszKey, long lVal, bool fZero )
+{
+        m_BaseDefs.SetNum( pszKey, lVal, fZero );
+}
+
+void CObjBase::SetKeyStr( LPCTSTR pszKey, LPCTSTR pszVal, bool fQuoted, bool fZero )
+{
+        m_BaseDefs.SetStr( pszKey, fQuoted, pszVal, fZero );
+}
+
+void CObjBase::DeleteKey( LPCTSTR pszKey )
+{
+        m_BaseDefs.DeleteKey( pszKey );
+}
+
+void CObjBase::SetOwnerObj( CObjUID uid )
+{
+        m_uidOwner = uid;
+}
+
+void CObjBase::ClearOwnerObj()
+{
+        m_uidOwner.ClearUID();
+}
