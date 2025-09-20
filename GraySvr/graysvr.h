@@ -34,6 +34,7 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #define GRAY_TITLE			"Sphere"	// "Sphere"
 #define GRAY_VERSION		"0.51a"
@@ -4788,23 +4789,24 @@ public:
 	void SetWeatherChance( bool fRain, int iChance );
 
 	// Light
-	bool IsLightOverriden() const
-	{
-		return(( m_locallight & LIGHT_OVERRIDE ) ? true : false );
-	}
-	BYTE GetLight() const
-	{
-		return( m_locallight &~ LIGHT_OVERRIDE );
-	}
-	void LightFlash()
-	{
-		SetLightNow( true );
-	}
-	void SetLight( int light );
+        bool IsLightOverriden() const
+        {
+                return(( m_locallight & LIGHT_OVERRIDE ) ? true : false );
+        }
+        BYTE GetLight() const
+        {
+                return( m_locallight &~ LIGHT_OVERRIDE );
+        }
+        void LightFlash()
+        {
+                SetLightNow( true );
+        }
+        bool MarkSaved();
+        void SetLight( int light );
 
-	// Chars in the sector.
-	bool IsCharActiveIn( const CChar * pChar ) //const
-	{
+        // Chars in the sector.
+        bool IsCharActiveIn( const CChar * pChar ) //const
+        {
 		// assume the char is active (not disconnected)
 		return( pChar->GetParent() == &m_Chars );
 	}
@@ -4908,7 +4910,23 @@ public:
 	long	m_lLoadSize;		// Current size of the loading scripts.
 	time_t  m_Clock_Startup;		// When did the system restore save ?
 
-	// World data.
+        bool    m_fSavingStorage;
+        bool    m_fSaveFailed;
+        bool    m_fStorageSavePrepared;
+        bool    m_fStorageLoadPrepared;
+        bool    m_fStorageLoadFailed;
+        int             m_iStorageLoadStage;
+        std::unique_ptr<CWorldStorageMySQL::Transaction> m_pSaveTransaction;
+        std::vector<CWorldStorageMySQL::WorldObjectRecord> m_StorageLoadObjects;
+        size_t  m_uStorageLoadObjectIndex;
+        std::vector<CWorldStorageMySQL::SectorData> m_StorageLoadSectors;
+        size_t  m_uStorageLoadSectorIndex;
+        std::vector<CWorldStorageMySQL::GMPageRecord> m_StorageLoadGMPages;
+        size_t  m_uStorageLoadGMPageIndex;
+        std::vector<CWorldStorageMySQL::ServerRecord> m_StorageLoadServers;
+        size_t  m_uStorageLoadServerIndex;
+
+        // World data.
 	CSector m_Sectors[ SECTOR_QTY ];
 	CItemsDisconnectList m_ItemsNew;	// Item created but not yet placed in the world.
 	CCharsDisconnectList m_CharsNew;	// Chars created but not yet placed.
@@ -4936,19 +4954,33 @@ private:
 
         void SaveTry(bool fForceImmediate); // Save world state
         void GarbageCollection_New();
-	void GarbageCollection_GMPages();
-	int FixObjTry( CObjBase * pObj, int iUID = 0 );
-	bool SaveStage();
-	void GetBackupName( CGString & sArchive, TCHAR chType ) const;
-	void SaveForce(); // Save world state
+        void GarbageCollection_GMPages();
+        int FixObjTry( CObjBase * pObj, int iUID = 0 );
+        bool SaveStage();
+        bool SaveStageStorage();
+        bool SaveStorageSector( CSector & sector );
+        bool SaveStorageGMPages();
+        bool SaveStorageServers();
+        bool SaveObjectToStorage( CObjBase * pObj );
+        bool BeginStorageSave();
+        void AbortStorageSave();
+        bool FinalizeStorageSave();
+        bool InitializeStorageLoad();
+        void ResetStorageLoadState();
+        bool LoadFromStorage();
+        bool LoadSectionFromStorage();
+        void NotifyStorageObjectRemoved( CObjBase * pObj );
+        void FlushDeletedObjects();
+        void GetBackupName( CGString & sArchive, TCHAR chType ) const;
+        void SaveForce(); // Save world state
 
 public:
         CWorld();
         ~CWorld();
-	bool IsSaving() const
-	{
-		return( m_File.IsFileOpen() && m_File.IsWriteMode());
-	}
+        bool IsSaving() const
+        {
+                return(( m_File.IsFileOpen() && m_File.IsWriteMode()) || m_fSavingStorage);
+        }
 
 	// Time
 

@@ -9,6 +9,11 @@ class CAccount;
 class CObjBase;
 class CRealTime;
 class CVarDefMap;
+class CSector;
+class CChar;
+class CItem;
+class CGMPage;
+class CServRef;
 struct in_addr;
 
 #ifdef _WIN32
@@ -116,9 +121,63 @@ public:
                 time_t m_tUpdatedAt;
         };
 
+        struct SectorData
+        {
+                int m_iMapPlane;
+                int m_iX1;
+                int m_iY1;
+                int m_iX2;
+                int m_iY2;
+                bool m_fHasLightOverride;
+                int m_iLocalLight;
+                bool m_fHasRainOverride;
+                int m_iRainChance;
+                bool m_fHasColdOverride;
+                int m_iColdChance;
+        };
+
+        struct WorldObjectRecord
+        {
+                unsigned long long m_uid;
+                bool m_fIsChar;
+                int m_iBaseId;
+                CGString m_sSerialized;
+        };
+
+        struct GMPageRecord
+        {
+                CGString m_sAccount;
+                CGString m_sReason;
+                long m_lTime;
+                int m_iPosX;
+                int m_iPosY;
+                int m_iPosZ;
+                int m_iMapPlane;
+        };
+
+        struct ServerRecord
+        {
+                CGString m_sName;
+                CGString m_sAddress;
+                int m_iPort;
+                int m_iStatus;
+                int m_iTimeZone;
+                int m_iClientsAvg;
+                CGString m_sURL;
+                CGString m_sEmail;
+                CGString m_sRegisterPassword;
+                CGString m_sNotes;
+                CGString m_sLanguage;
+                CGString m_sVersion;
+                int m_iAccApp;
+                int m_iLastValidSeconds;
+                int m_iAgeHours;
+        };
+
         bool Connect( const CServerMySQLConfig & config );
         void Disconnect();
         bool IsConnected() const;
+        bool IsEnabled() const;
         MYSQL * GetHandle() const;
 
         bool EnsureSchema();
@@ -139,7 +198,29 @@ public:
         bool SaveWorldObject( CObjBase * pObject );
         bool SaveWorldObjects( const std::vector<CObjBase*> & objects );
         bool DeleteWorldObject( const CObjBase * pObject );
+        bool DeleteObject( const CObjBase * pObject );
         bool ClearWorldData();
+
+        bool SaveSector( const CSector & sector );
+        bool SaveChar( CChar & character );
+        bool SaveItem( CItem & item );
+        bool SaveGMPage( const CGMPage & page );
+        bool SaveServer( const CServRef & server );
+
+        bool ClearGMPages();
+        bool ClearServers();
+
+        bool SetWorldSaveCount( int saveCount );
+        bool GetWorldSaveCount( int & saveCount );
+        bool SetWorldSaveCompleted( bool fCompleted );
+        bool GetWorldSaveCompleted( bool & fCompleted );
+
+        bool LoadWorldMetadata( int & saveCount, bool & fCompleted );
+        bool LoadSectors( std::vector<SectorData> & sectors );
+        bool LoadWorldObjects( std::vector<WorldObjectRecord> & objects );
+        bool ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const;
+        bool LoadGMPages( std::vector<GMPageRecord> & pages );
+        bool LoadServers( std::vector<ServerRecord> & servers );
 
         const CGString & GetTablePrefix() const
         {
@@ -162,6 +243,11 @@ private:
         bool ColumnExists( const CGString & table, const char * column ) const;
         bool FetchAccounts( std::vector<AccountData> & accounts, const CGString & whereClause );
         void LoadAccountEmailSchedule( std::vector<AccountData> & accounts );
+        bool InsertOrUpdateSchemaValue( int id, int value );
+        bool QuerySchemaValue( int id, int & value );
+        bool EnsureSectorColumns();
+        bool EnsureGMPageColumns();
+        bool EnsureServerColumns();
         CGString EscapeString( const TCHAR * pszInput ) const;
         CGString FormatStringValue( const CGString & value ) const;
         CGString FormatOptionalStringValue( const CGString & value ) const;
@@ -183,6 +269,7 @@ private:
         CGString ComputeSerializedChecksum( const CGString & serialized ) const;
         bool ExecuteRecordsInsert( const std::vector<UniversalRecord> & records );
         bool ClearTable( const CGString & table );
+        CGString GetAccountNameById( unsigned int accountId );
 
         void LogMySQLError( const char * context );
 

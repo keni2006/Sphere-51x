@@ -22,6 +22,8 @@ namespace
 {
         static const int SCHEMA_VERSION_ROW = 1;      // Stores current schema version
         static const int SCHEMA_IMPORT_ROW = 2;       // Tracks legacy import state
+        static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
+        static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
         static const int CURRENT_SCHEMA_VERSION = 3;
 }
 
@@ -385,12 +387,17 @@ void CWorldStorageMySQL::Disconnect()
 
 bool CWorldStorageMySQL::IsConnected() const
 {
-	return m_pConnection != NULL;
+        return m_pConnection != NULL;
+}
+
+bool CWorldStorageMySQL::IsEnabled() const
+{
+        return IsConnected();
 }
 
 MYSQL * CWorldStorageMySQL::GetHandle() const
 {
-	return m_pConnection;
+        return m_pConnection;
 }
 
 CGString CWorldStorageMySQL::GetPrefixedTableName( const char * name ) const
@@ -900,6 +907,20 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
                 return false;
         }
 
+        sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
+                (const char *) sTableName, SCHEMA_WORLD_SAVECOUNT_ROW );
+        if ( ! ExecuteQuery( sQuery ))
+        {
+                return false;
+        }
+
+        sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
+                (const char *) sTableName, SCHEMA_WORLD_SAVEFLAG_ROW );
+        if ( ! ExecuteQuery( sQuery ))
+        {
+                return false;
+        }
+
         return true;
 }
 
@@ -1078,6 +1099,140 @@ bool CWorldStorageMySQL::EnsureColumnExists( const CGString & table, const char 
         CGString sQuery;
         sQuery.Format( "ALTER TABLE `%s` ADD COLUMN %s;", (const char *) table, definition );
         return ExecuteQuery( sQuery );
+}
+
+bool CWorldStorageMySQL::EnsureSectorColumns()
+{
+        static bool s_fEnsured = false;
+        if ( s_fEnsured )
+        {
+                return true;
+        }
+
+        const CGString sSectors = GetPrefixedTableName( "sectors" );
+        if ( ! EnsureColumnExists( sSectors, "has_light_override", "`has_light_override` TINYINT(1) NOT NULL DEFAULT 0 AFTER `last_update`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sSectors, "local_light", "`local_light` INT NULL AFTER `has_light_override`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sSectors, "has_rain_override", "`has_rain_override` TINYINT(1) NOT NULL DEFAULT 0 AFTER `local_light`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sSectors, "rain_chance", "`rain_chance` INT NULL AFTER `has_rain_override`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sSectors, "has_cold_override", "`has_cold_override` TINYINT(1) NOT NULL DEFAULT 0 AFTER `rain_chance`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sSectors, "cold_chance", "`cold_chance` INT NULL AFTER `has_cold_override`" ))
+        {
+                return false;
+        }
+
+        s_fEnsured = true;
+        return true;
+}
+
+bool CWorldStorageMySQL::EnsureGMPageColumns()
+{
+        static bool s_fEnsured = false;
+        if ( s_fEnsured )
+        {
+                return true;
+        }
+
+        const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
+        if ( ! EnsureColumnExists( sGMPages, "account_name", "`account_name` VARCHAR(32) NULL AFTER `account_id`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sGMPages, "page_time", "`page_time` BIGINT NULL AFTER `status`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sGMPages, "pos_x", "`pos_x` INT NULL AFTER `page_time`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sGMPages, "pos_y", "`pos_y` INT NULL AFTER `pos_x`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sGMPages, "pos_z", "`pos_z` INT NULL AFTER `pos_y`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sGMPages, "map_plane", "`map_plane` INT NULL AFTER `pos_z`" ))
+        {
+                return false;
+        }
+
+        s_fEnsured = true;
+        return true;
+}
+
+bool CWorldStorageMySQL::EnsureServerColumns()
+{
+        static bool s_fEnsured = false;
+        if ( s_fEnsured )
+        {
+                return true;
+        }
+
+        const CGString sServers = GetPrefixedTableName( "servers" );
+        if ( ! EnsureColumnExists( sServers, "time_zone", "`time_zone` INT NOT NULL DEFAULT 0 AFTER `status`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "clients_avg", "`clients_avg` INT NOT NULL DEFAULT 0 AFTER `time_zone`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "url", "`url` VARCHAR(255) NULL AFTER `clients_avg`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "email", "`email` VARCHAR(128) NULL AFTER `url`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "register_password", "`register_password` VARCHAR(64) NULL AFTER `email`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "notes", "`notes` TEXT NULL AFTER `register_password`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "language", "`language` VARCHAR(16) NULL AFTER `notes`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "version", "`version` VARCHAR(64) NULL AFTER `language`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "acc_app", "`acc_app` INT NOT NULL DEFAULT 0 AFTER `version`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "last_valid_seconds", "`last_valid_seconds` INT NULL AFTER `acc_app`" ))
+        {
+                return false;
+        }
+        if ( ! EnsureColumnExists( sServers, "age_hours", "`age_hours` INT NULL AFTER `last_valid_seconds`" ))
+        {
+                return false;
+        }
+
+        s_fEnsured = true;
+        return true;
 }
 
 CGString CWorldStorageMySQL::EscapeString( const TCHAR * pszInput ) const
@@ -1376,6 +1531,88 @@ void CWorldStorageMySQL::LoadAccountEmailSchedule( std::vector<AccountData> & ac
         mysql_free_result( pResult );
 }
 
+bool CWorldStorageMySQL::InsertOrUpdateSchemaValue( int id, int value )
+{
+        const CGString sTableName = GetPrefixedTableName( "schema_version" );
+
+        CGString sQuery;
+        sQuery.Format(
+                "INSERT INTO `%s` (`id`, `version`) VALUES (%d, %d) ON DUPLICATE KEY UPDATE `version` = VALUES(`version`);",
+                (const char *) sTableName, id, value );
+        return ExecuteQuery( sQuery );
+}
+
+bool CWorldStorageMySQL::QuerySchemaValue( int id, int & value )
+{
+        value = 0;
+        const CGString sTableName = GetPrefixedTableName( "schema_version" );
+
+        CGString sQuery;
+        sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;",
+                (const char *) sTableName, id );
+
+        MYSQL_RES * pResult = NULL;
+        if ( ! Query( sQuery, &pResult ))
+        {
+                return false;
+        }
+
+        if ( pResult != NULL )
+        {
+                MYSQL_ROW pRow = mysql_fetch_row( pResult );
+                if ( pRow != NULL && pRow[0] != NULL )
+                {
+                        value = atoi( pRow[0] );
+                }
+                mysql_free_result( pResult );
+        }
+
+        return true;
+}
+
+bool CWorldStorageMySQL::SetWorldSaveCount( int saveCount )
+{
+        return InsertOrUpdateSchemaValue( SCHEMA_WORLD_SAVECOUNT_ROW, saveCount );
+}
+
+bool CWorldStorageMySQL::GetWorldSaveCount( int & saveCount )
+{
+        if ( ! QuerySchemaValue( SCHEMA_WORLD_SAVECOUNT_ROW, saveCount ))
+        {
+                return false;
+        }
+        return true;
+}
+
+bool CWorldStorageMySQL::SetWorldSaveCompleted( bool fCompleted )
+{
+        return InsertOrUpdateSchemaValue( SCHEMA_WORLD_SAVEFLAG_ROW, fCompleted ? 1 : 0 );
+}
+
+bool CWorldStorageMySQL::GetWorldSaveCompleted( bool & fCompleted )
+{
+        int iValue = 0;
+        if ( ! QuerySchemaValue( SCHEMA_WORLD_SAVEFLAG_ROW, iValue ))
+        {
+                return false;
+        }
+        fCompleted = ( iValue != 0 );
+        return true;
+}
+
+bool CWorldStorageMySQL::LoadWorldMetadata( int & saveCount, bool & fCompleted )
+{
+        if ( ! GetWorldSaveCount( saveCount ))
+        {
+                return false;
+        }
+        if ( ! GetWorldSaveCompleted( fCompleted ))
+        {
+                return false;
+        }
+        return true;
+}
+
 void CWorldStorageMySQL::UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts )
 {
         time_t tMax = ( m_tLastAccountSync > 0 ) ? ( m_tLastAccountSync - 1 ) : 0;
@@ -1624,6 +1861,183 @@ bool CWorldStorageMySQL::DeleteWorldObject( const CObjBase * pObject )
         });
 }
 
+bool CWorldStorageMySQL::DeleteObject( const CObjBase * pObject )
+{
+        return DeleteWorldObject( pObject );
+}
+
+bool CWorldStorageMySQL::SaveSector( const CSector & sector )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( ! EnsureSectorColumns())
+        {
+                return false;
+        }
+
+        const CGString sSectors = GetPrefixedTableName( "sectors" );
+        UniversalRecord record( *this, sSectors );
+
+        const CPointMap base = sector.GetBase();
+        record.SetInt( "map_plane", base.m_mapplane );
+        record.SetInt( "x1", base.m_x );
+        record.SetInt( "y1", base.m_y );
+        record.SetInt( "x2", base.m_x + SECTOR_SIZE_X );
+        record.SetInt( "y2", base.m_y + SECTOR_SIZE_Y );
+        record.SetRaw( "last_update", "CURRENT_TIMESTAMP" );
+
+        if ( sector.IsLightOverriden())
+        {
+                record.SetBool( "has_light_override", true );
+                record.SetInt( "local_light", sector.GetLight());
+        }
+        else
+        {
+                record.SetBool( "has_light_override", false );
+                record.SetNull( "local_light" );
+        }
+
+        if ( sector.IsRainOverriden())
+        {
+                record.SetBool( "has_rain_override", true );
+                record.SetInt( "rain_chance", sector.GetRainChance());
+        }
+        else
+        {
+                record.SetBool( "has_rain_override", false );
+                record.SetNull( "rain_chance" );
+        }
+
+        if ( sector.IsColdOverriden())
+        {
+                record.SetBool( "has_cold_override", true );
+                record.SetInt( "cold_chance", sector.GetColdChance());
+        }
+        else
+        {
+                record.SetBool( "has_cold_override", false );
+                record.SetNull( "cold_chance" );
+        }
+
+        return ExecuteQuery( record.BuildInsert( false, true ));
+}
+
+bool CWorldStorageMySQL::SaveChar( CChar & character )
+{
+        return SaveWorldObject( &character );
+}
+
+bool CWorldStorageMySQL::SaveItem( CItem & item )
+{
+        return SaveWorldObject( &item );
+}
+
+bool CWorldStorageMySQL::SaveGMPage( const CGMPage & page )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( ! EnsureGMPageColumns())
+        {
+                return false;
+        }
+
+        const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
+        UniversalRecord record( *this, sGMPages );
+
+        record.SetNull( "account_id" );
+        record.SetNull( "account_name" );
+
+        CAccount * pAccount = page.FindAccount();
+        if ( pAccount != NULL )
+        {
+                CGString sName = pAccount->GetName();
+                if ( ! sName.IsEmpty())
+                {
+                        unsigned int accountId = GetAccountId( sName );
+                        if ( accountId > 0 )
+                        {
+                                record.SetUInt( "account_id", accountId );
+                        }
+                        record.SetOptionalString( "account_name", sName );
+                }
+        }
+
+        record.SetNull( "character_uid" );
+        record.SetOptionalString( "reason", CGString( page.GetReason()));
+        record.SetUInt( "status", 0 );
+        record.SetInt( "page_time", (long long) page.m_lTime );
+        record.SetInt( "pos_x", page.m_p.m_x );
+        record.SetInt( "pos_y", page.m_p.m_y );
+        record.SetInt( "pos_z", page.m_p.m_z );
+        record.SetInt( "map_plane", page.m_p.m_mapplane );
+
+        return ExecuteQuery( record.BuildInsert( false, true ));
+}
+
+bool CWorldStorageMySQL::SaveServer( const CServRef & server )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( ! EnsureServerColumns())
+        {
+                return false;
+        }
+
+        const TCHAR * pszName = server.GetName();
+        if ( pszName == NULL || pszName[0] == '\0' )
+        {
+                return false;
+        }
+
+        const CGString sServers = GetPrefixedTableName( "servers" );
+        UniversalRecord record( *this, sServers );
+
+        record.SetString( "name", CGString( pszName ));
+        record.SetOptionalString( "address", CGString( server.m_ip.GetAddrStr()));
+        record.SetInt( "port", server.m_ip.GetPort());
+        record.SetInt( "status", server.IsValidStatus() ? 1 : 0 );
+        record.SetInt( "time_zone", server.m_TimeZone );
+        record.SetInt( "clients_avg", server.GetClientsAvg());
+        record.SetOptionalString( "url", server.m_sURL );
+        record.SetOptionalString( "email", server.m_sEMail );
+        record.SetOptionalString( "register_password", server.m_sRegisterPassword );
+        record.SetOptionalString( "notes", server.m_sNotes );
+        record.SetOptionalString( "language", server.m_sLang );
+        record.SetOptionalString( "version", server.m_sVersion );
+        record.SetInt( "acc_app", server.m_eAccApp );
+        record.SetInt( "last_valid_seconds", server.GetTimeSinceLastValid());
+        record.SetInt( "age_hours", server.GetAgeHours());
+        record.SetRaw( "last_seen", "CURRENT_TIMESTAMP" );
+
+        return ExecuteQuery( record.BuildInsert( false, true ));
+}
+
+bool CWorldStorageMySQL::ClearGMPages()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
+        return ClearTable( sGMPages );
+}
+
+bool CWorldStorageMySQL::ClearServers()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        const CGString sServers = GetPrefixedTableName( "servers" );
+        return ClearTable( sServers );
+}
+
 bool CWorldStorageMySQL::ClearWorldData()
 {
         if ( ! IsConnected())
@@ -1666,6 +2080,244 @@ bool CWorldStorageMySQL::ClearWorldData()
                 }
                 return true;
         });
+}
+
+bool CWorldStorageMySQL::LoadSectors( std::vector<SectorData> & sectors )
+{
+        sectors.clear();
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( ! EnsureSectorColumns())
+        {
+                return false;
+        }
+
+        const CGString sSectors = GetPrefixedTableName( "sectors" );
+        CGString sQuery;
+        sQuery.Format( "SELECT `map_plane`,`x1`,`y1`,`x2`,`y2`,`has_light_override`,`local_light`,`has_rain_override`,`rain_chance`,`has_cold_override`,`cold_chance` FROM `%s`;",
+                (const char *) sSectors );
+
+        MYSQL_RES * pResult = NULL;
+        if ( ! Query( sQuery, &pResult ))
+        {
+                return false;
+        }
+
+        if ( pResult == NULL )
+        {
+                return true;
+        }
+
+        MYSQL_ROW pRow;
+        while (( pRow = mysql_fetch_row( pResult )) != NULL )
+        {
+                SectorData data;
+                data.m_iMapPlane = pRow[0] ? atoi( pRow[0] ) : 0;
+                data.m_iX1 = pRow[1] ? atoi( pRow[1] ) : 0;
+                data.m_iY1 = pRow[2] ? atoi( pRow[2] ) : 0;
+                data.m_iX2 = pRow[3] ? atoi( pRow[3] ) : 0;
+                data.m_iY2 = pRow[4] ? atoi( pRow[4] ) : 0;
+                data.m_fHasLightOverride = pRow[5] ? ( atoi( pRow[5] ) != 0 ) : false;
+                data.m_iLocalLight = pRow[6] ? atoi( pRow[6] ) : 0;
+                data.m_fHasRainOverride = pRow[7] ? ( atoi( pRow[7] ) != 0 ) : false;
+                data.m_iRainChance = pRow[8] ? atoi( pRow[8] ) : 0;
+                data.m_fHasColdOverride = pRow[9] ? ( atoi( pRow[9] ) != 0 ) : false;
+                data.m_iColdChance = pRow[10] ? atoi( pRow[10] ) : 0;
+                sectors.push_back( data );
+        }
+
+        mysql_free_result( pResult );
+        return true;
+}
+
+bool CWorldStorageMySQL::LoadWorldObjects( std::vector<WorldObjectRecord> & objects )
+{
+        objects.clear();
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        const CGString sObjects = GetPrefixedTableName( "world_objects" );
+        const CGString sData = GetPrefixedTableName( "world_object_data" );
+
+        CGString sQuery;
+        sQuery.Format(
+                "SELECT o.`uid`,o.`object_type`,o.`object_subtype`,d.`data` FROM `%s` o INNER JOIN `%s` d ON o.`uid` = d.`object_uid` ORDER BY o.`uid`;",
+                (const char *) sObjects, (const char *) sData );
+
+        MYSQL_RES * pResult = NULL;
+        if ( ! Query( sQuery, &pResult ))
+        {
+                return false;
+        }
+
+        if ( pResult == NULL )
+        {
+                return true;
+        }
+
+        MYSQL_ROW pRow;
+        while (( pRow = mysql_fetch_row( pResult )) != NULL )
+        {
+                WorldObjectRecord record;
+#ifdef _WIN32
+                record.m_uid = pRow[0] ? (unsigned long long) _strtoui64( pRow[0], NULL, 10 ) : 0;
+#else
+                record.m_uid = pRow[0] ? (unsigned long long) strtoull( pRow[0], NULL, 10 ) : 0;
+#endif
+                const char * pszType = pRow[1] ? pRow[1] : "";
+                record.m_fIsChar = ( strcmpi( pszType, "char" ) == 0 );
+                const char * pszSubtype = pRow[2] ? pRow[2] : "";
+                record.m_iBaseId = (int) strtol( pszSubtype, NULL, 0 );
+                record.m_sSerialized = pRow[3] ? pRow[3] : "";
+                objects.push_back( record );
+        }
+
+        mysql_free_result( pResult );
+        return true;
+}
+
+bool CWorldStorageMySQL::LoadGMPages( std::vector<GMPageRecord> & pages )
+{
+        pages.clear();
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( ! EnsureGMPageColumns())
+        {
+                return false;
+        }
+
+        const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
+        CGString sQuery;
+        sQuery.Format( "SELECT `account_id`,`account_name`,`reason`,`page_time`,`pos_x`,`pos_y`,`pos_z`,`map_plane` FROM `%s` ORDER BY `id`;",
+                (const char *) sGMPages );
+
+        MYSQL_RES * pResult = NULL;
+        if ( ! Query( sQuery, &pResult ))
+        {
+                return false;
+        }
+
+        if ( pResult == NULL )
+        {
+                return true;
+        }
+
+        MYSQL_ROW pRow;
+        while (( pRow = mysql_fetch_row( pResult )) != NULL )
+        {
+                GMPageRecord record;
+                unsigned int accountId = pRow[0] ? (unsigned int) strtoul( pRow[0], NULL, 10 ) : 0;
+                record.m_sAccount = pRow[1] ? pRow[1] : "";
+                if ( record.m_sAccount.IsEmpty() && accountId > 0 )
+                {
+                        record.m_sAccount = GetAccountNameById( accountId );
+                }
+                record.m_sReason = pRow[2] ? pRow[2] : "";
+#ifdef _WIN32
+                record.m_lTime = pRow[3] ? (long) _strtoi64( pRow[3], NULL, 10 ) : 0;
+#else
+                record.m_lTime = pRow[3] ? (long) strtoll( pRow[3], NULL, 10 ) : 0;
+#endif
+                record.m_iPosX = pRow[4] ? atoi( pRow[4] ) : 0;
+                record.m_iPosY = pRow[5] ? atoi( pRow[5] ) : 0;
+                record.m_iPosZ = pRow[6] ? atoi( pRow[6] ) : 0;
+                record.m_iMapPlane = pRow[7] ? atoi( pRow[7] ) : 0;
+                pages.push_back( record );
+        }
+
+        mysql_free_result( pResult );
+        return true;
+}
+
+bool CWorldStorageMySQL::LoadServers( std::vector<ServerRecord> & servers )
+{
+        servers.clear();
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( ! EnsureServerColumns())
+        {
+                return false;
+        }
+
+        const CGString sServers = GetPrefixedTableName( "servers" );
+        CGString sQuery;
+        sQuery.Format( "SELECT `name`,`address`,`port`,`status`,`time_zone`,`clients_avg`,`url`,`email`,`register_password`,`notes`,`language`,`version`,`acc_app`,`last_valid_seconds`,`age_hours` FROM `%s` ORDER BY `name`;",
+                (const char *) sServers );
+
+        MYSQL_RES * pResult = NULL;
+        if ( ! Query( sQuery, &pResult ))
+        {
+                return false;
+        }
+
+        if ( pResult == NULL )
+        {
+                return true;
+        }
+
+        MYSQL_ROW pRow;
+        while (( pRow = mysql_fetch_row( pResult )) != NULL )
+        {
+                ServerRecord record;
+                record.m_sName = pRow[0] ? pRow[0] : "";
+                record.m_sAddress = pRow[1] ? pRow[1] : "";
+                record.m_iPort = pRow[2] ? atoi( pRow[2] ) : 0;
+                record.m_iStatus = pRow[3] ? atoi( pRow[3] ) : 0;
+                record.m_iTimeZone = pRow[4] ? atoi( pRow[4] ) : 0;
+                record.m_iClientsAvg = pRow[5] ? atoi( pRow[5] ) : 0;
+                record.m_sURL = pRow[6] ? pRow[6] : "";
+                record.m_sEmail = pRow[7] ? pRow[7] : "";
+                record.m_sRegisterPassword = pRow[8] ? pRow[8] : "";
+                record.m_sNotes = pRow[9] ? pRow[9] : "";
+                record.m_sLanguage = pRow[10] ? pRow[10] : "";
+                record.m_sVersion = pRow[11] ? pRow[11] : "";
+                record.m_iAccApp = pRow[12] ? atoi( pRow[12] ) : 0;
+                record.m_iLastValidSeconds = pRow[13] ? atoi( pRow[13] ) : 0;
+                record.m_iAgeHours = pRow[14] ? atoi( pRow[14] ) : 0;
+                servers.push_back( record );
+        }
+
+        mysql_free_result( pResult );
+        return true;
+}
+
+CGString CWorldStorageMySQL::GetAccountNameById( unsigned int accountId )
+{
+        if ( accountId == 0 )
+        {
+                return CGString();
+        }
+
+        const CGString sAccounts = GetPrefixedTableName( "accounts" );
+        CGString sQuery;
+        sQuery.Format( "SELECT `name` FROM `%s` WHERE `id` = %u LIMIT 1;", (const char *) sAccounts, accountId );
+
+        MYSQL_RES * pResult = NULL;
+        if ( ! Query( sQuery, &pResult ))
+        {
+                return CGString();
+        }
+
+        CGString sName;
+        if ( pResult != NULL )
+        {
+                MYSQL_ROW pRow = mysql_fetch_row( pResult );
+                if ( pRow != NULL && pRow[0] != NULL )
+                {
+                        sName = pRow[0];
+                }
+                mysql_free_result( pResult );
+        }
+
+        return sName;
 }
 
 bool CWorldStorageMySQL::SaveWorldObjectInternal( CObjBase * pObject )
@@ -1737,8 +2389,44 @@ bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & ou
         const std::string serialized = buffer.str();
         outSerialized = serialized.c_str();
 
+::remove( szTempName );
+return true;
+}
+
+bool CWorldStorageMySQL::ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const
+{
+        char szTempName[L_tmpnam];
+        if ( tmpnam( szTempName ) == NULL )
+        {
+                return false;
+        }
+
+        {
+                std::ofstream output( szTempName, std::ios::out | std::ios::binary );
+                if ( ! output.is_open())
+                {
+                        ::remove( szTempName );
+                        return false;
+                }
+                output << (const char *) serialized;
+        }
+
+        CScript script;
+        if ( ! script.Open( szTempName, OF_READ | OF_TEXT ))
+        {
+                ::remove( szTempName );
+                return false;
+        }
+
+        bool fResult = false;
+        if ( script.FindNextSection())
+        {
+                fResult = object.r_Load( script );
+        }
+
+        script.Close();
         ::remove( szTempName );
-        return true;
+        return fResult;
 }
 
 bool CWorldStorageMySQL::UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized )

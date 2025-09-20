@@ -209,15 +209,25 @@ jumpover:
 
 CWorld::CWorld()
 {
-	m_iSaveCount = 0;
-	m_iSaveStage = 0;
-	m_fSaveForce = false;
-	m_Clock_Sector = 0;
-	m_Clock_Respawn = 0;
+        m_iSaveCount = 0;
+        m_iSaveStage = 0;
+        m_fSaveForce = false;
+        m_Clock_Sector = 0;
+        m_Clock_Respawn = 0;
 
-	m_Clock_PrevSys = 0;
-	m_Clock_Time = 0;
-	m_Clock_Startup = 0;
+        m_Clock_PrevSys = 0;
+        m_Clock_Time = 0;
+        m_Clock_Startup = 0;
+        m_fSavingStorage = false;
+        m_fSaveFailed = false;
+        m_fStorageSavePrepared = false;
+        m_fStorageLoadPrepared = false;
+        m_fStorageLoadFailed = false;
+        m_iStorageLoadStage = 0;
+        m_uStorageLoadObjectIndex = 0;
+        m_uStorageLoadSectorIndex = 0;
+        m_uStorageLoadGMPageIndex = 0;
+        m_uStorageLoadServerIndex = 0;
 }
 
 CWorld::~CWorld()
@@ -268,6 +278,7 @@ setcount:
 	{
 		// NOTE: We cannot use Delete() in here because the UID will still be assigned til the async cleanup time.
 		DEBUG_ERR(( "UID conflict delete 0%lx, '%s'\n", dwIndex, pObjPrv->GetName()));
+		NotifyStorageObjectRemoved( pObjPrv );
 		delete pObjPrv;	// Delete()	will not work here !
 		// ASSERT( 0 );
 	}
@@ -298,11 +309,17 @@ void CWorld::GetBackupName( CGString & sArchive, TCHAR chType ) const
 
 bool CWorld::SaveStage() // Save world state in stages.
 {
-	// Do the next stage of the save.
-	// RETURN: true = continue;
-	//  false = done.
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage && pStorage->IsEnabled())
+        {
+                return SaveStageStorage();
+        }
 
-	ASSERT( IsSaving());
+        // Do the next stage of the save.
+        // RETURN: true = continue;
+        //  false = done.
+
+        ASSERT( IsSaving());
 
 	switch ( m_iSaveStage )
 	{
@@ -379,37 +396,827 @@ bool CWorld::SaveStage() // Save world state in stages.
 		m_Clock_Save = GetTime() + iNextTime;
 	}
 	m_iSaveStage ++;
-	return( true );
+        return( true );
+}
+
+bool CWorld::BeginStorageSave()
+{
+        if ( m_fStorageSavePrepared )
+                return true;
+
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        m_pSaveTransaction.reset( new CWorldStorageMySQL::Transaction( *pStorage ));
+        if ( ! m_pSaveTransaction || ! m_pSaveTransaction->IsActive())
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to begin MySQL transaction for world save.\n" );
+                if ( m_pSaveTransaction )
+                {
+                        m_pSaveTransaction->Rollback();
+                }
+                m_pSaveTransaction.reset();
+                return false;
+        }
+
+        if ( ! pStorage->SetWorldSaveCompleted( false ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to mark MySQL world save as in-progress.\n" );
+                return false;
+        }
+        if ( ! pStorage->SetWorldSaveCount( m_iSaveCount ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to update MySQL world save count baseline.\n" );
+                return false;
+        }
+        if ( ! pStorage->ClearGMPages())
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to clear MySQL GM pages before save.\n" );
+                return false;
+        }
+        if ( ! pStorage->ClearServers())
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to clear MySQL server list before save.\n" );
+                return false;
+        }
+
+        m_fStorageSavePrepared = true;
+        g_Log.Event( LOGM_SAVE, "MySQL world save transaction started.\n" );
+        return true;
+}
+
+void CWorld::AbortStorageSave()
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        bool fHadActiveTransaction = ( m_pSaveTransaction && m_pSaveTransaction->IsActive());
+        if ( m_pSaveTransaction )
+        {
+                m_pSaveTransaction->Rollback();
+                m_pSaveTransaction.reset();
+        }
+        if ( pStorage && pStorage->IsEnabled())
+        {
+                pStorage->SetWorldSaveCompleted( false );
+        }
+        if ( fHadActiveTransaction )
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_WARN, "MySQL world save rolled back.\n" );
+        }
+        m_fSavingStorage = false;
+        m_fStorageSavePrepared = false;
+}
+
+void CWorld::NotifyStorageObjectRemoved( CObjBase * pObj )
+{
+	if ( pObj == NULL )
+		return;
+
+	CWorldStorageMySQL * pStorage = Storage();
+	if ( pStorage == NULL || ! pStorage->IsEnabled())
+		return;
+
+	if ( ! pStorage->DeleteObject( pObj ))
+	{
+		g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to mark object 0%lx as deleted in MySQL.\n", (unsigned long) pObj->GetUID());
+	}
+}
+
+void CWorld::FlushDeletedObjects()
+{
+	CObjBase * pDelete = STATIC_CAST <CObjBase*>( m_ObjDelete.GetHead());
+	while ( pDelete != NULL )
+	{
+		CObjBase * pNext = STATIC_CAST <CObjBase*>( pDelete->GetNext());
+		NotifyStorageObjectRemoved( pDelete );
+		delete pDelete;
+		pDelete = pNext;
+	}
+}
+
+bool CWorld::SaveObjectToStorage( CObjBase * pObj )
+{
+	if ( pObj == NULL )
+		return true;
+
+	if ( ! g_Serv.m_fSaveGarbageCollect )
+        {
+                if ( FixObj( pObj ))
+                {
+                        return true;
+                }
+        }
+
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                        return false;
+        }
+
+        auto saveObject = [pStorage]( CObjBase * pTarget ) -> bool
+        {
+                if ( pTarget->IsChar())
+                {
+                        CChar * pChar = dynamic_cast<CChar*>( pTarget );
+                        return ( pChar != NULL ) && pStorage->SaveChar( *pChar );
+                }
+                if ( pTarget->IsItem())
+                {
+                        CItem * pItem = dynamic_cast<CItem*>( pTarget );
+                        return ( pItem != NULL ) && pStorage->SaveItem( *pItem );
+                }
+                return false;
+        };
+
+        if ( g_Serv.m_fSecure )
+        {
+                try
+                {
+                        if ( ! saveObject( pObj ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist object 0%lx.\n", (unsigned long) pObj->GetUID());
+                                return false;
+                        }
+                }
+                catch (...)     // catch all
+                {
+                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save Object Exception!\n" );
+                        return false;
+                }
+        }
+        else
+        {
+                if ( ! saveObject( pObj ))
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist object 0%lx.\n", (unsigned long) pObj->GetUID());
+                        return false;
+                }
+        }
+        return true;
+}
+
+bool CWorld::SaveStorageSector( CSector & sector )
+{
+        if ( ! sector.MarkSaved())
+                return true;
+
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        if ( ! pStorage->SaveSector( sector ))
+        {
+                CPointMap base = sector.GetBase();
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist sector %d,%d.\n", base.m_x, base.m_y );
+                return false;
+        }
+
+        CChar * pCharNext;
+        CChar * pChar = STATIC_CAST <CChar*>( sector.m_Chars.GetHead());
+        for ( ; pChar != NULL; pChar = pCharNext )
+        {
+                pCharNext = pChar->GetNext();
+                if ( ! SaveObjectToStorage( pChar ))
+                        return false;
+        }
+
+        pChar = STATIC_CAST <CChar*> (sector.m_Chars_Disconnect.GetHead());
+        for ( ; pChar != NULL; pChar = pCharNext )
+        {
+                pCharNext = pChar->GetNext();
+                if ( ! SaveObjectToStorage( pChar ))
+                        return false;
+        }
+
+        CItem * pItemNext;
+        CItem * pItem = STATIC_CAST <CItem*> (sector.m_Items_Inert.GetHead());
+        for ( ; pItem != NULL; pItem = pItemNext )
+        {
+                pItemNext = pItem->GetNext();
+                if ( ! SaveObjectToStorage( pItem ))
+                        return false;
+        }
+
+        pItem = STATIC_CAST <CItem*> (sector.m_Items_Timer.GetHead());
+        for ( ; pItem != NULL; pItem = pItemNext )
+        {
+                pItemNext = pItem->GetNext();
+                if ( ! SaveObjectToStorage( pItem ))
+                        return false;
+        }
+
+        return true;
+}
+
+bool CWorld::SaveStorageGMPages()
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        CGMPage * pPage = dynamic_cast<CGMPage*>( m_GMPages.GetHead());
+        for ( ; pPage != NULL; pPage = pPage->GetNext())
+        {
+                if ( ! pStorage->SaveGMPage( *pPage ))
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist GM page for account '%s'.\n", pPage->GetName());
+                        return false;
+                }
+        }
+        return true;
+}
+
+bool CWorld::SaveStorageServers()
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        if ( ! g_Serv.m_fMainLogServer )
+        {
+                return true;
+        }
+
+        for ( int i = 0; i < g_Serv.m_Servers.GetCount(); ++i )
+        {
+                CServRef * pServ = g_Serv.m_Servers[i];
+                if ( pServ == NULL )
+                        continue;
+                if ( ! pStorage->SaveServer( *pServ ))
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist linked server '%s'.\n", pServ->GetName());
+                        return false;
+                }
+        }
+        return true;
+}
+
+bool CWorld::FinalizeStorageSave()
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        if ( ! pStorage->SetWorldSaveCount( m_iSaveCount + 1 ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to update MySQL world save count.\n" );
+                return false;
+        }
+        if ( ! pStorage->SetWorldSaveCompleted( true ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to mark MySQL world save as completed.\n" );
+                return false;
+        }
+
+        if ( m_pSaveTransaction )
+        {
+                if ( ! m_pSaveTransaction->Commit())
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to commit MySQL world save transaction.\n" );
+                        m_pSaveTransaction->Rollback();
+                        m_pSaveTransaction.reset();
+                        return false;
+                }
+                m_pSaveTransaction.reset();
+        }
+
+        m_iSaveCount++;
+        m_Clock_Save = GetTime() + g_Serv.m_iSavePeriod;
+
+        for ( int i = 1; i < GetUIDCount(); ++i )
+        {
+                if ( m_UIDs[i] == UID_PLACE_HOLDER )
+                        m_UIDs[i] = NULL;
+        }
+
+        g_Log.Event( LOGM_SAVE, "World data saved (MySQL).\n" );
+
+        m_fSavingStorage = false;
+        m_fStorageSavePrepared = false;
+        return true;
+}
+
+void CWorld::ResetStorageLoadState()
+{
+        m_StorageLoadObjects.clear();
+        m_StorageLoadSectors.clear();
+        m_StorageLoadGMPages.clear();
+        m_StorageLoadServers.clear();
+        m_uStorageLoadObjectIndex = 0;
+        m_uStorageLoadSectorIndex = 0;
+        m_uStorageLoadGMPageIndex = 0;
+        m_uStorageLoadServerIndex = 0;
+        m_iStorageLoadStage = 0;
+        m_fStorageLoadPrepared = false;
+        m_fStorageLoadFailed = false;
+}
+
+bool CWorld::InitializeStorageLoad()
+{
+        if ( m_fStorageLoadPrepared )
+                return true;
+
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        ResetStorageLoadState();
+
+        int iSaveCount = 0;
+        bool fCompleted = true;
+        if ( ! pStorage->LoadWorldMetadata( iSaveCount, fCompleted ))
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load world metadata from MySQL.\n" );
+                m_fStorageLoadFailed = true;
+                return false;
+        }
+        m_iSaveCount = iSaveCount;
+        if ( ! fCompleted )
+        {
+                g_Log.Event( LOGM_INIT|LOGL_WARN, "Previous MySQL world save did not complete cleanly.\n" );
+        }
+
+        if ( ! pStorage->LoadSectors( m_StorageLoadSectors ))
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load sector data from MySQL.\n" );
+                m_fStorageLoadFailed = true;
+                return false;
+        }
+        if ( ! pStorage->LoadWorldObjects( m_StorageLoadObjects ))
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load world objects from MySQL.\n" );
+                m_fStorageLoadFailed = true;
+                return false;
+        }
+        if ( ! pStorage->LoadGMPages( m_StorageLoadGMPages ))
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load GM pages from MySQL.\n" );
+                m_fStorageLoadFailed = true;
+                return false;
+        }
+        if ( ! pStorage->LoadServers( m_StorageLoadServers ))
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load server list from MySQL.\n" );
+                m_fStorageLoadFailed = true;
+                return false;
+        }
+
+        m_fStorageLoadPrepared = true;
+        m_fStorageLoadFailed = false;
+        return true;
+}
+
+bool CWorld::SaveStageStorage()
+{
+        if ( ! m_fSavingStorage )
+        {
+                return false;
+        }
+
+        if ( ! BeginStorageSave())
+        {
+                m_fSaveFailed = true;
+                AbortStorageSave();
+                return false;
+        }
+
+        switch ( m_iSaveStage )
+        {
+        case -1:
+                if ( ! g_Serv.m_fSaveGarbageCollect )
+                {
+                        GarbageCollection_New();
+                        GarbageCollection_GMPages();
+                }
+                break;
+        default:
+                if ( m_iSaveStage < SECTOR_QTY )
+                {
+                        if ( ! SaveStorageSector( m_Sectors[m_iSaveStage] ))
+                        {
+                                m_fSaveFailed = true;
+                                AbortStorageSave();
+                                return false;
+                        }
+                }
+                else if ( m_iSaveStage == SECTOR_QTY )
+                {
+                        if ( ! SaveStorageGMPages())
+                        {
+                                m_fSaveFailed = true;
+                                AbortStorageSave();
+                                return false;
+                        }
+                }
+                else if ( m_iSaveStage == SECTOR_QTY + 1 )
+                {
+                        if ( ! SaveStorageServers())
+                        {
+                                m_fSaveFailed = true;
+                                AbortStorageSave();
+                                return false;
+                        }
+                }
+                else if ( m_iSaveStage == SECTOR_QTY + 2 )
+                {
+                        if ( ! SaveAccounts())
+                        {
+                                m_fSaveFailed = true;
+                                AbortStorageSave();
+                                return false;
+                        }
+                }
+                else if ( m_iSaveStage == SECTOR_QTY + 3 )
+                {
+                        if ( ! FinalizeStorageSave())
+                        {
+                                m_fSaveFailed = true;
+                                AbortStorageSave();
+                                return false;
+                        }
+                        return false;
+                }
+                break;
+        }
+
+        if ( g_Serv.m_iSaveBackgroundTime )
+        {
+                int iNextTime = g_Serv.m_iSaveBackgroundTime / SECTOR_QTY;
+                if ( iNextTime > TICK_PER_SEC/2 ) iNextTime = TICK_PER_SEC/2;
+                m_Clock_Save = GetTime() + iNextTime;
+        }
+
+        m_iSaveStage++;
+        return true;
+}
+
+bool CWorld::LoadSectionFromStorage()
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        if ( m_fStorageLoadFailed )
+        {
+                return false;
+        }
+
+        if ( ! InitializeStorageLoad())
+        {
+                        return false;
+        }
+
+        while ( true )
+        {
+                switch ( m_iStorageLoadStage )
+                {
+                case 0:
+                        if ( m_uStorageLoadSectorIndex < m_StorageLoadSectors.size())
+                        {
+                                const CWorldStorageMySQL::SectorData & data = m_StorageLoadSectors[m_uStorageLoadSectorIndex++];
+                                CPointMap base( data.m_iX1, data.m_iY1, 0, data.m_iMapPlane );
+                                CSector * pSector = base.GetSector();
+                                if ( pSector != NULL )
+                                {
+                                        if ( data.m_fHasLightOverride )
+                                                pSector->SetLight( data.m_iLocalLight );
+                                        else
+                                                pSector->SetLight( -1 );
+
+                                        if ( data.m_fHasRainOverride )
+                                                pSector->SetWeatherChance( true, data.m_iRainChance );
+                                        else
+                                                pSector->SetWeatherChance( true, -1 );
+
+                                        if ( data.m_fHasColdOverride )
+                                                pSector->SetWeatherChance( false, data.m_iColdChance );
+                                        else
+                                                pSector->SetWeatherChance( false, -1 );
+                                }
+                                else
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Unable to resolve sector (%d,%d) map %d while loading from MySQL.\n", data.m_iX1, data.m_iY1, data.m_iMapPlane );
+                                }
+                                return true;
+                        }
+                        m_iStorageLoadStage = 1;
+                        continue;
+
+                case 1:
+                        if ( m_uStorageLoadObjectIndex < m_StorageLoadObjects.size())
+                        {
+                                const CWorldStorageMySQL::WorldObjectRecord & record = m_StorageLoadObjects[m_uStorageLoadObjectIndex++];
+                                UINT uid = (UINT) record.m_uid;
+                                CObjBase * pObj = NULL;
+
+                                if ( record.m_fIsChar )
+                                {
+                                        CChar * pChar = CChar::CreateBasic( (CREID_TYPE) record.m_iBaseId );
+                                        if ( pChar == NULL )
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to instantiate character 0x%x for UID 0%llx.\n", record.m_iBaseId, record.m_uid );
+                                                m_fStorageLoadFailed = true;
+                                                return false;
+                                        }
+                                        pChar->SetPrivateUID( uid, false );
+                                        pObj = pChar;
+                                }
+                                else
+                                {
+                                        CItem * pItem = CItem::CreateScript( (ITEMID_TYPE) record.m_iBaseId );
+                                        if ( pItem == NULL )
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to instantiate item 0x%x for UID 0%llx.\n", record.m_iBaseId, record.m_uid );
+                                                m_fStorageLoadFailed = true;
+                                                return false;
+                                        }
+                                        pItem->SetPrivateUID( uid, true );
+                                        pObj = pItem;
+                                }
+
+                                if ( ! pStorage->ApplyWorldObjectData( *pObj, record.m_sSerialized ))
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to deserialize world object 0%llx from MySQL.\n", record.m_uid );
+                                        FreeUID( uid & UID_MASK );
+                                        delete pObj;
+                                        m_fStorageLoadFailed = true;
+                                        return false;
+                                }
+                                return true;
+                        }
+                        m_iStorageLoadStage = 2;
+                        continue;
+
+                case 2:
+                        if ( m_uStorageLoadGMPageIndex < m_StorageLoadGMPages.size())
+                        {
+                                const CWorldStorageMySQL::GMPageRecord & record = m_StorageLoadGMPages[m_uStorageLoadGMPageIndex++];
+                                CGMPage * pPage = new CGMPage( record.m_sAccount );
+                                pPage->SetReason( record.m_sReason );
+                                pPage->m_lTime = record.m_lTime;
+                                pPage->m_p.m_x = record.m_iPosX;
+                                pPage->m_p.m_y = record.m_iPosY;
+                                pPage->m_p.m_z = record.m_iPosZ;
+                                pPage->m_p.m_mapplane = record.m_iMapPlane;
+                                return true;
+                        }
+                        m_iStorageLoadStage = 3;
+                        continue;
+
+                case 3:
+                        if ( m_uStorageLoadServerIndex < m_StorageLoadServers.size())
+                        {
+                                const CWorldStorageMySQL::ServerRecord & record = m_StorageLoadServers[m_uStorageLoadServerIndex++];
+                                if ( ! record.m_sName.IsEmpty())
+                                {
+                                        CServRef * pServ = new CServRef( record.m_sName, SOCKET_LOCAL_ADDRESS );
+                                        if ( ! record.m_sAddress.IsEmpty())
+                                        {
+                                                pServ->m_ip.SetHostStr( record.m_sAddress );
+                                        }
+                                        if ( record.m_iPort > 0 )
+                                        {
+                                                pServ->m_ip.SetPort( record.m_iPort );
+                                        }
+                                        pServ->m_TimeZone = (signed char) record.m_iTimeZone;
+                                        pServ->SetStat( SERV_STAT_CLIENTS, record.m_iClientsAvg );
+                                        pServ->m_sURL = record.m_sURL;
+                                        pServ->m_sEMail = record.m_sEmail;
+                                        pServ->m_sRegisterPassword = record.m_sRegisterPassword;
+                                        pServ->m_sNotes = record.m_sNotes;
+                                        pServ->m_sLang = record.m_sLanguage;
+                                        pServ->m_sVersion = record.m_sVersion;
+                                        pServ->m_eAccApp = (ACCAPP_TYPE) record.m_iAccApp;
+                                        g_Serv.m_Servers.AddSortKey( pServ, pServ->GetName());
+                                }
+                                return true;
+                        }
+                        m_iStorageLoadStage = 4;
+                        continue;
+
+                default:
+                        return false;
+                }
+        }
+}
+
+bool CWorld::LoadFromStorage()
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        if ( ! InitializeStorageLoad())
+        {
+                return false;
+        }
+
+        g_Serv.SysMessage( "World Is Loading...\n" );
+
+        m_GMPages.DeleteAll();
+        g_Serv.m_Servers.RemoveAll();
+
+        size_t uTotal = m_StorageLoadSectors.size() + m_StorageLoadObjects.size() + m_StorageLoadGMPages.size() + m_StorageLoadServers.size();
+        size_t uLastReported = 0;
+
+        while ( true )
+        {
+                bool fContinue = false;
+                if ( g_Serv.m_fSecure )
+                {
+                        try
+                        {
+                                fContinue = LoadSectionFromStorage();
+                        }
+                        catch (...)
+                        {
+                                g_Log.Event( LOGM_INIT|LOGL_CRIT, "Load Exception during MySQL world restore!\n" );
+                                m_fStorageLoadFailed = true;
+                                fContinue = false;
+                        }
+                }
+                else
+                {
+                        fContinue = LoadSectionFromStorage();
+                }
+
+                if ( m_fStorageLoadFailed )
+                {
+                        break;
+                }
+                if ( ! fContinue )
+                {
+                        break;
+                }
+
+                if ( uTotal > 0 )
+                {
+                        size_t uProcessed = m_uStorageLoadSectorIndex + m_uStorageLoadObjectIndex + m_uStorageLoadGMPageIndex + m_uStorageLoadServerIndex;
+                        if (( uProcessed != uLastReported ) && !( uProcessed & 0xFF ))
+                        {
+                                g_Serv.PrintPercent( static_cast<int>( uProcessed ), static_cast<int>( uTotal ));
+                                uLastReported = uProcessed;
+                        }
+                }
+        }
+
+	bool fSuccess = ! m_fStorageLoadFailed;
+	if ( fSuccess )
+	{
+		g_Log.Event( LOGM_INIT, "World data loaded (MySQL).\n" );
+	}
+
+	ResetStorageLoadState();
+	return fSuccess;
 }
 
 void CWorld::SaveForce() // Save world state
 {
-	m_fSaveForce = true;
-	Broadcast( "World save has been initiated." );
+        CWorldStorageMySQL * pStorage = Storage();
+        const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
 
-	while ( SaveStage())
-	{
-		if (! ( m_iSaveStage & 0xFF ))
-		{
-			g_Serv.PrintPercent( m_iSaveStage, SECTOR_QTY+3 );
+        if ( fStorageEnabled )
+        {
+                if ( ! m_fSavingStorage )
+                {
+                        if ( g_Serv.m_fSaveGarbageCollect )
+                        {
+                                GarbageCollection();
+                        }
+
+                        if ( ! BeginStorageSave())
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to initialize MySQL world save.\n" );
+                                AbortStorageSave();
+                                return;
+                        }
+
+                        m_fSavingStorage = true;
+                        m_fSaveParity = ! m_fSaveParity;
+                        m_iSaveStage = -1;
+                        m_fSaveFailed = false;
+                        m_Clock_Save = 0;
+                }
+
+                m_fSaveForce = true;
+                Broadcast( "World save has been initiated." );
+
+                while ( SaveStage())
+                {
+                        if (! ( m_iSaveStage & 0xFF ))
+                        {
+                                g_Serv.PrintPercent( m_iSaveStage, SECTOR_QTY+3 );
 #ifdef _WIN32
-			// Linux doesn't need to know about this
-			if ( g_Service.IsServiceStopPending())
-			{
-				g_Service.ReportStatusToSCMgr(SERVICE_STOP_PENDING, NO_ERROR, 5000);
-			}
+                                if ( g_Service.IsServiceStopPending())
+                                {
+                                        g_Service.ReportStatusToSCMgr(SERVICE_STOP_PENDING, NO_ERROR, 5000);
+                                }
 #endif
-		}
-	}
-	DEBUG_MSG(( "Save Done\n" ));
+                        }
+                }
+
+                if ( m_fSaveFailed )
+                {
+                        if ( m_fSavingStorage )
+                        {
+                                AbortStorageSave();
+                        }
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "World save failed. Rolling back MySQL transaction.\n" );
+                        Broadcast( "Save FAILED. Sphere is UNSTABLE!" );
+                }
+                else
+                {
+                        DEBUG_MSG(( "Save Done\n" ));
+                }
+                return;
+        }
+
+        m_fSaveForce = true;
+        Broadcast( "World save has been initiated." );
+
+        while ( SaveStage())
+        {
+                if (! ( m_iSaveStage & 0xFF ))
+                {
+                        g_Serv.PrintPercent( m_iSaveStage, SECTOR_QTY+3 );
+#ifdef _WIN32
+                        // Linux doesn't need to know about this
+                        if ( g_Service.IsServiceStopPending())
+                        {
+                                g_Service.ReportStatusToSCMgr(SERVICE_STOP_PENDING, NO_ERROR, 5000);
+                        }
+#endif
+                }
+        }
+        DEBUG_MSG(( "Save Done\n" ));
 }
 
 void CWorld::SaveTry( bool fForceImmediate ) // Save world state
 {
-	if ( m_File.IsFileOpen())
-	{
-		// Save is already active !
-		ASSERT( IsSaving());
+        CWorldStorageMySQL * pStorage = Storage();
+        const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
+
+        if ( fStorageEnabled )
+        {
+                if ( m_fSavingStorage )
+                {
+                        if ( fForceImmediate )
+                        {
+                                SaveForce();
+                        }
+                        else if ( g_Serv.m_iSaveBackgroundTime )
+                        {
+                                SaveStage();
+                        }
+                        return;
+                }
+
+                if ( g_Serv.m_fSaveGarbageCollect )
+                {
+                        GarbageCollection();
+                }
+
+                if ( ! BeginStorageSave())
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to initialize MySQL world save.\n" );
+                        AbortStorageSave();
+                        return;
+                }
+
+                m_fSavingStorage = true;
+                m_fSaveParity = ! m_fSaveParity;
+                m_iSaveStage = -1;
+                m_fSaveForce = false;
+                m_fSaveFailed = false;
+                m_Clock_Save = 0;
+
+                if ( fForceImmediate || ! g_Serv.m_iSaveBackgroundTime )
+                {
+                        SaveForce();
+                }
+                return;
+        }
+
+        if ( m_File.IsFileOpen())
+        {
+                // Save is already active !
+                ASSERT( IsSaving());
 		if ( fForceImmediate )	// finish it now !
 		{
 			SaveForce();
@@ -472,17 +1279,27 @@ void CWorld::SaveTry( bool fForceImmediate ) // Save world state
 
 void CWorld::Save( bool fForceImmediate ) // Save world state
 {
-	if ( g_Serv.m_fSecure )	// enable the try code.
+	CWorldStorageMySQL * pStorage = Storage();
+	const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
+
+	if ( g_Serv.m_fSecure ) // enable the try code.
 	{
 		try
 		{
 			SaveTry(fForceImmediate);
 		}
-		catch (...)	// catch all
+		catch (...) // catch all
 		{
 			g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED. " GRAY_TITLE " is UNSTABLE!\n" );
 			Broadcast( "Save FAILED. " GRAY_TITLE " is UNSTABLE!" );
-			m_File.Close();	// close if not already closed.
+			if ( fStorageEnabled )
+			{
+				AbortStorageSave();
+			}
+			else
+			{
+				m_File.Close(); // close if not already closed.
+			}
 		}
 	}
 	else
@@ -495,10 +1312,16 @@ void CWorld::Save( bool fForceImmediate ) // Save world state
 
 bool CWorld::LoadSection()
 {
-	// Load another section of the *WORLD.SCP file.
+        // Load another section of the *WORLD.SCP file.
 
-	if ( ! m_File.FindNextSection())
-	{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage && pStorage->IsEnabled())
+        {
+                return LoadSectionFromStorage();
+        }
+
+        if ( ! m_File.FindNextSection())
+        {
 		if ( m_File.IsSectionType( "EOF" ))
 		{
 			// The only valid way to end.
@@ -588,7 +1411,8 @@ bool CWorld::Load() // Load world from script
 	if ( ! LoadRegions())
 		return( false );
 
-	bool fMySQLConnected = false;
+        bool fMySQLConnected = false;
+        bool fStorageEnabled = false;
 	const CServer::MySQLConfig & mySQLConfig = g_Serv.GetMySQLConfig();
 	if ( mySQLConfig.m_fEnable )
 	{
@@ -610,7 +1434,8 @@ bool CWorld::Load() // Load world from script
 			goto mysql_fail;
 		}
 
-		fMySQLConnected = true;
+                fMySQLConnected = true;
+                fStorageEnabled = ( m_pStorage != NULL && m_pStorage->IsEnabled());
 	}
 	else if ( m_pStorage )
 	{
@@ -621,55 +1446,66 @@ bool CWorld::Load() // Load world from script
 	if ( ! LoadAccounts( false ))
 		return( false );
 
-	CGString sSaveName;
-	sSaveName.Format( "%s" GRAY_FILE "world", (const TCHAR*) g_Serv.m_sWorldBaseDir );
-
-	if ( ! m_File.Open( sSaveName ))
+	if ( fStorageEnabled )
 	{
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "No world data file\n" );
+		if ( ! LoadFromStorage())
+		{
+			goto mysql_fail;
+		}
 	}
 	else
 	{
-		g_Serv.SysMessage( "World Is Loading...\n" );
+		CGString sSaveName;
+		sSaveName.Format( "%s" GRAY_FILE "world", (const TCHAR*) g_Serv.m_sWorldBaseDir );
 
-		// Find the size of the file.
-		m_lLoadSize = m_File.GetLength();
-		m_iSaveStage = 0;	// Load stage as well.
-		g_Log.SetScriptContext( &m_File );
-
-		// Read the header stuff first.
-		CScriptObj::r_Load( m_File );
-
-		while ( m_File.IsFileOpen())
+		if ( ! m_File.Open( sSaveName ))
 		{
-			if ( g_Serv.m_fSecure )	// enable the try code.
-			{
-				try
-				{
-                                if ( ! LoadSection())
-                                {
-                                        g_Log.SetScriptContext( NULL );
-                                        goto mysql_fail;
-                                }
-				}
-				catch (...)	// catch all
-				{
-					g_Log.Event( LOGM_INIT|LOGL_CRIT, "Load Exception line %d " GRAY_TITLE " is UNSTABLE!\n", m_File.GetLineNumber());
-				}
-			}
-			else
-			{
-                                if ( ! LoadSection())
-                                {
-                                        g_Log.SetScriptContext( NULL );
-                                        goto mysql_fail;
-                                }
-			}
+			g_Log.Event( LOGM_INIT|LOGL_ERROR, "No world data file\n" );
 		}
-		m_File.Close();
+		else
+		{
+			g_Serv.SysMessage( "World Is Loading...\n" );
+
+			// Find the size of the file.
+			m_lLoadSize = m_File.GetLength();
+			m_iSaveStage = 0;	// Load stage as well.
+			g_Log.SetScriptContext( &m_File );
+
+			// Read the header stuff first.
+			CScriptObj::r_Load( m_File );
+
+			while ( m_File.IsFileOpen())
+			{
+				if ( g_Serv.m_fSecure )	// enable the try code.
+				{
+					try
+					{
+						if ( ! LoadSection())
+						{
+							g_Log.SetScriptContext( NULL );
+							goto mysql_fail;
+						}
+					}
+					catch (...)	// catch all
+					{
+						g_Log.Event( LOGM_INIT|LOGL_CRIT, "Load Exception line %d " GRAY_TITLE " is UNSTABLE!\n", m_File.GetLineNumber());
+					}
+				}
+				else
+				{
+					if ( ! LoadSection())
+					{
+						g_Log.SetScriptContext( NULL );
+						goto mysql_fail;
+					}
+				}
+			}
+			m_File.Close();
+		}
+
+			g_Log.SetScriptContext( NULL );
 	}
 
-	g_Log.SetScriptContext( NULL );
 
 	m_Clock_Startup = GetTime();
 	m_Clock_Save = GetTime() + g_Serv.m_iSavePeriod;	// next save time.
@@ -845,7 +1681,7 @@ void CWorld::Close()
 		m_pStorage.reset();
 	}
 
-	m_ObjDelete.DeleteAll();	// clean up our delete list.
+	FlushDeletedObjects();	// clean up our delete list.
 	m_ItemsNew.DeleteAll();
 	m_CharsNew.DeleteAll();
 	m_UIDs.RemoveAll();
@@ -1001,11 +1837,12 @@ void CWorld::GarbageCollection()
 		int iResultCode = FixObj( pObj, i );
 		if ( iResultCode )
 		{
-			// Do an immediate delete here instead of Delete()
-			try
-			{
-				delete pObj;
-			}
+		// Do an immediate delete here instead of Delete()
+		NotifyStorageObjectRemoved( pObj );
+		try
+		{
+			delete pObj;
+		}
 			catch(...)
 			{
 			}
@@ -1021,7 +1858,7 @@ void CWorld::GarbageCollection()
 	}
 
 	World_fDeleteCycle = true;
-	m_ObjDelete.DeleteAll();	// clean up our delete list.
+	FlushDeletedObjects();	// clean up our delete list.
 	World_fDeleteCycle = false;
 
 	if ( iCount != CObjBase::sm_iCount )	// All objects must be accounted for.
@@ -1465,7 +2302,7 @@ void CWorld::OnTick()
 		}
 
 		World_fDeleteCycle = true;
-		m_ObjDelete.DeleteAll();	// clean up our delete list.
+		FlushDeletedObjects();	// clean up our delete list.
 		World_fDeleteCycle = false;
 	}
 	if ( m_Clock_Save <= GetTime())
