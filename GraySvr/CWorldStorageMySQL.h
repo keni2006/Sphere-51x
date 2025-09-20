@@ -24,7 +24,7 @@ struct in_addr;
 #ifdef _WIN32
 #include <winsock2.h>
 #include <windows.h>
-#include <winsock/mysql.h>
+#include <mysql.h>
 #else
 #include <mysql/mysql.h>
 #endif
