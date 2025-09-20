@@ -587,9 +587,6 @@ bool CWorld::Load() // Load world from script
 	// Load region info.
 	if ( ! LoadRegions())
 		return( false );
-	// Load all the accounts.
-	if ( ! LoadAccounts( false ))
-		return( false );
 
 	bool fMySQLConnected = false;
 	const CServer::MySQLConfig & mySQLConfig = g_Serv.GetMySQLConfig();
@@ -607,19 +604,22 @@ bool CWorld::Load() // Load world from script
 			goto mysql_fail;
 		}
 
-		fMySQLConnected = true;
-
 		if ( m_pStorage && ! m_pStorage->EnsureSchema())
 		{
 			g_Log.Event( LOGM_INIT|LOGL_FATAL, "Failed to initialize MySQL schema.\n" );
 			goto mysql_fail;
 		}
+
+		fMySQLConnected = true;
 	}
 	else if ( m_pStorage )
 	{
 		m_pStorage->Disconnect();
 		m_pStorage.reset();
 	}
+
+	if ( ! LoadAccounts( false ))
+		return( false );
 
 	CGString sSaveName;
 	sSaveName.Format( "%s" GRAY_FILE "world", (const TCHAR*) g_Serv.m_sWorldBaseDir );

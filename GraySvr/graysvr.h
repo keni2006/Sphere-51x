@@ -29,6 +29,7 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include "../common/cregion.h"
 #include "../common/cgraymap.h"
 #include "CParty.h"
+#include "CWorldStorageMySQL.h"
 #include <memory>
 #include <set>
 #include <string>
@@ -74,8 +75,6 @@ struct CServerMySQLConfig
                 m_iReconnectDelay = 5;
         }
 };
-
-class CWorldStorageMySQL;
 
 ///////////////////////////////////////////////
 
@@ -700,6 +699,7 @@ public:
 	static int NameStrip( TCHAR * pszNameOut, const TCHAR * pszNameInp );
 	static PLEVEL_TYPE GetPrivLevelText( const TCHAR * pszFlags );
 
+	bool r_Load( CScript & s );
 	bool r_LoadVal( CScript & s );
 	bool r_WriteVal( const TCHAR *pKey, CGString &sVal, CTextConsole * pSrc );
 	bool r_Verb( CScript &s, CTextConsole * pSrc );
@@ -4875,11 +4875,16 @@ public:
 	static const TCHAR * sm_KeyTable[];
 
 private:
-	bool LoadSection();
-	bool LoadRegions( CScript & s );
+        bool LoadSection();
+        bool LoadRegions( CScript & s );
+        bool LoadAccountsFromScripts( bool fChanges, bool fClearChanges );
+        bool LoadAccountsMySQL( bool fChanges, bool fClearChanges );
+        bool ImportLegacyAccountsToMySQL();
+        void ApplyAccountData( CAccount & account, const CWorldStorageMySQL::AccountData & data );
+        CGString GetAccountFilePath( bool fChanges );
 
-	void SaveTry(bool fForceImmediate); // Save world state
-	void GarbageCollection_New();
+        void SaveTry(bool fForceImmediate); // Save world state
+        void GarbageCollection_New();
 	void GarbageCollection_GMPages();
 	int FixObjTry( CObjBase * pObj, int iUID = 0 );
 	bool SaveStage();

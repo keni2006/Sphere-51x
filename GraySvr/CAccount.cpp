@@ -13,33 +13,39 @@ void globalstartsymbol()	// put this here as just the starting offset.
 
 bool CWorld::LoadAccounts( bool fChanges, bool fClearChanges )
 {
-	// Load the accounts file. (at start up)
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage && pStorage->IsConnected())
+        {
+                return LoadAccountsMySQL( fChanges, fClearChanges );
+        }
+        return LoadAccountsFromScripts( fChanges, fClearChanges );
+}
 
-	const TCHAR * pszBaseName;
-	if ( fChanges )
-	{
-		pszBaseName = GRAY_FILE "acct"; // Open script file
-	}
-	else
-	{
-		pszBaseName = GRAY_FILE "accu";
-	}
+CGString CWorld::GetAccountFilePath( bool fChanges )
+{
+        const TCHAR * pszBaseName = fChanges ? GRAY_FILE "acct" : GRAY_FILE "accu";
 
-	if ( g_Serv.m_sAcctBaseDir.IsEmpty())
-	{
-		g_Serv.m_sAcctBaseDir = g_Serv.m_sWorldBaseDir;
-	}
+        if ( g_Serv.m_sAcctBaseDir.IsEmpty())
+        {
+                g_Serv.m_sAcctBaseDir = g_Serv.m_sWorldBaseDir;
+        }
 
-	CGString sLoadName;
-	sLoadName.Format( _TEXT("%s%s"), (const TCHAR*) g_Serv.m_sAcctBaseDir, pszBaseName );
+        CGString sPath;
+        sPath.Format( _TEXT("%s%s"), (const TCHAR*) g_Serv.m_sAcctBaseDir, pszBaseName );
+        return sPath;
+}
+
+bool CWorld::LoadAccountsFromScripts( bool fChanges, bool fClearChanges )
+{
+	CGString sLoadName = GetAccountFilePath( fChanges );
 
 	CScript s;
 	if ( ! s.Open( sLoadName ))
 	{
 		if ( ! fChanges )
 		{
-			if ( LoadAccounts( true ))	// if we have changes then we are ok.
-				return( true );
+			if ( LoadAccountsFromScripts( true, fClearChanges ))
+				return true;
 			g_Log.Event( LOGL_FATAL|LOGM_INIT, "Can't open account file '%s'\n", s.GetFilePath());
 		}
 		return false;
@@ -48,19 +54,15 @@ bool CWorld::LoadAccounts( bool fChanges, bool fClearChanges )
 	if ( fClearChanges )
 	{
 		ASSERT( fChanges );
-		// empty the changes file.
 		s.Close();
 		s.Open( NULL, OF_WRITE );
 		s.WriteStr( "// Accounts are periodically moved to the " GRAY_FILE "accu" GRAY_SCRIPT " file.\n"
 			"// All account changes should be made here.\n"
-			"// Use the /ACCOUNT UPDATE command to force accounts to update.\n"
-			);
+			"// Use the /ACCOUNT UPDATE command to force accounts to update.\n" );
 		return true;
 	}
 
-	int iAccounts = 0;
-
-	while (s.FindNextSection())
+	while ( s.FindNextSection())
 	{
 		CAccount * pAccount = AccountFind( s.GetKey());
 		if ( pAccount )
@@ -76,64 +78,277 @@ bool CWorld::LoadAccounts( bool fChanges, bool fClearChanges )
 			if ( ! CAccount::NameStrip( szName, s.GetKey()))
 				continue;
 			pAccount = new CAccount( szName );
-			ASSERT(pAccount);
-			iAccounts ++;
+			ASSERT( pAccount );
 		}
 		pAccount->r_Load( s );
 	}
 
 	if ( ! fChanges )
 	{
-		LoadAccounts( true );
+		LoadAccountsFromScripts( true, fClearChanges );
 	}
 
-	return( true );
+	return true;
 }
+
+
+bool CWorld::LoadAccountsMySQL( bool fChanges, bool fClearChanges )
+{
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsConnected())
+        {
+                return false;
+        }
+
+        if ( fClearChanges )
+        {
+                return true;
+        }
+
+        if ( ! pStorage->IsLegacyImportCompleted())
+        {
+                if ( ! ImportLegacyAccountsToMySQL())
+                {
+                        return false;
+                }
+        }
+
+        std::vector<CWorldStorageMySQL::AccountData> accounts;
+        bool fResult = fChanges ? pStorage->LoadChangedAccounts( accounts ) : pStorage->LoadAllAccounts( accounts );
+        if ( ! fResult )
+        {
+                return false;
+        }
+
+        for ( size_t i = 0; i < accounts.size(); ++i )
+        {
+                const CWorldStorageMySQL::AccountData & data = accounts[i];
+                CAccount * pAccount = AccountFind( (const TCHAR *) data.m_sName, true );
+                ASSERT( pAccount );
+                ApplyAccountData( *pAccount, data );
+        }
+
+        return true;
+}
+
+bool CWorld::ImportLegacyAccountsToMySQL()
+{
+	CWorldStorageMySQL * pStorage = Storage();
+	if ( pStorage == NULL || ! pStorage->IsConnected())
+	{
+		return false;
+	}
+
+	if ( pStorage->IsLegacyImportCompleted())
+	{
+		return true;
+	}
+
+	std::vector<CWorldStorageMySQL::AccountData> existing;
+	if ( ! pStorage->LoadAllAccounts( existing ))
+	{
+		return false;
+	}
+	if ( ! existing.empty())
+	{
+		return pStorage->SetLegacyImportCompleted();
+	}
+
+	CGString sLegacyPath = GetAccountFilePath( false );
+	CScript s;
+	if ( ! s.Open( sLegacyPath, OF_NONCRIT ))
+	{
+		return pStorage->SetLegacyImportCompleted();
+	}
+	CGString sResolved = s.GetFilePath();
+	s.Close();
+
+	g_Log.Event( LOGM_INIT|LOGL_EVENT, "Importing legacy accounts from '%s'.
+", (const TCHAR *) sResolved );
+
+	if ( ! LoadAccountsFromScripts( false, false ))
+	{
+		g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to import legacy accounts from '%s'.
+", (const TCHAR *) sResolved );
+		return false;
+	}
+
+	bool fSuccess = true;
+	for ( int i = 0; i < m_Accounts.GetCount(); ++i )
+	{
+		if ( ! pStorage->UpsertAccount( *m_Accounts[i] ))
+		{
+			fSuccess = false;
+		}
+	}
+	if ( ! fSuccess )
+	{
+		g_Log.Event( LOGM_ACCOUNTS|LOGL_ERROR, "One or more accounts failed to import into MySQL storage.
+" );
+		return false;
+	}
+
+	if ( ! pStorage->SetLegacyImportCompleted())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+
+void CWorld::ApplyAccountData( CAccount & account, const CWorldStorageMySQL::AccountData & data )
+{
+        account.SetPassword( data.m_sPassword );
+
+        PLEVEL_TYPE plevel = (PLEVEL_TYPE) data.m_iPrivLevel;
+        if ( plevel < 0 )
+        {
+                plevel = PLEVEL_Player;
+        }
+        else if ( plevel >= PLEVEL_QTY )
+        {
+                plevel = (PLEVEL_TYPE)( PLEVEL_QTY - 1 );
+        }
+        account.SetPrivLevel( plevel );
+
+        account.m_PrivFlags = (WORD) data.m_uPrivFlags;
+        account.ClearPrivFlags( PRIV_BLOCKED | PRIV_JAILED );
+        if ( data.m_uStatus & 0x1 )
+        {
+                account.SetPrivFlags( PRIV_BLOCKED );
+        }
+        if ( data.m_uStatus & 0x2 )
+        {
+                account.SetPrivFlags( PRIV_JAILED );
+        }
+
+        account.m_sComment = data.m_sComment;
+        account.m_sEMail = data.m_sEmail;
+        account.m_sChatName = data.m_sChatName;
+
+        memset( account.m_lang, 0, sizeof(account.m_lang));
+        if ( ! data.m_sLanguage.IsEmpty())
+        {
+                strncpy( account.m_lang, (const TCHAR *) data.m_sLanguage, COUNTOF(account.m_lang) - 1 );
+        }
+
+        account.m_Total_Connect_Time = data.m_iTotalConnectTime;
+        account.m_Last_Connect_Time = data.m_iLastConnectTime;
+
+        if ( data.m_sLastIP.IsEmpty())
+        {
+                account.m_Last_IP.s_addr = 0;
+        }
+        else
+        {
+                account.m_Last_IP.s_addr = inet_addr( (const char *) data.m_sLastIP );
+        }
+
+        if ( data.m_sFirstIP.IsEmpty())
+        {
+                account.m_First_IP.s_addr = 0;
+        }
+        else
+        {
+                account.m_First_IP.s_addr = inet_addr( (const char *) data.m_sFirstIP );
+        }
+
+        if ( data.m_sLastLogin.IsEmpty())
+        {
+                memset( &account.m_Last_Connect_Date, 0, sizeof(account.m_Last_Connect_Date ));
+        }
+        else
+        {
+                CGString sLast = data.m_sLastLogin;
+                account.m_Last_Connect_Date.Read( sLast.GetBuffer());
+        }
+
+        if ( data.m_sFirstLogin.IsEmpty())
+        {
+                memset( &account.m_First_Connect_Date, 0, sizeof(account.m_First_Connect_Date ));
+        }
+        else
+        {
+                CGString sFirst = data.m_sFirstLogin;
+                account.m_First_Connect_Date.Read( sFirst.GetBuffer());
+        }
+
+        if ( data.m_uLastCharUID )
+        {
+                account.m_uidLastChar.SetUID( (UINT) data.m_uLastCharUID );
+        }
+        else
+        {
+                account.m_uidLastChar.ClearUID();
+        }
+
+        account.m_iEmailFailures = ( data.m_uEmailFailures > 0xFF ) ? 0xFF : (BYTE) data.m_uEmailFailures;
+
+        account.m_EMailSchedule.RemoveAll();
+        for ( size_t i = 0; i < data.m_EmailSchedule.size(); ++i )
+        {
+                account.m_EMailSchedule.Add( data.m_EmailSchedule[i] );
+        }
+}
+
 
 bool CWorld::SaveAccounts()
 {
-	// Look for changes FIRST.
-	LoadAccounts( true );
+        CWorldStorageMySQL * pStorage = Storage();
+        if ( pStorage && pStorage->IsConnected())
+        {
+                bool fSuccess = true;
+                for ( int i = 0; i < m_Accounts.GetCount(); i++ )
+                {
+                        if ( ! pStorage->UpsertAccount( *m_Accounts[i] ))
+                        {
+                                fSuccess = false;
+                        }
+                }
+                return fSuccess;
+        }
 
-	CGString sArchive;
-	GetBackupName( sArchive, 'a' );
+        LoadAccountsFromScripts( true, false );
 
-	// remove previous archive of same name
-	remove( sArchive );
+        CGString sArchive;
+        GetBackupName( sArchive, 'a' );
 
-	// rename previous save to archive name.
-	CGString sSaveName;
-	sSaveName.Format( "%s" GRAY_FILE "accu%s",
-		(const TCHAR*) g_Serv.m_sAcctBaseDir,
-		g_Serv.m_fSaveBinary ? GRAY_BINARY : GRAY_SCRIPT );
+        remove( sArchive );
 
-	if ( rename( sSaveName, sArchive ))
-	{
-		// May not exist if this is the first time.
-		g_Log.Event( LOGL_ERROR, "Account Save Rename to '%s' FAILED\n", (const TCHAR*) sArchive );
-	}
+        CGString sSaveName;
+        sSaveName.Format( "%s" GRAY_FILE "accu%s",
+                (const TCHAR*) g_Serv.m_sAcctBaseDir,
+                g_Serv.m_fSaveBinary ? GRAY_BINARY : GRAY_SCRIPT );
 
-	CScript s;
-	if ( ! s.Open( sSaveName, OF_WRITE|((g_Serv.m_fSaveBinary)?OF_BINARY:OF_TEXT)))
-	{
-		return( false );
-	}
+        if ( rename( sSaveName, sArchive ))
+        {
+                g_Log.Event( LOGL_ERROR, "Account Save Rename to '%s' FAILED\n
+", (const TCHAR*) sArchive );
+        }
 
-	s.Printf( "\\\\ " GRAY_TITLE " %s accounts file\n"
-		"\\\\ NOTE: This file cannot be edited while the server is running.\n"
-		"\\\\ Any file changes must be made to " GRAY_FILE "accu" GRAY_SCRIPT ". This is read in at save time.\n",
-		g_Serv.GetName());
+        CScript s;
+        if ( ! s.Open( sSaveName, OF_WRITE|((g_Serv.m_fSaveBinary)?OF_BINARY:OF_TEXT)))
+        {
+                return false;
+        }
 
-	int i=0;
-	for ( ; i<m_Accounts.GetCount(); i++ )
-	{
-		m_Accounts[i]->r_Write(s);
-	}
+        s.Printf( "\\ " GRAY_TITLE " %s accounts file
+",
+                "\\ NOTE: This file cannot be edited while the server is running.
+",
+                "\\ Any file changes must be made to " GRAY_FILE "accu" GRAY_SCRIPT ". This is read in at save time.
+",
+                g_Serv.GetName());
 
-	LoadAccounts( true, true );	// clear the change file now.
-	return( true );
+        for ( int i=0; i<m_Accounts.GetCount(); i++ )
+        {
+                m_Accounts[i]->r_Write(s);
+        }
+
+        LoadAccountsFromScripts( true, true );
+        return true;
 }
-
 CAccount * CWorld::AccountFind( const TCHAR * pszName, bool fAutoCreate, bool fGuest )
 {
 	TCHAR szName[ MAX_ACCOUNT_NAME_SIZE ];
@@ -622,6 +837,21 @@ const TCHAR * CAccount::sm_KeyTable[] = // static
 	"TOTALCONNECTTIME",
 };
 
+bool CAccount::r_Load( CScript & s )
+{
+        bool fRes = CScriptObj::r_Load( s );
+
+        CWorldStorageMySQL * pStorage = g_World.Storage();
+        if ( pStorage && pStorage->IsConnected())
+        {
+                if ( ! pStorage->UpsertAccount( *this ))
+                {
+                        g_Log.Event( LOGM_ACCOUNTS|LOGL_ERROR, "Failed to persist account '%s' after load.\n", GetName());
+                }
+        }
+        return fRes;
+}
+
 bool CAccount::r_WriteVal( const TCHAR *pKey, CGString &sVal, CTextConsole * pSrc )
 {
 	if ( ! pSrc ||
@@ -821,6 +1051,16 @@ plevel:
 
 void CAccount::r_Write( CScript & s )
 {
+        CWorldStorageMySQL * pStorage = g_World.Storage();
+        if ( pStorage && pStorage->IsConnected())
+        {
+                if ( ! pStorage->UpsertAccount( *this ))
+                {
+                        g_Log.Event( LOGM_ACCOUNTS|LOGL_ERROR, "Failed to persist account '%s' while writing.\n", GetName());
+                }
+                return;
+        }
+
 	if ( GetPrivLevel() >= PLEVEL_QTY ) 
 		return;
 
@@ -934,6 +1174,14 @@ bool CAccount::r_Verb( CScript &s, CTextConsole * pSrc )
 				return( false );
 			if ( pClient->GetAccount() == this ) // deleting myself at this point is bad.
 				return( false );
+		}
+		CWorldStorageMySQL * pStorage = g_World.Storage();
+		if ( pStorage && pStorage->IsConnected())
+		{
+			if ( ! pStorage->DeleteAccount( GetName()))
+			{
+				g_Log.Event( LOGM_ACCOUNTS|LOGL_ERROR, "Failed to remove account '%s' from MySQL storage.\n", GetName());
+			}
 		}
 		g_World.m_Accounts.DeleteOb( this );
 		return( true );
