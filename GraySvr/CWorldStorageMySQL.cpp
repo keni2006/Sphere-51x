@@ -376,13 +376,29 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 		const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
 		unsigned int uiPort = ( config.m_iPort > 0 ) ? (unsigned int) config.m_iPort : 0;
 
-		MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
-		if ( pResult != NULL )
-		{
-			g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u.\n", pszHost ? pszHost : "localhost", uiPort );
-			StartDirtyWorker();
-			return true;
-		}
+                MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
+                if ( pResult != NULL )
+                {
+                        const char * pszRequestedCharset = config.m_sCharset.IsEmpty() ? "utf8mb4" : (const char *) config.m_sCharset;
+                        if ( mysql_set_character_set( m_pConnection, pszRequestedCharset ) != 0 )
+                        {
+                                LogMySQLError( m_pConnection, "mysql_set_character_set" );
+                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to set MySQL connection character set to '%s'.\n", pszRequestedCharset );
+                                mysql_close( m_pConnection );
+                                m_pConnection = NULL;
+                                continue;
+                        }
+
+                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
+                        if ( pszActiveCharset == NULL )
+                        {
+                                pszActiveCharset = pszRequestedCharset;
+                        }
+
+                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszActiveCharset );
+                        StartDirtyWorker();
+                        return true;
+                }
 
 		LogMySQLError( m_pConnection, "mysql_real_connect" );
 		mysql_close( m_pConnection );

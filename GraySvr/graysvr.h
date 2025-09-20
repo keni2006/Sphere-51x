@@ -59,6 +59,7 @@ struct CServerMySQLConfig
         CGString m_sUser;
         CGString m_sPassword;
         CGString m_sTablePrefix;
+        CGString m_sCharset;
         bool m_fAutoReconnect;
         int m_iReconnectTries;
         int m_iReconnectDelay;
@@ -72,6 +73,7 @@ struct CServerMySQLConfig
                 m_sUser.Empty();
                 m_sPassword.Empty();
                 m_sTablePrefix.Empty();
+                m_sCharset = "utf8mb4";
                 m_fAutoReconnect = true;
                 m_iReconnectTries = 3;
                 m_iReconnectDelay = 5;
