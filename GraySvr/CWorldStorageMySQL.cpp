@@ -26,6 +26,34 @@ namespace
         static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
         static const int CURRENT_SCHEMA_VERSION = 3;
+
+        WORD GetMySQLErrorLogMask( LOGL_TYPE level )
+        {
+                WORD wMask = static_cast<WORD>( level );
+                if ( g_Serv.IsLoading())
+                {
+                        wMask |= LOGM_INIT;
+                }
+                return wMask;
+        }
+
+        void LogMySQLError( MYSQL * pConnection, const char * context )
+        {
+                if ( pConnection == NULL )
+                {
+                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL %s error: no active connection.\n", context );
+                        return;
+                }
+
+                const unsigned int uiError = mysql_errno( pConnection );
+                const char * pszError = mysql_error( pConnection );
+                if ( pszError == NULL || pszError[0] == '\0' )
+                {
+                        pszError = "Unknown MySQL client error";
+                }
+
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL %s error (%u): %s\n", context, uiError, pszError );
+        }
 }
 
 CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool fAutoBegin ) :
@@ -356,7 +384,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 			return true;
 		}
 
-		LogMySQLError( "mysql_real_connect" );
+		LogMySQLError( m_pConnection, "mysql_real_connect" );
 		mysql_close( m_pConnection );
 		m_pConnection = NULL;
 
@@ -422,7 +450,7 @@ bool CWorldStorageMySQL::Query( const CGString & query, MYSQL_RES ** ppResult )
 
         if ( mysql_query( m_pConnection, query ) != 0 )
         {
-                LogMySQLError( "mysql_query" );
+			LogMySQLError( m_pConnection, "mysql_query" );
                 g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s\n", (const char *) query );
                 return false;
         }
@@ -432,7 +460,7 @@ bool CWorldStorageMySQL::Query( const CGString & query, MYSQL_RES ** ppResult )
                 *ppResult = mysql_store_result( m_pConnection );
                 if ( *ppResult == NULL && mysql_errno( m_pConnection ) != 0 )
                 {
-                        LogMySQLError( "mysql_store_result" );
+				LogMySQLError( m_pConnection, "mysql_store_result" );
                         g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed to fetch result for query: %s\n", (const char *) query );
                         return false;
                 }
@@ -500,7 +528,7 @@ bool CWorldStorageMySQL::BeginTransaction()
         {
                 if ( mysql_query( m_pConnection, "START TRANSACTION" ) != 0 )
                 {
-                        LogMySQLError( "START TRANSACTION" );
+				LogMySQLError( m_pConnection, "START TRANSACTION" );
                         return false;
                 }
         }
@@ -525,7 +553,7 @@ bool CWorldStorageMySQL::CommitTransaction()
         {
                 if ( mysql_query( m_pConnection, "COMMIT" ) != 0 )
                 {
-                        LogMySQLError( "COMMIT" );
+				LogMySQLError( m_pConnection, "COMMIT" );
                         m_iTransactionDepth = 0;
                         return false;
                 }
@@ -546,7 +574,7 @@ bool CWorldStorageMySQL::RollbackTransaction()
 
         if ( mysql_query( m_pConnection, "ROLLBACK" ) != 0 )
         {
-                        LogMySQLError( "ROLLBACK" );
+				LogMySQLError( m_pConnection, "ROLLBACK" );
                         m_iTransactionDepth = 0;
                         return false;
         }
@@ -2867,62 +2895,34 @@ bool CWorldStorageMySQL::EnsureSchema()
         {
                 g_Log.Event( LOGM_INIT|LOGL_ERROR, "Cannot ensure schema without an active MySQL connection.\n" );
                 return false;
-	}
-
-	if ( ! EnsureSchemaVersionTable())
-	{
-		return false;
-	}
-
-	int iVersion = GetSchemaVersion();
-	if ( iVersion < 0 )
-	{
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to read MySQL schema version.\n" );
-		return false;
-	}
-
-	while ( iVersion < CURRENT_SCHEMA_VERSION )
-	{
-		if ( ! ApplyMigration( iVersion ))
-		{
-			return false;
-		}
-		iVersion = GetSchemaVersion();
-		if ( iVersion < 0 )
-		{
-			g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to read MySQL schema version after migration.\n" );
-			return false;
-		}
-	}
-
-	return true;
-}
-
-WORD CWorldStorageMySQL::GetMySQLErrorLogMask( LOGL_TYPE level ) const
-{
-        WORD wMask = static_cast<WORD>( level );
-        if ( g_Serv.IsLoading())
-        {
-                wMask |= LOGM_INIT;
-        }
-        return wMask;
-}
-
-void CWorldStorageMySQL::LogMySQLError( const char * context )
-{
-        if ( m_pConnection == NULL )
-        {
-                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL %s error: no active connection.\n", context );
-                return;
         }
 
-        const unsigned int uiError = mysql_errno( m_pConnection );
-        const char * pszError = mysql_error( m_pConnection );
-        if ( pszError == NULL || pszError[0] == '\0' )
+        if ( ! EnsureSchemaVersionTable())
         {
-                pszError = "Unknown MySQL client error";
+                return false;
         }
 
-        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL %s error (%u): %s\n", context, uiError, pszError );
+        int iVersion = GetSchemaVersion();
+        if ( iVersion < 0 )
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to read MySQL schema version.\n" );
+                return false;
+        }
+
+        while ( iVersion < CURRENT_SCHEMA_VERSION )
+        {
+                if ( ! ApplyMigration( iVersion ))
+                {
+                        return false;
+                }
+                iVersion = GetSchemaVersion();
+                if ( iVersion < 0 )
+                {
+                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to read MySQL schema version after migration.\n" );
+                        return false;
+                }
+        }
+
+        return true;
 }
 
