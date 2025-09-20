@@ -584,6 +584,49 @@ void SetConsoleColor(WORD color)         //console color
         HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
         SetConsoleTextAttribute(hConsole, color);
 }
+
+static void WaitForConsoleClose(HANDLE hConsoleIn)
+{
+        ASSERT(hConsoleIn != INVALID_HANDLE_VALUE);
+
+        while ( true )
+        {
+                DWORD dwWait = WaitForSingleObject(hConsoleIn, INFINITE);
+                if ( dwWait == WAIT_OBJECT_0 )
+                {
+                        INPUT_RECORD inputRecord;
+                        DWORD dwRead = 0;
+                        if ( !ReadConsoleInput(hConsoleIn, &inputRecord, 1, &dwRead ))
+                        {
+                                if ( GetLastError() == ERROR_INVALID_HANDLE )
+                                {
+                                        break;
+                                }
+                                break;
+                        }
+
+                        (void)dwRead;
+
+                        if ( inputRecord.EventType == KEY_EVENT && inputRecord.Event.KeyEvent.bKeyDown )
+                        {
+                                // Drop keyboard input on the floor so the console stays open
+                                // until the user explicitly closes it (or interrupts with Ctrl+C).
+                                continue;
+                        }
+                }
+                else
+                {
+                        if ( dwWait == WAIT_FAILED )
+                        {
+                                if ( GetLastError() == ERROR_INVALID_HANDLE )
+                                {
+                                        break;
+                                }
+                                break;
+                        }
+                }
+        }
+}
 #else
 namespace
 {
@@ -653,7 +696,13 @@ int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 
 		const TCHAR* pszLabel = NULL;
 
-		switch (wMask & 0x07)
+		const LOGL_TYPE eSeverity = (LOGL_TYPE)( wMask & 0x07 );
+		if ( eSeverity <= LOGL_ERROR )
+		{
+			m_fCriticalLogged = true;
+		}
+
+		switch ( eSeverity )
 		{
 		case LOGL_FATAL:   // fatal error!
 			pszLabel = "FATAL:";
@@ -974,16 +1023,46 @@ world_bail:
 	if ( g_Serv.m_iExitCode )
 	{
 		g_Log.Event( LOGL_FATAL, "Server terminated by error %d!\n", g_Serv.m_iExitCode );
-#ifdef _WIN32
-		g_Serv.SysMessage( "Press any key to exit" );
-		while ( _getch() == 0 ) ;
-#endif
 	}
 	else
 	{
 		g_Log.Event( LOGL_EVENT, "Server shutdown complete!\n");
 	}
+
+#ifdef _WIN32
+	const HANDLE hConsoleIn = GetStdHandle(STD_INPUT_HANDLE);
+	bool fConsoleInteractive = false;
+	if ( hConsoleIn != INVALID_HANDLE_VALUE )
+	{
+		DWORD dwConsoleMode = 0;
+		if ( GetConsoleMode(hConsoleIn, &dwConsoleMode))
+		{
+			fConsoleInteractive = true;
+
+			FlushConsoleInputBuffer(hConsoleIn);
+
+			if ( g_Serv.m_iExitCode || g_Log.HasLoggedCritical())
+			{
+				g_Serv.SysMessage( "Close this window or press Ctrl+C to exit (errors logged)" );
+			}
+			else
+			{
+				g_Serv.SysMessage( "Close this window or press Ctrl+C to exit" );
+			}
+
+			fflush(stdout);
+		}
+	}
+#endif
+
 	g_Log.Close();
+
+#ifdef _WIN32
+	if ( fConsoleInteractive )
+	{
+		WaitForConsoleClose(hConsoleIn);
+	}
+#endif
 
 	return( g_Serv.m_iExitCode );
 }
