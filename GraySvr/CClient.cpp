@@ -1602,7 +1602,7 @@ bool CClient::Cmd_Skill_Tracking( int track_sel, bool fExec )
 			track_sel = COUNTOF(Track_Brain)-1;
 		NPCBRAIN_TYPE track_type = Track_Brain[ track_sel ];
 
-		CMenuItem item[ min( MAX_MENU_ITEMS, COUNTOF( m_tmMenu )) ];
+		CMenuItem item[MAX_MENU_ITEMS];
 		int count = 0;
 
 		item[0].m_id = TARGMODE_MENU_SKILL_TRACK;
@@ -1752,7 +1752,7 @@ bool CClient::Cmd_Skill_Menu( SKILL_TYPE iSkill, int iOffset, int iSelect )
 	if ( ! s.ReadKey())
 		return( false );
 
-	CMenuItem item[ min( COUNTOF( m_tmMenu ), MAX_MENU_ITEMS ) ];
+	CMenuItem item[MAX_MENU_ITEMS];
 	if ( iSelect < 0 )
 	{
 		item[0].m_id = TARGMODE_MENU_SKILL;
