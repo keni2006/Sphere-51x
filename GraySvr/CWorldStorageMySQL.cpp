@@ -381,216 +381,30 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 if ( pResult != NULL )
                 {
                         const char * pszRequestedCharset = config.m_sCharset.IsEmpty() ? "utf8mb4" : (const char *) config.m_sCharset;
-
-                        bool fCharsetListingUnavailable = false;
-
-                        auto trySetCharacterSet = [&]( const char * pszCharset, LOGL_TYPE logLevel ) -> bool
+                        if ( mysql_set_character_set( m_pConnection, pszRequestedCharset ) != 0 )
                         {
-                                if ( pszCharset == NULL || pszCharset[0] == '\0' )
-                                {
-                                        m_sTableCharset.Empty();
-                                        return true;
-                                }
-
-                                if ( mysql_set_character_set( m_pConnection, pszCharset ) != 0 )
-                                {
-                                        LogMySQLError( m_pConnection, "mysql_set_character_set" );
-                                        g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s'.\n", pszCharset );
-                                        return false;
-                                }
-
-                                const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
-                                if ( pszActiveCharset == NULL )
-                                {
-                                        pszActiveCharset = pszCharset;
-                                }
-
-                                m_sTableCharset = pszActiveCharset;
-                                return true;
-                        };
-
-                        auto fetchServerVariable = [&]( const char * pszVariableName ) -> CGString
-                        {
-                                CGString sValue;
-                                if ( pszVariableName == NULL || pszVariableName[0] == '\0' )
-                                {
-                                        return sValue;
-                                }
-
-                                CGString sQuery;
-                                sQuery.Format( "SHOW VARIABLES LIKE '%s';", pszVariableName );
-                                if ( mysql_query( m_pConnection, sQuery ) != 0 )
-                                {
-                                        LogMySQLError( m_pConnection, "SHOW VARIABLES" );
-                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to query MySQL variable '%s'.\n", pszVariableName );
-                                        return sValue;
-                                }
-
-                                MYSQL_RES * pResult = mysql_store_result( m_pConnection );
-                                if ( pResult == NULL )
-                                {
-                                        if ( mysql_errno( m_pConnection ) != 0 )
-                                        {
-                                                LogMySQLError( m_pConnection, "mysql_store_result" );
-                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to read MySQL variable '%s'.\n", pszVariableName );
-                                        }
-                                        return sValue;
-                                }
-
-                                MYSQL_ROW pRow = mysql_fetch_row( pResult );
-                                if ( pRow != NULL && mysql_num_fields( pResult ) >= 2 && pRow[1] != NULL )
-                                {
-                                        sValue = pRow[1];
-                                }
-                                mysql_free_result( pResult );
-                                return sValue;
-                        };
-
-                        auto isCharsetAvailable = [&]( const char * pszCharset ) -> bool
-                        {
-                                if ( pszCharset == NULL || pszCharset[0] == '\0' )
-                                {
-                                        return false;
-                                }
-
-                                CGString sQuery;
-                                sQuery.Format( "SHOW CHARACTER SET WHERE Charset = '%s';", pszCharset );
-                                if ( mysql_query( m_pConnection, sQuery ) != 0 )
-                                {
-                                        LogMySQLError( m_pConnection, "SHOW CHARACTER SET" );
-                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to check support for MySQL character set '%s'.\n", pszCharset );
-                                        fCharsetListingUnavailable = true;
-                                        return false;
-                                }
-
-                                MYSQL_RES * pResult = mysql_store_result( m_pConnection );
-                                if ( pResult == NULL )
-                                {
-                                        if ( mysql_errno( m_pConnection ) != 0 )
-                                        {
-                                                LogMySQLError( m_pConnection, "mysql_store_result" );
-                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to read MySQL character set list while looking for '%s'.\n", pszCharset );
-                                        }
-                                        fCharsetListingUnavailable = true;
-                                        return false;
-                                }
-
-                                bool fAvailable = mysql_num_rows( pResult ) > 0;
-                                mysql_free_result( pResult );
-                                return fAvailable;
-                        };
-
-                        auto chooseTableCharset = [&]( const CGString & sConnectionCharset ) -> CGString
-                        {
-                                CGString sChosen;
-                                const char * pszConnectionCharset = sConnectionCharset.IsEmpty() ? NULL : (const char *) sConnectionCharset;
-                                if ( pszConnectionCharset != NULL && isCharsetAvailable( pszConnectionCharset ))
-                                {
-                                        sChosen = pszConnectionCharset;
-                                        return sChosen;
-                                }
-
-                                if ( pszRequestedCharset != NULL && isCharsetAvailable( pszRequestedCharset ))
-                                {
-                                        sChosen = pszRequestedCharset;
-                                        return sChosen;
-                                }
-
-                                static const char * const pszFallbackCharsets[] = { "utf8", "utf8mb3", "latin1", NULL };
-                                for ( size_t i = 0; pszFallbackCharsets[i] != NULL; ++i )
-                                {
-                                        if ( isCharsetAvailable( pszFallbackCharsets[i] ))
-                                        {
-                                                sChosen = pszFallbackCharsets[i];
-                                                return sChosen;
-                                        }
-                                }
-
-                                CGString sDatabaseCharset = fetchServerVariable( "character_set_database" );
-                                if ( ! sDatabaseCharset.IsEmpty() && isCharsetAvailable( sDatabaseCharset ))
-                                {
-                                        return sDatabaseCharset;
-                                }
-
-                                if ( pszConnectionCharset != NULL )
-                                {
-                                        sChosen = pszConnectionCharset;
-                                }
-                                return sChosen;
-                        };
-
-                        LOGL_TYPE initialFailureLog = LOGL_ERROR;
-                        if ( pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
-                        {
-                                initialFailureLog = LOGL_WARN;
-                        }
-
-                        bool fCharsetSet = trySetCharacterSet( pszRequestedCharset, initialFailureLog );
-                        if ( ! fCharsetSet && pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
-                        {
-                                const char * pszFallbackCharset = "utf8";
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL character set '%s' is not available, falling back to '%s'.\n", pszRequestedCharset, pszFallbackCharset );
-                                fCharsetSet = trySetCharacterSet( pszFallbackCharset, LOGL_ERROR );
-                        }
-
-                        if ( ! fCharsetSet )
-                        {
+                                LogMySQLError( m_pConnection, "mysql_set_character_set" );
+                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to set MySQL connection character set to '%s'.\n", pszRequestedCharset );
                                 mysql_close( m_pConnection );
                                 m_pConnection = NULL;
                                 m_sTableCharset.Empty();
                                 continue;
                         }
 
-                        CGString sConnectionCharset = m_sTableCharset;
-                        CGString sTableCharset = chooseTableCharset( sConnectionCharset );
-
-                        const char * pszConnectionCharset = sConnectionCharset.IsEmpty() ? NULL : (const char *) sConnectionCharset;
-                        if ( pszConnectionCharset == NULL || pszConnectionCharset[0] == '\0' )
+                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
+                        if ( pszActiveCharset == NULL )
                         {
-                                pszConnectionCharset = ( pszRequestedCharset != NULL && pszRequestedCharset[0] != '\0' ) ? pszRequestedCharset : NULL;
+                                pszActiveCharset = pszRequestedCharset;
                         }
 
-                        if ( sTableCharset.IsEmpty() && fCharsetListingUnavailable )
-                        {
-                                if ( pszConnectionCharset != NULL && pszConnectionCharset[0] != '\0' )
-                                {
-                                        sTableCharset = pszConnectionCharset;
-                                }
-                                else
-                                {
-                                        CGString sDatabaseCharset = fetchServerVariable( "character_set_database" );
-                                        if ( ! sDatabaseCharset.IsEmpty())
-                                        {
-                                                sTableCharset = sDatabaseCharset;
-                                        }
-                                }
-                        }
+                        m_sTableCharset = pszActiveCharset;
 
-                        if ( sTableCharset.IsEmpty())
-                        {
-                                sTableCharset = "latin1";
-                        }
-
-                        m_sTableCharset = sTableCharset;
-
-                        if ( pszConnectionCharset == NULL || pszConnectionCharset[0] == '\0' )
-                        {
-                                pszConnectionCharset = (const char *) m_sTableCharset;
-                        }
-
-                        const char * pszTableCharset = m_sTableCharset.IsEmpty() ? pszConnectionCharset : (const char *) m_sTableCharset;
-
-                        if ( pszConnectionCharset != NULL && pszTableCharset != NULL && strcmpi( pszConnectionCharset, pszTableCharset ) != 0 )
-                        {
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL connection character set '%s' is not supported for table definitions, using '%s' instead.\n", pszConnectionCharset, pszTableCharset );
-                        }
-
-                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s' (tables use '%s').\n", pszHost ? pszHost : "localhost", uiPort, pszConnectionCharset != NULL ? pszConnectionCharset : "unknown", pszTableCharset != NULL ? pszTableCharset : "unknown" );
+                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszActiveCharset );
                         StartDirtyWorker();
                         return true;
                 }
 
-                LogMySQLError( m_pConnection, "mysql_real_connect" );
+		LogMySQLError( m_pConnection, "mysql_real_connect" );
 		mysql_close( m_pConnection );
 		m_pConnection = NULL;
 
