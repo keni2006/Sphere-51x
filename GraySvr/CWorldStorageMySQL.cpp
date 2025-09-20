@@ -1261,6 +1261,7 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
 
 	std::vector<CGString> vQueries;
 	CGString sQuery;
+	CGString sCollationSuffix = GetDefaultTableCollationSuffix();
 
         sQuery.Format(
                 "CREATE TABLE IF NOT EXISTS `%s` ("
