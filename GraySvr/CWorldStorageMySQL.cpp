@@ -677,8 +677,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`name` VARCHAR(32) NOT NULL,"
                 "`password` VARCHAR(64) NOT NULL,"
                 "`plevel` INT NOT NULL DEFAULT 0,"
-                "`priv_flags` INT NOT NULL DEFAULT 0,"
-                "`status` INT NOT NULL DEFAULT 0,"
+                "`priv_flags` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
                 "`comment` TEXT NULL,"
                 "`email` VARCHAR(128) NULL,"
                 "`chat_name` VARCHAR(64) NULL,"
@@ -690,7 +690,7 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`first_ip` VARCHAR(45) NULL,"
                 "`first_login` DATETIME NULL,"
                 "`last_char_uid` BIGINT UNSIGNED NULL,"
-                "`email_failures` INT NOT NULL DEFAULT 0,"
+                "`email_failures` INT UNSIGNED NOT NULL DEFAULT 0,"
                 "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
                 "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                 "PRIMARY KEY (`id`),"
@@ -702,8 +702,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
         sQuery.Format(
                 "CREATE TABLE IF NOT EXISTS `%s` ("
                 "`account_id` INT UNSIGNED NOT NULL,"
-                "`sequence` INT NOT NULL,"
-                "`message_id` INT NOT NULL,"
+                "`sequence` SMALLINT UNSIGNED NOT NULL,"
+                "`message_id` SMALLINT UNSIGNED NOT NULL,"
                 "PRIMARY KEY (`account_id`, `sequence`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
@@ -733,14 +733,14 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
 		"`uid` BIGINT UNSIGNED NOT NULL,"
 		"`container_uid` BIGINT UNSIGNED NULL,"
 		"`owner_uid` BIGINT UNSIGNED NULL,"
-		"`type` INT NOT NULL DEFAULT 0,"
-		"`amount` INT NOT NULL DEFAULT 0,"
-		"`color` INT NOT NULL DEFAULT 0,"
-		"`position_x` INT NULL,"
-		"`position_y` INT NULL,"
-		"`position_z` INT NULL,"
-		"`map_plane` INT NULL,"
-		"`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "`type` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`amount` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`color` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`position_x` INT NULL,"
+                "`position_y` INT NULL,"
+                "`position_z` INT NULL,"
+                "`map_plane` INT NULL,"
+                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
 		"PRIMARY KEY (`uid`),"
 		"KEY `ix_items_container` (`container_uid`),"
 		"KEY `ix_items_owner` (`owner_uid`),"
@@ -782,12 +782,12 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
 		"`account_id` INT UNSIGNED NULL,"
 		"`character_uid` BIGINT UNSIGNED NULL,"
 		"`reason` TEXT NULL,"
-		"`status` INT NOT NULL DEFAULT 0,"
-		"`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-		"PRIMARY KEY (`id`),"
-		"KEY `ix_gm_pages_account` (`account_id`),"
-		"KEY `ix_gm_pages_character` (`character_uid`),"
-		"FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,"
+                "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "PRIMARY KEY (`id`),"
+                "KEY `ix_gm_pages_account` (`account_id`),"
+                "KEY `ix_gm_pages_character` (`character_uid`),"
+                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,"
 		"FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
 		(const char *) sGMPages, (const char *) sAccounts, (const char *) sCharacters );
@@ -799,13 +799,13 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
 		"`name` VARCHAR(64) NOT NULL,"
 		"`address` VARCHAR(128) NULL,"
 		"`port` INT NULL,"
-		"`status` INT NOT NULL DEFAULT 0,"
-		"`last_seen` DATETIME NULL,"
-		"PRIMARY KEY (`id`),"
-		"UNIQUE KEY `ux_servers_name` (`name`)"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sServers );
-	vQueries.push_back( sQuery );
+                "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
+                "`last_seen` DATETIME NULL,"
+                "PRIMARY KEY (`id`),"
+                "UNIQUE KEY `ux_servers_name` (`name`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sServers );
+        vQueries.push_back( sQuery );
 
 	sQuery.Format(
 		"CREATE TABLE IF NOT EXISTS `%s` ("
@@ -813,12 +813,12 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
 		"`character_uid` BIGINT UNSIGNED NULL,"
 		"`item_uid` BIGINT UNSIGNED NULL,"
 		"`expires_at` BIGINT NOT NULL,"
-		"`type` INT NOT NULL,"
-		"`data` TEXT NULL,"
-		"PRIMARY KEY (`id`),"
-		"KEY `ix_timers_character` (`character_uid`),"
-		"KEY `ix_timers_item` (`item_uid`),"
-		"FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
+                "`type` INT UNSIGNED NOT NULL,"
+                "`data` TEXT NULL,"
+                "PRIMARY KEY (`id`),"
+                "KEY `ix_timers_character` (`character_uid`),"
+                "KEY `ix_timers_item` (`item_uid`),"
+                "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
 		"FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
 		(const char *) sTimers, (const char *) sCharacters, (const char *) sItems );
@@ -840,7 +840,7 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
         const CGString sAccounts = GetPrefixedTableName( "accounts" );
         const CGString sAccountEmails = GetPrefixedTableName( "account_emails" );
 
-        if ( ! EnsureColumnExists( sAccounts, "priv_flags", "`priv_flags` INT NOT NULL DEFAULT 0 AFTER `plevel`" ))
+        if ( ! EnsureColumnExists( sAccounts, "priv_flags", "`priv_flags` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `plevel`" ))
         {
                 return false;
         }
@@ -876,7 +876,7 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
         {
                 return false;
         }
-        if ( ! EnsureColumnExists( sAccounts, "email_failures", "`email_failures` INT NOT NULL DEFAULT 0 AFTER `last_char_uid`" ))
+        if ( ! EnsureColumnExists( sAccounts, "email_failures", "`email_failures` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `last_char_uid`" ))
         {
                 return false;
         }
@@ -889,8 +889,8 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
         sQuery.Format(
                 "CREATE TABLE IF NOT EXISTS `%s` ("
                 "`account_id` INT UNSIGNED NOT NULL,"
-                "`sequence` INT NOT NULL,"
-                "`message_id` INT NOT NULL,"
+                "`sequence` SMALLINT UNSIGNED NOT NULL,"
+                "`message_id` SMALLINT UNSIGNED NOT NULL,"
                 "PRIMARY KEY (`account_id`, `sequence`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
@@ -934,6 +934,7 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "KEY `ix_world_objects_type` (`object_type`),\n"
                 "KEY `ix_world_objects_account` (`account_id`),\n"
                 "KEY `ix_world_objects_container` (`container_uid`),\n"
+                "KEY `ix_world_objects_top` (`top_level_uid`),\n"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,\n"
                 "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL,\n"
                 "FOREIGN KEY (`top_level_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL\n"
