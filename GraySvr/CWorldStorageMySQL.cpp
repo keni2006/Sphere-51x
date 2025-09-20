@@ -381,30 +381,66 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 if ( pResult != NULL )
                 {
                         const char * pszRequestedCharset = config.m_sCharset.IsEmpty() ? "utf8mb4" : (const char *) config.m_sCharset;
-                        if ( mysql_set_character_set( m_pConnection, pszRequestedCharset ) != 0 )
+
+                        auto trySetCharacterSet = [&]( const char * pszCharset, LOGL_TYPE logLevel ) -> bool
                         {
-                                LogMySQLError( m_pConnection, "mysql_set_character_set" );
-                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to set MySQL connection character set to '%s'.\n", pszRequestedCharset );
+                                if ( pszCharset == NULL || pszCharset[0] == '\0' )
+                                {
+                                        m_sTableCharset.Empty();
+                                        return true;
+                                }
+
+                                if ( mysql_set_character_set( m_pConnection, pszCharset ) != 0 )
+                                {
+                                        LogMySQLError( m_pConnection, "mysql_set_character_set" );
+                                        g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s'.\n", pszCharset );
+                                        return false;
+                                }
+
+                                const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
+                                if ( pszActiveCharset == NULL )
+                                {
+                                        pszActiveCharset = pszCharset;
+                                }
+
+                                m_sTableCharset = pszActiveCharset;
+                                return true;
+                        };
+
+                        LOGL_TYPE initialFailureLog = LOGL_ERROR;
+                        if ( pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
+                        {
+                                initialFailureLog = LOGL_WARN;
+                        }
+
+                        bool fCharsetSet = trySetCharacterSet( pszRequestedCharset, initialFailureLog );
+                        if ( ! fCharsetSet && pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
+                        {
+                                const char * pszFallbackCharset = "utf8";
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL character set '%s' is not available, falling back to '%s'.\n", pszRequestedCharset, pszFallbackCharset );
+                                fCharsetSet = trySetCharacterSet( pszFallbackCharset, LOGL_ERROR );
+                        }
+
+                        if ( ! fCharsetSet )
+                        {
                                 mysql_close( m_pConnection );
                                 m_pConnection = NULL;
                                 m_sTableCharset.Empty();
                                 continue;
                         }
 
-                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
-                        if ( pszActiveCharset == NULL )
+                        const char * pszActiveCharset = m_sTableCharset.IsEmpty() ? pszRequestedCharset : (const char *) m_sTableCharset;
+                        if ( pszActiveCharset == NULL || pszActiveCharset[0] == '\0' )
                         {
-                                pszActiveCharset = pszRequestedCharset;
+                                pszActiveCharset = "utf8mb4";
                         }
-
-                        m_sTableCharset = pszActiveCharset;
 
                         g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszActiveCharset );
                         StartDirtyWorker();
                         return true;
                 }
 
-		LogMySQLError( m_pConnection, "mysql_real_connect" );
+                LogMySQLError( m_pConnection, "mysql_real_connect" );
 		mysql_close( m_pConnection );
 		m_pConnection = NULL;
 
