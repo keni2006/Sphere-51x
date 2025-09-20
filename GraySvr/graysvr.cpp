@@ -653,7 +653,13 @@ int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 
 		const TCHAR* pszLabel = NULL;
 
-		switch (wMask & 0x07)
+		const LOGL_TYPE eSeverity = (LOGL_TYPE)( wMask & 0x07 );
+		if ( eSeverity <= LOGL_ERROR )
+		{
+			m_fCriticalLogged = true;
+		}
+
+		switch ( eSeverity )
 		{
 		case LOGL_FATAL:   // fatal error!
 			pszLabel = "FATAL:";
@@ -974,15 +980,33 @@ world_bail:
 	if ( g_Serv.m_iExitCode )
 	{
 		g_Log.Event( LOGL_FATAL, "Server terminated by error %d!\n", g_Serv.m_iExitCode );
-#ifdef _WIN32
-		g_Serv.SysMessage( "Press any key to exit" );
-		while ( _getch() == 0 ) ;
-#endif
 	}
 	else
 	{
 		g_Log.Event( LOGL_EVENT, "Server shutdown complete!\n");
 	}
+
+#ifdef _WIN32
+	const HANDLE hConsoleIn = GetStdHandle(STD_INPUT_HANDLE);
+	DWORD dwConsoleMode = 0;
+	if ( hConsoleIn != INVALID_HANDLE_VALUE && GetConsoleMode(hConsoleIn, &dwConsoleMode))
+	{
+		FlushConsoleInputBuffer(hConsoleIn);
+
+		if ( g_Serv.m_iExitCode || g_Log.HasLoggedCritical())
+		{
+			g_Serv.SysMessage( "Press any key to exit (errors logged)" );
+		}
+		else
+		{
+			g_Serv.SysMessage( "Press any key to exit" );
+		}
+
+		fflush(stdout);
+		while ( _getch() == 0 ) ;
+	}
+#endif
+
 	g_Log.Close();
 
 	return( g_Serv.m_iExitCode );

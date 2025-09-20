@@ -167,6 +167,7 @@ private:
 	CRealTime m_Stamp;			// last real time stamp.
 	CGString m_sBaseDir;
 	const CScript * m_pScriptContext;	// The current context.
+	bool m_fCriticalLogged;	// Has a fatal, critical, or error message been written?
 
 public:
 	const CScript * SetScriptContext( const CScript * pScriptContext )
@@ -186,6 +187,7 @@ public:
 		m_wMsgMask = LOGL_EVENT |
 			LOGM_INIT | LOGM_CLIENTS_LOG | LOGM_GM_PAGE;
 		SetFilePath( GRAY_FILE "log.log" );	// default name to go to.
+		m_fCriticalLogged = false;
 	}
 
 	bool Open( TCHAR * pszName = NULL );	// name set previously.
@@ -213,6 +215,11 @@ public:
 	{
 		return( IsLoggedMask(wMask) ||
 			( GetLogLevel() >= ( wMask & 0x0f )));
+	}
+
+	bool HasLoggedCritical() const
+	{
+		return( m_fCriticalLogged );
 	}
 
 	void Dump( const BYTE * pData, int len );
