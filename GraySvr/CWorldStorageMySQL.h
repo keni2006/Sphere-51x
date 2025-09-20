@@ -276,6 +276,8 @@ private:
         void UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts );
         CGString GetPrefixedTableName( const char * name ) const;
         const char * GetDefaultTableCharset() const;
+        const char * GetDefaultTableCollation() const;
+        CGString GetDefaultTableCollationSuffix() const;
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
         bool SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
@@ -293,6 +295,7 @@ private:
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
         CGString m_sTableCharset;
+        CGString m_sTableCollation;
         bool m_fAutoReconnect;
         int m_iReconnectTries;
         int m_iReconnectDelay;
