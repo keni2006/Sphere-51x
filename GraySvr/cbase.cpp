@@ -272,6 +272,8 @@ CObjBase::CObjBase( bool fItem )
 	m_color=COLOR_DEFAULT;
 	m_timeout=0;
 	m_uidOwner.ClearUID();
+	m_fStorageNew = !g_Serv.IsLoading();
+	m_fStorageDeleted = false;
 
 	if ( g_Serv.IsLoading())
 	{
@@ -349,56 +351,99 @@ void CObjBase::SetPrivateUID(UINT dwIndex, bool fItem )
 
 bool CObjBase::SetNamePool( const TCHAR * pszName )
 {
-	ASSERT(pszName);
+        ASSERT(pszName);
 
-	// Parse out the name from the name pool ?
-	if ( pszName[0] == '#' )
-	{
-		pszName ++;
-		TCHAR szTmp[ MAX_SCRIPT_LINE_LEN ];
-		strcpy( szTmp, pszName );
+        bool fResult = false;
 
-		TCHAR * ppTitles[2];
-		ParseCmds( szTmp, ppTitles, COUNTOF(ppTitles));
+        // Parse out the name from the name pool ?
+        if ( pszName[0] == '#' )
+        {
+                pszName ++;
+                TCHAR szTmp[ MAX_SCRIPT_LINE_LEN ];
+                strcpy( szTmp, pszName );
 
-		CScriptLock s;
-		if ( g_Serv.ScriptLock( s, SCPFILE_NAME_2, ppTitles[0] ) == NULL )
-		{
+                TCHAR * ppTitles[2];
+                ParseCmds( szTmp, ppTitles, COUNTOF(ppTitles));
+
+                CScriptLock s;
+                if ( g_Serv.ScriptLock( s, SCPFILE_NAME_2, ppTitles[0] ) == NULL )
+                {
 failout:
-			DEBUG_ERR(( "Name pool '%s' could not be found\n", ppTitles[0] ));
-			CObjBase::SetName( ppTitles[0] );
-			return false;
-		}
+                        DEBUG_ERR(( "Name pool '%s' could not be found\n", ppTitles[0] ));
+                        CObjBase::SetName( ppTitles[0] );
+                        return false;
+                }
 
-		// Pick a random name.
-		if ( ! s.ReadKey())
-			goto failout;
-		int iCount = GetRandVal( atoi( s.GetKey())) + 1;
-		while ( iCount-- )
-		{
-			if ( ! s.ReadKey())
-				goto failout;
-		}
+                // Pick a random name.
+                if ( ! s.ReadKey())
+                        goto failout;
+                int iCount = GetRandVal( atoi( s.GetKey())) + 1;
+                while ( iCount-- )
+                {
+                        if ( ! s.ReadKey())
+                                goto failout;
+                }
 
-		return CObjBaseTemplate::SetName( s.GetKey());
-	}
+                fResult = CObjBaseTemplate::SetName( s.GetKey());
+                goto done;
+        }
 
-	// NOTE: Name must be <= MAX_VISIBLE_NAME - items in game contains a lot of chars, so we must try setting the name to the available chars in the buffer
-	TCHAR szTmp[MAX_VISIBLE_NAME + 1];
-	int len = strlen( pszName );
-	if ( len >= MAX_VISIBLE_NAME)
+        // NOTE: Name must be <= MAX_VISIBLE_NAME - items in game contains a lot of chars, so we must try setting the name to the available chars in the buffer
+        TCHAR szTmp[MAX_VISIBLE_NAME + 1];
+        int len = strlen( pszName );
+        if ( len >= MAX_VISIBLE_NAME)
+        {
+                strncpy( szTmp, pszName, MAX_VISIBLE_NAME);
+                szTmp[MAX_VISIBLE_NAME] = '\0';
+                pszName = szTmp;
+        }
+
+        // Can't be a dupe name with type ?
+        const TCHAR * pszTypeName = GetBase()->GetTypeName();
+        if ( ! strcmpi( pszTypeName, pszName ))
+                pszName = "";
+
+        fResult = CObjBaseTemplate::SetName( pszName );
+
+done:
+        if ( fResult )
+        {
+                MarkDirty( StorageDirtyType_Save );
+        }
+        return fResult;
+}
+
+
+void CObjBase::MarkDirty( StorageDirtyType type )
+{
+	if ( type == StorageDirtyType_None )
+		return;
+	if ( g_Serv.IsLoading())
+		return;
+
+	CWorldStorageMySQL * pStorage = g_World.Storage();
+	if ( pStorage == NULL || ! pStorage->IsEnabled())
+		return;
+
+	if ( type == StorageDirtyType_Delete )
 	{
-		strncpy( szTmp, pszName, MAX_VISIBLE_NAME);
-		szTmp[MAX_VISIBLE_NAME] = '\0';
-		pszName = szTmp;
+		m_fStorageNew = false;
+		m_fStorageDeleted = true;
+		pStorage->MarkObjectDirty( *this, StorageDirtyType_Delete );
+		return;
 	}
 
-	// Can't be a dupe name with type ?
-	const TCHAR * pszTypeName = GetBase()->GetTypeName();
-	if ( ! strcmpi( pszTypeName, pszName ))
-		pszName = "";
+	if ( m_fStorageDeleted )
+		return;
 
-	return CObjBaseTemplate::SetName( pszName );
+	if ( m_fStorageNew )
+	{
+		if ( IsDisconnected())
+			return;
+		m_fStorageNew = false;
+	}
+
+	pStorage->MarkObjectDirty( *this, StorageDirtyType_Save );
 }
 
 void CObjBase::WriteTry( CScript & s )
@@ -454,6 +499,7 @@ void CObjBase::SetTimeout( int iDelayInTicks )
 	{
 		m_timeout = g_World.GetTime() + iDelayInTicks;
 	}
+	MarkDirty( StorageDirtyType_Save );
 }
 
 void CObjBase::Sound( SOUND_TYPE id, int iOnce ) const // Play sound effect for player
@@ -1321,6 +1367,7 @@ void CObjBase::RemoveFromView( CClient * pClientExclude )
 void CObjBase::DeletePrepare()
 {
 	// Prepare to delete.
+	MarkDirty( StorageDirtyType_Delete );
 	RemoveFromView();
 	RemoveSelf();	// Must remove early or else virtuals will fail.
 	m_TagDefs.ClearKeys();
@@ -1333,6 +1380,17 @@ void CObjBase::DeletePrepare()
 void CObjBase::Delete()
 {
 	DeletePrepare();
+	MarkDirty( StorageDirtyType_Delete );
+
+	CWorldStorageMySQL * pStorage = g_World.Storage();
+	if ( pStorage && pStorage->IsEnabled())
+	{
+		if ( ! pStorage->DeleteObject( this ))
+		{
+			g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to mark object 0%lx as deleted in MySQL.\n", (unsigned long) GetUID());
+		}
+	}
+
 	ASSERT( IsDisconnected());	// It is no place in the world.
 	g_World.m_ObjDelete.InsertAfter(this);
 }

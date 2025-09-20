@@ -4,6 +4,11 @@
 #include "../common/cstring.h"
 #include <functional>
 #include <vector>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
 
 class CAccount;
 class CObjBase;
@@ -199,6 +204,7 @@ public:
         bool SaveWorldObjects( const std::vector<CObjBase*> & objects );
         bool DeleteWorldObject( const CObjBase * pObject );
         bool DeleteObject( const CObjBase * pObject );
+        void MarkObjectDirty( const CObjBase & object, StorageDirtyType type );
         bool ClearWorldData();
 
         bool SaveSector( const CSector & sector );
@@ -230,6 +236,11 @@ public:
 private:
         friend class Transaction;
         friend class UniversalRecord;
+
+        void StartDirtyWorker();
+        void StopDirtyWorker();
+        void DirtyWorkerLoop();
+        bool ProcessDirtyObject( unsigned long long uid, StorageDirtyType type );
 
         bool Query( const CGString & query, MYSQL_RES ** ppResult = NULL );
         bool ExecuteQuery( const CGString & query );
@@ -281,6 +292,13 @@ private:
         int m_iReconnectDelay;
         time_t m_tLastAccountSync;
         int m_iTransactionDepth;
+        std::mutex m_DirtyMutex;
+        std::condition_variable m_DirtyCondition;
+        std::deque<unsigned long long> m_DirtyQueue;
+        std::unordered_map<unsigned long long, StorageDirtyType> m_DirtyObjects;
+        std::thread m_DirtyThread;
+        bool m_fDirtyThreadStop;
+        bool m_fDirtyThreadRunning;
 };
 
 #endif // _CWORLD_STORAGE_MYSQL_H_

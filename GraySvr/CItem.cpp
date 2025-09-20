@@ -1192,6 +1192,7 @@ bool CItem::MoveTo( CPointMap pt ) // Put item on the ground here.
 	ASSERT( ! CObjBase::IsWeird());
 
 	Update();
+	MarkDirty( StorageDirtyType_Save );
 	return( true );
 }
 
@@ -1570,6 +1571,14 @@ bool CItem::SetName( const TCHAR * pszName )
 	return SetNamePool( pszName );
 }
 
+void CItem::SetAttr( WORD wAttr )
+{
+	if ( m_Attr == wAttr )
+		return;
+	m_Attr = wAttr;
+	MarkDirty( StorageDirtyType_Save );
+}
+
 bool CItem::SetBase( CItemBase * pDef )
 {
 	// Total change of type. (possibly dangerous)
@@ -1599,6 +1608,7 @@ bool CItem::SetBase( CItemBase * pDef )
 	}
 
 	m_type = m_pDef->m_type;	// might change the type.
+	MarkDirty( StorageDirtyType_Save );
 	return( true );
 }
 
@@ -1628,6 +1638,7 @@ bool CItem::SetDispID( ITEMID_TYPE id )
 			return( false );
 	}
 
+	ITEMID_TYPE idPrev = m_id;
 	if ( CItemBase::IsValidDispID(id))
 	{
 		m_id = id;
@@ -1637,7 +1648,12 @@ bool CItem::SetDispID( ITEMID_TYPE id )
 	{
 		m_id = m_pDef->GetDispID();
 	}
-	
+
+	if ( idPrev != m_id )
+	{
+		MarkDirty( StorageDirtyType_Save );
+	}
+
 	return( true );
 }
 
@@ -1665,6 +1681,8 @@ void CItem::SetAmount( int amount )
 		ASSERT( IsEquipped() || IsInContainer());
 		pParentCont->OnWeightChange(( amount - oldamount ) * m_pDef->GetWeight());
 	}
+
+	MarkDirty( StorageDirtyType_Save );
 }
 
 void CItem::SetAmountUpdate( int amount )
@@ -1962,7 +1980,7 @@ bool CItem::r_LoadVal( CScript & s ) // Load an item Script
 		SetAmount( s.GetArgVal());
 		return true;
 	case 1: // "ATTR"
-		m_Attr = s.GetArgHex();
+		SetAttr( s.GetArgHex());
 		return true;
 	case 2:	// "CONT" needs special processing.
 		// Loading or import.

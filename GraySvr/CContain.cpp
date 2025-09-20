@@ -11,6 +11,11 @@ void CContainer::OnWeightChange( int iChange )
 	// Propagate the weight change up the stack if there is one.
 	m_totalweight += iChange;
 	DEBUG_CHECK( m_totalweight >= 0 );
+	CObjBase * pObj = dynamic_cast<CObjBase*>( this );
+	if ( pObj != NULL )
+	{
+		pObj->MarkDirty( StorageDirtyType_Save );
+	}
 }
 
 int CContainer::FixWeight()
@@ -46,6 +51,7 @@ void CContainer::ContentAddPrivate( CItem * pItem )
 	}
 	CGObList::InsertAfter( pItem );
 	OnWeightChange( pItem->GetWeight());
+	pItem->MarkDirty( StorageDirtyType_Save );
 }
 
 void CContainer::OnRemoveOb( CGObListRec* pObRec )	// Override this = called when removed from list.
