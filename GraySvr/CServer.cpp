@@ -2,9 +2,6 @@
 // CServer.cpp
 // Copyright Menace Software (www.menasoft.com).
 //
-#ifdef _WIN32
-#include <windows.h>
-#endif
 #ifndef _WIN32
 #include <sys/select.h>
 #include <sys/time.h>
