@@ -72,7 +72,7 @@
       <OmitFramePointers>true</OmitFramePointers>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\common;$(MYSQL_INCLUDE_DIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\common;$(ProjectDir)..\third_party\mysql-connector-c-6.1.11-win32\include;$(MYSQL_INCLUDE_DIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Midl>
       <TypeLibraryName>.\Release\GraySvr.tlb</TypeLibraryName>
@@ -118,7 +118,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ExceptionHandling>Sync</ExceptionHandling>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\common;$(MYSQL_INCLUDE_DIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\common;$(ProjectDir)..\third_party\mysql-connector-c-6.1.11-win32\include;$(MYSQL_INCLUDE_DIR);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Midl>
       <TypeLibraryName>.\Debug\GraySvr.tlb</TypeLibraryName>
