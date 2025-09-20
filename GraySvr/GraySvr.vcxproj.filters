@@ -150,6 +150,9 @@
     <ClCompile Include="CWorldStorageMySQL.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CVarDefMap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="cworldimport.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -213,6 +216,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CWorldStorageMySQL.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CVarDefMap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="graysvr.h">
