@@ -1583,7 +1583,7 @@ int CChar::CalcArmorDefense( void )
 	// When armor is added or subtracted check this.
 	int iDefenseTotal = 0;
 	int iArmorCount = 0;
-	WORD ArmorRegionMax[ARMOR_QTY];
+int ArmorRegionMax[ARMOR_QTY];
 	memset( ArmorRegionMax, 0, sizeof(ArmorRegionMax));
 	for ( CItem* pItem=GetContentHead(); pItem!=NULL; pItem=pItem->GetNext())
 	{
@@ -1959,7 +1959,7 @@ int CChar::OnTakeDamageHitPoint( int iDmg, CChar * pSrc, DAMAGE_TYPE uType )
 			pArmor->m_itSpell.m_spell == SPELL_Protection )
 		{
 			// Effect of protection spells.
-			iMaxCoverage = max( iMaxCoverage, pArmor->m_itSpell.m_skilllevel );
+			iMaxCoverage = max( iMaxCoverage, static_cast<int>(pArmor->m_itSpell.m_skilllevel) );
 			continue;
 		}
 

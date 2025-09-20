@@ -1,106 +1,73 @@
-# Generic makefile
+# Generic makefile capable of building the Sphere server on Linux.
+#
+# The historical makefile shipped with the project expected a
+# case-insensitive filesystem and listed every source file explicitly
+# using lowercase paths (e.g. `../common/carray.cpp`).  The repository
+# however stores the sources inside `Common/` with mixed-case file
+# names, which means a modern Linux build would immediately stop with
+# "No rule to make target" errors.  In addition the original compile
+# commands used the broken token `$ <` instead of `$<`, so even if the
+# paths were fixed the compiler never received the name of the current
+# translation unit.
+#
+# This replacement automates the source discovery, wires up the correct
+# include paths and resolves the MySQL dependencies through
+# `mysql_config` so we no longer have to guess distribution specific
+# directories.
 
-OPT 	=
+EXE            ?= graysvr
 
-#WARN	= -Wall -W
-WARN	= -w
+CXX            ?= g++
+WARN           ?= -w
+OPT            ?=
 
-EXE	= graysvr
+# ---------------------------------------------------------------------------
+# Compiler and pre-processor flags
+CXXFLAGS       += $(WARN) $(OPT) -pipe
+CPPFLAGS       += -DGRAY_SVR -I../Common
 
-CC	= g++
+# Ask `mysql_config` for the necessary include and library flags.  This keeps
+# the build portable across distributions where MySQL headers and libraries
+# might live in different directories.
+MYSQL_CFLAGS   := $(shell mysql_config --cflags 2>/dev/null)
+MYSQL_LIBS     := $(shell mysql_config --libs 2>/dev/null)
 
-NORTII	= -fno-rtti
-NOEX	= -fno-exceptions
-EX	= -fexceptions
-STRICT  = -mstrict-align
+ifneq ($(strip $(MYSQL_CFLAGS)),)
+CPPFLAGS       += $(MYSQL_CFLAGS)
+endif
 
-DEBUG	= -g
-PROF	= -pg
-PIPE	= -pipe
+ifneq ($(strip $(MYSQL_LIBS)),)
+LDLIBS         += $(MYSQL_LIBS)
+endif
 
-SRC	:= 	caccount.cpp \
-		cbacktask.cpp \
-		cbase.cpp \
-		cchar.cpp \
-		ccharbase.cpp \
-		ccharfight.cpp \
-		ccharnpc.cpp \
-		cchat.cpp \
-		cclient.cpp \
-		cclientlog.cpp \
-		cclientmsg.cpp \
-		ccontain.cpp \
-		citem.cpp \
-		citembase.cpp \
-		citemsp.cpp \
-		citemstone.cpp \
-                cmail.cpp \
-                cserver.cpp \
-                cworldstoragemysql.cpp \
-                cworld.cpp \
-                graysvr.cpp
+# ---------------------------------------------------------------------------
+# Source discovery
+SRC            := $(filter-out GrayLog.cpp,$(wildcard *.cpp))
+COMMON_EXCLUDE := ../Common/cbitmap.cpp ../Common/cdata.cpp ../Common/cwindow.cpp ../Common/cmodver.cpp
+COMMONSRC      := $(filter-out $(COMMON_EXCLUDE),$(wildcard ../Common/*.cpp))
 
-COMMONSRC	:=	../common/carray.cpp \
-			../common/ccrypt.cpp \
-			../common/cexpression.cpp \
-			../common/cfile.cpp \
-			../common/cgrayinst.cpp \
-			../common/cgraymap.cpp \
-			../common/cregion.cpp \
-			../common/cscript.cpp \
-			../common/cstring.cpp 
+OBJ            := $(SRC:.cpp=.o)
+COMMONOBJ      := $(patsubst ../Common/%.cpp,../Common/%.o,$(COMMONSRC))
 
-INCLUDE	= -I/usr/ea/h -I../common -I/usr/include/mysql
+.PHONY: all clean tidy
 
-LIBS = -L/usr/lib -L/usr/lib/mysql -lmysqlclient
+all: $(EXE)
 
-DEFINES = -DGRAY_SVR
+$(EXE): $(OBJ) $(COMMONOBJ)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-SPECIAL = $(NORTTI) $(EX) $(STRICT)
-STATIC	= -static
-#O_FLAGS	= $(WARN) $(PIPE) $(PROF) $(STATIC) $(SPECIAL)
-O_FLAGS	= $(WARN) $(PIPE) $(STATIC) 
-
-C_FLAGS	= $(OPT) $(INCLUDE) $(DEFINES)
-
-.cpp.o:
-	@echo " Compiling $<"
-	@ $(CC) -c $(O_FLAGS) $(C_FLAGS) $ < $(INCLUDE)
-
-.PHONY:	all clean tidy
-
-all:	$(EXE)
-
-clean:	tidy
-	rm -f *.o ../common/*.o $(EXE)
-	$(MAKE)
-
-.depend:
-	gcc -MM $(INCLUDE) $(SRC) $(COMMONSRC) > .depend
-	perl -pi -e 's/([^.]+)\.o/o\/\1.o/g' .depend
+clean: tidy
+	rm -f $(OBJ) $(COMMONOBJ) $(EXE)
 
 tidy:
-	rm -f *~ *orig *bak *rej ../common/*~ ../common/*orig ../common*bak
+	rm -f *~ *orig *bak *rej ../Common/*~ ../Common/*orig ../Common/*bak
 
-tags:	$(SRC) $(COMMONSRC)
-	ctags $(SRC) $(COMMONSRC)
-
-cmn:	$(COMMONSRC:.cpp=.o)
-
-gray:	$(SRC:.cpp=.o)
-
-commonlib:	$(COMMONSRC:.cpp=.o)
-	ar r $@ $?
-
-$(EXE): commonlib gray
-	g++ $(O_FLAGS) $(LIBS) -o $(EXE) *.o commonlib
-
-version.h:	VERSION
-	echo "#define VERSION 'head -l VERSION'" > version.h
-	echo "#define COMPILED_BY \"$(COMPILED_BY)\"" >> version.h
-
-%.o:	%.cpp
+# ---------------------------------------------------------------------------
+# Pattern rules
+%.o: %.cpp
 	@echo " Compiling $<"
-	@$(CC) -c $(O_FLAGS) $(C_FLAGS) $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
 
-
+../Common/%.o: ../Common/%.cpp
+	@echo " Compiling $<"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@

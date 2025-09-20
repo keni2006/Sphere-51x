@@ -5,7 +5,7 @@
 //
 
 #ifdef GRAY_SVR
-#include "../graysvr/graysvr.h"
+#include "../GraySvr/graysvr.h"
 #elif defined(GRAY_MAP)
 #include "../graymap/graymap.h"
 #else
@@ -753,16 +753,17 @@ bool CRegionBase::r_Verb( CScript & s, CTextConsole * pSrc ) // Execute command 
 		Parse( s.GetArgStr(), &pszArg );
 		return SendSectorsVerb( s.GetArgStr(), pszArg, pSrc );
 	}
-	if ( s.IsKey( _TEXT("ALLCLIENTS")))
-	{
-		for ( CClient * pClient = g_Serv.GetClientHead(); pClient!=NULL; pClient = pClient->GetNext())
+		if ( s.IsKey( _TEXT("ALLCLIENTS")))
 		{
-			CChar * pChar = pClient->GetChar();
-			if ( pChar == NULL ) continue;
-			if ( pChar->m_pArea != this ) continue;
-			pChar->r_Verb( CScript( s.GetArgStr()), pSrc );
+			for ( CClient * pClient = g_Serv.GetClientHead(); pClient!=NULL; pClient = pClient->GetNext())
+			{
+				CChar * pChar = pClient->GetChar();
+				if ( pChar == NULL ) continue;
+				if ( pChar->m_pArea != this ) continue;
+				CScript scriptVerb( s.GetArgStr());
+				pChar->r_Verb( scriptVerb, pSrc );
+			}
 		}
-	}
 #endif
 	return( CScriptObj::r_Verb( s, pSrc ));
 }
@@ -781,7 +782,8 @@ bool CRegionBase::SendSectorsVerb( const TCHAR * pszVerb, const TCHAR * pszArgs,
 		// Does the rect overlap ?
 		if ( IsOverlapped( g_World.m_Sectors[i].GetRect()))
 		{
-			fRet |= g_World.m_Sectors[i].r_Verb( CScript( pszVerb, pszArgs ), pSrc );
+			CScript scriptVerb( pszVerb, pszArgs );
+			fRet |= g_World.m_Sectors[i].r_Verb( scriptVerb, pSrc );
 		}
 	}
 	return( fRet );

@@ -10,7 +10,7 @@
 //
 // see http://www.menasoft.com/gray for more details.
 
-#include "../graysvr/graycom.h"
+#include "../Common/graycom.h"
 
 #define GRAY_TITLE		"GrayLog"
 #define GRAY_VERSION	"0.01"
@@ -20,7 +20,7 @@ class CLogServer : public CSockets
 
 };
 
-#include "../graysvr/cclientlog.cpp"
+#include "CClientLog.cpp"
 
 int main( int argc, char *argv[] )
 {

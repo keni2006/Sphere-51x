@@ -22,14 +22,13 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #define FD_SETSIZE 1024 // for max of n users ! default = 64
 #endif
 
-#include "../common/graycom.h"	// put slashes this way for LINUX, WIN32 does not care.
-#include "../common/graymul.h"
-#include "../common/grayproto.h"
-#include "../common/cgrayinst.h"
-#include "../common/cregion.h"
-#include "../common/cgraymap.h"
+#include "../Common/graycom.h"	// put slashes this way for LINUX, WIN32 does not care.
+#include "../Common/graymul.h"
+#include "../Common/grayproto.h"
+#include "../Common/cgrayinst.h"
+#include "../Common/cregion.h"
+#include "../Common/cGrayMap.h"
 #include "CParty.h"
-#include "CWorldStorageMySQL.h"
 #include "CVarDefMap.h"
 #include <memory>
 #include <set>
@@ -49,6 +48,7 @@ class CAccount;
 class CItemContainer;
 class CItemMessage;
 class CItemMap;
+class CItemStone;
 
 struct CServerMySQLConfig
 {
@@ -450,10 +450,12 @@ enum NPC_MEM_ACT_TYPE	// A simgle primary memory about the object.
 
 enum StorageDirtyType
 {
-	StorageDirtyType_None = 0,
-	StorageDirtyType_Save,
-	StorageDirtyType_Delete,
+        StorageDirtyType_None = 0,
+        StorageDirtyType_Save,
+        StorageDirtyType_Delete,
 };
+
+#include "CWorldStorageMySQL.h"
 
 class CObjBase : public CObjBaseTemplate, public CScriptObj
 {
@@ -1981,7 +1983,7 @@ class CItemBaseMulti : public CItemBase
 	// NOTE: It does not have to be a true multi item ITEMID_MULTI
 
 public:
-	CGTypedArray<CMultiComponentItem,CMultiComponentItem&> m_Components;	//  can be flipped to make these display ids.
+	CGTypedArray<CMultiComponentItem,const CMultiComponentItem&> m_Components;	//  can be flipped to make these display ids.
 	CGRect m_rect;		// my region.
 	UINT m_dwRegionFlags;
 
@@ -3077,7 +3079,7 @@ public:
     };
 
 	bool m_fPlotMode;	// should really be per-client based but oh well.
-	CGTypedArray<CMapPinRec,CMapPinRec&> m_Pins;
+	CGTypedArray<CMapPinRec,const CMapPinRec&> m_Pins;
 
 public:
 	CItemMap( ITEMID_TYPE id, CItemBase * pDef ) : CItemVendable( id, pDef )
@@ -4951,7 +4953,7 @@ public:
 
 	CGObList m_Regions;		// CRegionWorlds(s)
 	CGObList m_GMPages;		// Current outstanding GM pages. (CGMPage)
-	CGTypedArray<CPointBase,CPointBase&> m_MoonGates;	// The array of moongates.
+	CGTypedArray<CPointBase,const CPointBase&> m_MoonGates;	// The array of moongates.
 	CGPtrTypeArray<CItemStone*> m_Stones;	// links to leige stones.
 	CAccountArray m_Accounts;	// All the player accounts. name sorted
         CMultiDefArray m_MultiDefs;
@@ -5260,7 +5262,7 @@ protected:
 private:
 	int m_iTotalWeight;
 	static const TCHAR * sm_Table[];
-	CGTypedArray<CRandGroupRec, CRandGroupRec&> m_Members;
+	CGTypedArray<CRandGroupRec, const CRandGroupRec&> m_Members;
 	CGString m_sName;	// Name the group.
 public:
 	CRandGroupDef()
@@ -5894,7 +5896,7 @@ public:
 	CGObArray< const CStartLoc* > m_StartDefs; // Start points list
 	CGObArray< const CPotionDef* > m_PotionDefs;	 // Defined potions
 	CGObArray< const CSpellDef* > m_SpellDefs;	// Defined Spells
-	CGTypedArray<CValStr,CValStr&> m_SkillKeySort;
+	CGTypedArray<CValStr,const CValStr&> m_SkillKeySort;
 	CGObArray< const CSkillDef* > m_SkillDefs;	// Defined Skills
 	/// <summary>
 	/// Max skill usable inside this specific server, they can range from 0 to the maximum currently available in original client, (57 Throwing)

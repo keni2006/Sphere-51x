@@ -2,7 +2,14 @@
 // CServer.cpp
 // Copyright Menace Software (www.menasoft.com).
 //
+#ifdef _WIN32
 #include <windows.h>
+#endif
+#ifndef _WIN32
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#endif
 #include "graysvr.h"	// predef header.
 #include <fstream>
 #include <string>
@@ -12,7 +19,7 @@
 #include <cctype>
 
 #ifdef _WIN32
-#include "../common/cassoc.h"
+#include "../Common/cassoc.h"
 #endif
 
 //////////////////////////////////////////////////////////
@@ -1320,7 +1327,8 @@ bool CServer::OnConsoleCmd( CGString & sText, CTextConsole * pSrc )
 			strncpy( Cmd_Buffer, sText, sizeof(Cmd_Buffer));
 		Cmd_Buffer[sizeof(Cmd_Buffer)-1] = '\0';
 
-		if ( ! r_Verb( CScript( Cmd_Buffer ), pSrc ))
+		CScript serverVerb( Cmd_Buffer );
+	if ( ! r_Verb( serverVerb, pSrc ))
 		{
 			TCHAR * Cmd_pArgs;
 			Parse( Cmd_Buffer, &Cmd_pArgs );
@@ -1363,17 +1371,29 @@ bool CServer::OnConsoleCmd( CGString & sText, CTextConsole * pSrc )
 		break;
 
 	case 'H':	// Hear all said.
-		r_Verb( CScript( "HEARALL" ), pSrc );
+	{
+		CScript cmdHearAll( "HEARALL" );
+		r_Verb( cmdHearAll, pSrc );
 		break;
+	}
 	case 'S':
-		r_Verb( CScript( "SECURE" ), pSrc );
+	{
+		CScript cmdSecure( "SECURE" );
+		r_Verb( cmdSecure, pSrc );
 		break;
+	}
 	case 'L': // Turn the log file on or off.
-		r_Verb( CScript( "LOG" ), pSrc );
+	{
+		CScript cmdLog( "LOG" );
+		r_Verb( cmdLog, pSrc );
 		break;
+	}
 	case 'V':
-		r_Verb( CScript( "VERBOSE" ), pSrc );
+	{
+		CScript cmdVerbose( "VERBOSE" );
+		r_Verb( cmdVerbose, pSrc );
 		break;
+	}
 
 	case 'X':
 		if (m_fSecure)
@@ -2724,7 +2744,8 @@ bool CServer::r_Verb( CScript &s, CTextConsole * pSrc )
 			{
 				if ( pClient->GetChar() == NULL )
 					continue;
-				pClient->GetChar()->r_Verb( CScript( s.GetArgStr()), pSrc );
+				CScript clientVerb( s.GetArgStr());
+	pClient->GetChar()->r_Verb( clientVerb, pSrc );
 			}
 		}
 		break;
@@ -3044,7 +3065,7 @@ void CServer::ListClients( CTextConsole * pConsole ) const
 void CServer::SocketsReceive() // Check for messages from the clients
 {
 	// What sockets do I want to look at ?
-	struct fd_set readfds;
+	fd_set readfds;
 	FD_ZERO(&readfds);
 
 	FD_SET(GetSocket(), &readfds);
@@ -3106,12 +3127,12 @@ void CServer::SocketsReceive() // Check for messages from the clients
 	}
 
 	// Any new connections ? what if there are several ???
-	if ( FD_ISSET( GetSocket(), &readfds))
-	{
-		int len = sizeof( struct sockaddr_in );
-		struct sockaddr_in client_addr;
+        if ( FD_ISSET( GetSocket(), &readfds))
+        {
+                socklen_t len = sizeof( struct sockaddr_in );
+                struct sockaddr_in client_addr;
 
-		SOCKET hSocketClient = Accept( &client_addr, &len );
+                SOCKET hSocketClient = Accept( &client_addr, &len );
 		if ( hSocketClient < 0 || hSocketClient == INVALID_SOCKET )	// LINUX case is signed ?
 		{
 			// NOTE: Client_addr might be invalid.

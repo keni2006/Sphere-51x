@@ -2404,7 +2404,8 @@ do_goplace:
 			CObjUID uid( s.GetArgVal());
 			CObjBase * pObj = uid.ObjFind();
 			m_Act_Targ = uid;	// for last target stuff. (trigger stuff)
-			return pObj->r_Verb( CScript( "DUPE" ), pSrc );
+                        CScript tmpVerb( "DUPE" );
+                        return pObj->r_Verb( tmpVerb, pSrc );
 		}
 	case CV_NEWITEM:	// just add an item right here.
 		{

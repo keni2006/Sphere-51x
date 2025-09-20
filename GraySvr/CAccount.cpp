@@ -163,13 +163,11 @@ bool CWorld::ImportLegacyAccountsToMySQL()
 	CGString sResolved = s.GetFilePath();
 	s.Close();
 
-	g_Log.Event( LOGM_INIT|LOGL_EVENT, "Importing legacy accounts from '%s'.
-", (const TCHAR *) sResolved );
+        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Importing legacy accounts from '%s'.", (const TCHAR *) sResolved );
 
 	if ( ! LoadAccountsFromScripts( false, false ))
 	{
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to import legacy accounts from '%s'.
-", (const TCHAR *) sResolved );
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to import legacy accounts from '%s'.", (const TCHAR *) sResolved );
 		return false;
 	}
 
@@ -183,8 +181,7 @@ bool CWorld::ImportLegacyAccountsToMySQL()
 	}
 	if ( ! fSuccess )
 	{
-		g_Log.Event( LOGM_ACCOUNTS|LOGL_ERROR, "One or more accounts failed to import into MySQL storage.
-" );
+                g_Log.Event( LOGM_ACCOUNTS|LOGL_ERROR, "One or more accounts failed to import into MySQL storage." );
 		return false;
 	}
 
@@ -323,8 +320,7 @@ bool CWorld::SaveAccounts()
 
         if ( rename( sSaveName, sArchive ))
         {
-                g_Log.Event( LOGL_ERROR, "Account Save Rename to '%s' FAILED\n
-", (const TCHAR*) sArchive );
+                g_Log.Event( LOGL_ERROR, "Account Save Rename to '%s' FAILED\n", (const TCHAR*) sArchive );
         }
 
         CScript s;
@@ -333,12 +329,9 @@ bool CWorld::SaveAccounts()
                 return false;
         }
 
-        s.Printf( "\\ " GRAY_TITLE " %s accounts file
-",
-                "\\ NOTE: This file cannot be edited while the server is running.
-",
-                "\\ Any file changes must be made to " GRAY_FILE "accu" GRAY_SCRIPT ". This is read in at save time.
-",
+        s.Printf( "\\ " GRAY_TITLE " %s accounts file\n"
+                  "\\ NOTE: This file cannot be edited while the server is running.\n"
+                  "\\ Any file changes must be made to " GRAY_FILE "accu" GRAY_SCRIPT ". This is read in at save time.\n",
                 g_Serv.GetName());
 
         for ( int i=0; i<m_Accounts.GetCount(); i++ )
@@ -438,12 +431,13 @@ bool CWorld::OnAccountCmd( TCHAR * pszArgs, CTextConsole * pSrc )
 			// Account has not been used in a while.
 
 			iCount ++;
-			if ( iQty <= 0 || ppCmd[0][0] == '\0' )
-			{
-				// just list stuff about the account.
-				pAccount->r_Verb( CScript( "SHOW LASTCONNECTDATE" ), pSrc );
-				continue;
-			}
+                        if ( iQty <= 0 || ppCmd[0][0] == '\0' )
+                        {
+                                // just list stuff about the account.
+                                CScript showLast( "SHOW LASTCONNECTDATE" );
+                                pAccount->r_Verb( showLast, pSrc );
+                                continue;
+                        }
 
 			// can't delete unused priv accounts this way.
 			if ( ! strcmpi( ppCmd[0], "DELETE" ) && pAccount->GetPrivLevel() > PLEVEL_Player )
@@ -453,7 +447,8 @@ bool CWorld::OnAccountCmd( TCHAR * pszArgs, CTextConsole * pSrc )
 				continue;
 			}
 
-			pAccount->r_Verb( CScript( ppCmd[0], ppCmd[1] ), pSrc );
+                        CScript command( ppCmd[0], ppCmd[1] );
+                        pAccount->r_Verb( command, pSrc );
 		}
 
 		pSrc->SysMessagef( "%d of %d accounts unused for %d days", iCount, m_Accounts.GetCount(), iDaysTest );
@@ -501,7 +496,8 @@ bool CWorld::OnAccountCmd( TCHAR * pszArgs, CTextConsole * pSrc )
 		pszArgs = "PLEVEL";
 	}
 
-	return pAccount->r_Verb( CScript( pVerb, pszArgs ), pSrc );
+        CScript verbScript( pVerb, pszArgs );
+        return pAccount->r_Verb( verbScript, pSrc );
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1235,6 +1231,7 @@ bool CAccount::r_Verb( CScript &s, CTextConsole * pSrc )
 	switch ( FindTableSorted( s.GetKey(), pszKeyVerbs, COUNTOF( pszKeyVerbs )))
 	{
 	case 0: // "DELETE"
+	{
 		// delete the account and all it's chars
 		if ( pSrc->GetChar())
 		{
@@ -1254,8 +1251,10 @@ bool CAccount::r_Verb( CScript &s, CTextConsole * pSrc )
 		}
 		g_World.m_Accounts.DeleteOb( this );
 		return( true );
+	}
 
 	case 1: // "EMAIL"
+	{
 		// Enter the email address , but filtered.
 		if ( s.GetArgStr()[0] )
 		{
@@ -1268,14 +1267,17 @@ bool CAccount::r_Verb( CScript &s, CTextConsole * pSrc )
 		pSrc->SysMessagef( "Email for '%s' is '%s'.",
 			GetName(), (const TCHAR*) m_sEMail );
 		return( true );
+	}
 
 	case 2:	// "EMAILMSG"
+	{
 		// Schedule one of the email messages to be delivered.
 		if ( ! ScheduleEmailMessage( s.GetArgVal()))
 		{
 			return( false );
 		}
 		return( true );
+	}
 	}
 
 	return( CScriptObj::r_Verb( s, pSrc ));

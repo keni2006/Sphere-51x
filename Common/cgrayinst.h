@@ -9,9 +9,9 @@
 #pragma once
 #endif // _MSC_VER >= 1000
 
-#include "../common/graymul.h"
-#include "../common/cfile.h"
-#include "../common/carray.h"
+#include "../Common/graymul.h"
+#include "../Common/cfile.h"
+#include "../Common/carray.h"
 
 #if 0
 #define m_fMap0			m_File[VERFILE_MAP]

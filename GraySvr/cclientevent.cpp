@@ -249,7 +249,8 @@ void CClient::Event_Item_Pickup( CObjUID uid, int amount ) // Client grabs an it
 	//Allow for speedy pickup in own containers, but not on ground or other containers, to avoid speed-looting
 	if (pItem->GetTopLevelObj() != m_pChar && m_LastPick > GetTickCount())
 	{
-		goto cancelpick;
+		addItemDragCancel(0);
+		return;
 	}
 	m_LastPick = GetTickCount() + g_Serv.m_iPickUpSpeed;
 
@@ -261,7 +262,6 @@ void CClient::Event_Item_Pickup( CObjUID uid, int amount ) // Client grabs an it
 	amount = m_pChar->ItemPickup( pItem, amount );
 	if ( amount < 0 )
 	{
-		cancelpick:
 		addItemDragCancel(0);
 		return;
 	}
@@ -1691,7 +1691,8 @@ void CClient::Event_PromptResp( const TCHAR * pszText, int len )
 			CObjBase * pObj = m_Targ_UID.ObjFind();
 			if ( pObj )
 			{
-				pObj->r_Verb( CScript( m_Targ_Text, szText ), this );
+				CScript scriptVerb( m_Targ_Text, szText );
+	pObj->r_Verb( scriptVerb, this );
 			}
 		}
 		return;
@@ -2044,7 +2045,7 @@ void CClient::Event_SetName( CObjUID uid )
 	if ( g_Serv.IsObscene( m_bin.CharName.m_name ))
 		return;
 
-	if (ChkStr((char*)&pChar[0], "\n\r[]@\\^£$%&=#§*<>|1234567890,.-;:_/\"!?()°+ηςΰωθιμ"))
+	if (ChkStr((char*)&pChar[0], "\n\r[]@\\^Β£$%&=#Β§*<>|1234567890,.-;:_/\"!?()Β°+Γ§Γ²Γ ΓΉΓ¨Γ©Γ¬"))
 		return;
 
 	//name must not contain any unwanted spaces
@@ -2105,7 +2106,8 @@ void CClient::Event_GumpTextIn()
 					SysMessagef( "set: %s = %s", (const TCHAR*) m_Targ_Text, pszText );
 				}
 
-				if ( ! pObj->r_Verb( CScript( m_Targ_Text, pszText ), m_pChar ))
+				CScript scriptVerb( m_Targ_Text, pszText );
+		if ( ! pObj->r_Verb( scriptVerb, m_pChar ))
 				{
 					SysMessagef( "Invalid set: %s = %s", (const TCHAR*) m_Targ_Text, pszText );
 				}

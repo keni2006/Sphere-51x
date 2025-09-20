@@ -6,10 +6,10 @@
 
 #include "graysvr.h"	// predef header.
 
+#include <thread>
+
 #ifdef _WIN32
 #include <process.h>    // _beginthread, _endthread
-#else
-#include <pthread.h>	// pthread_create
 #endif
 
 //////////////////////////////////////////////////////////////////////
@@ -698,7 +698,7 @@ failout:
 	}
 
 	// Wait for some sort of response.
-	struct fd_set readfds;
+        fd_set readfds;
 	FD_ZERO(&readfds);
 	FD_SET(sock.GetSocket(), &readfds);
 
@@ -742,51 +742,63 @@ failout:
 /////////////
 // -CThread
 
+#ifdef _WIN32
 void CThread::CreateThread( void ( _cdecl * pEntryProc )(void *) )
 {
-	if ( IsActive())
-		return;	// Already active.
+        if ( IsActive())
+                return; // Already active.
 
-#ifdef _WIN32
-	m_hThread = _beginthread( pEntryProc, 0, this );
-	if ( m_hThread == -1 )
-	{
-		m_hThread = NULL;
-	}
-#else
-	//pthread_t thread;
-	//pthread_attr_t attr;
-	//int pthread_create( &thread, &attr, EntryProc, this );
-
-#endif
+        m_hThread = _beginthread( pEntryProc, 0, this );
+        if ( m_hThread == -1 )
+        {
+                m_hThread = NULL;
+        }
 }
+#else
+void CThread::CreateThread( void * ( _cdecl * pEntryProc )(void *) )
+{
+        if ( IsActive())
+                return; // Already active.
+
+        auto pThread = new std::thread( pEntryProc, this );
+        m_hThread = reinterpret_cast<uintptr_t>( pThread );
+}
+#endif
 
 bool CThread::TerminateThread(uintptr_t dwExitCode )
 {
-	if ( ! IsActive()) 
-		return true;
+        if ( ! IsActive())
+                return true;
 #ifdef _WIN32
-	if ( m_ThreadID == GetCurrentThreadId())
-	{
-		_endthread();	// , dwExitCode
-	}
-	else
-	{
-		BOOL fRet = ::TerminateThread( (HANDLE)m_hThread, dwExitCode );
-		if ( fRet )
-		{
-			CloseHandle( (HANDLE) m_hThread );
-		}
-		else
-		{
-			DEBUG_CHECK( fRet );
-		}
-	}
+        if ( m_ThreadID == GetCurrentThreadId())
+        {
+                _endthread();   // , dwExitCode
+        }
+        else
+        {
+                BOOL fRet = ::TerminateThread( (HANDLE)m_hThread, dwExitCode );
+                if ( fRet )
+                {
+                        CloseHandle( (HANDLE) m_hThread );
+                }
+                else
+                {
+                        DEBUG_CHECK( fRet );
+                }
+        }
 #else
-
+        auto pThread = reinterpret_cast<std::thread *>( m_hThread );
+        if ( pThread != NULL )
+        {
+                if ( pThread->joinable())
+                {
+                        pThread->join();
+                }
+                delete pThread;
+        }
 #endif
-	OnClose();
-	return( true );
+        OnClose();
+        return( true );
 }
 
 void CThread::WaitForClose( int iSec )
@@ -931,9 +943,13 @@ void CBackTask::SendOutgoingMail()
 	}
 }
 
+#ifdef _WIN32
 void _cdecl CBackTask::EntryProc( void * lpThreadParameter ) // static
+#else
+void * _cdecl CBackTask::EntryProc( void * lpThreadParameter ) // static
+#endif
 {
-	// Do all the background stuff we don't want to bog down the game server thread.
+        // Do all the background stuff we don't want to bog down the game server thread.
 
 	g_Serv.m_BackTask.OnCreate();
 	while ( g_Serv.CanRunBackTask())
@@ -971,7 +987,10 @@ void _cdecl CBackTask::EntryProc( void * lpThreadParameter ) // static
 	}
 
 	// Tell the world we are closed. CloseHandle() required ?
-	g_Serv.m_BackTask.OnClose();
+        g_Serv.m_BackTask.OnClose();
+#ifndef _WIN32
+        return NULL;
+#endif
 }
 
 void CBackTask::CreateThread()

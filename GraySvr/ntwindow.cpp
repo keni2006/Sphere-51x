@@ -9,7 +9,7 @@
 #ifdef _WIN32
 
 #include "graysvr.h"	// predef header.
-#include "../common/cwindow.h"
+#include "../Common/cwindow.h"
 
 class CNTWindow : public CWindow
 {

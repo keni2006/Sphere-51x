@@ -7,6 +7,9 @@
 #ifndef _INC_CARRAY_H
 #define _INC_CARRAY_H
 
+#include <cstddef>
+#include <cstdint>
+
 class CMemDynamic
 {
 	// This item will always be dynamically allocated with new/delete!
@@ -64,6 +67,8 @@ public:
 
 ///////////////////////////////////////////////////////////
 // CGObList
+
+class CGObList;
 
 class CGObListRec : public CMemDynamic	// generic list record. This item belongs to JUST ONE LIST
 {
@@ -263,7 +268,7 @@ public:
 
 	~CGTypedArray()
 	{
-		SetCount( 0 );
+		this->SetCount( 0 );
 	}
 };
 
@@ -322,9 +327,9 @@ public:
 	{
 		if ( pData == NULL )
 			return( -1 );
-		for ( int nIndex=0; nIndex<GetCount(); nIndex++ )
+		for ( int nIndex=0; nIndex<this->GetCount(); nIndex++ )
 		{
-			if ( GetAt(nIndex) == pData )
+			if ( this->GetAt(nIndex) == pData )
 				return( nIndex );
 		}
 		return( -1 );
@@ -334,14 +339,14 @@ public:
 		int nIndex = FindPtr( pData );
 		if ( nIndex < 0 )
 			return( false );
-		RemoveAt( nIndex );
+		this->RemoveAt( nIndex );
 		return( true );
 	}
 	bool IsValidIndex( int i ) const
 	{
-		if ( i < 0 || i >= GetCount()) 
+		if ( i < 0 || i >= this->GetCount()) 
 			return( false );
-		return( GetAt(i) != NULL );
+		return( this->GetAt(i) != NULL );
 	}
 };
 
@@ -367,16 +372,16 @@ protected:
 public:
 	bool DeleteOb( TYPE pData )
 	{
-		return( RemovePtr( pData ));
+		return( this->RemovePtr( pData ));
 	}
 	void DeleteAt( int nIndex )
 	{
-		RemoveAt( nIndex );
+		this->RemoveAt( nIndex );
 	}
 	~CGObArray()
 	{
 		// Make sure the virtuals get called.
-		SetCount( 0 );
+		this->SetCount( 0 );
 	}
 };
 
@@ -415,7 +420,7 @@ int CGObSortArray<TYPE, KEY_TYPE>::FindKeyNear( KEY_TYPE key, int & iCompare ) c
 	//		+1 = key should be greater than index
 	//
 
-	int iHigh = GetCount()-1;
+	int iHigh = this->GetCount()-1;
 	if ( iHigh < 0 )
 	{
 		iCompare = -1;
@@ -427,7 +432,7 @@ int CGObSortArray<TYPE, KEY_TYPE>::FindKeyNear( KEY_TYPE key, int & iCompare ) c
 	while ( iLow <= iHigh )
 	{
 		i = (iHigh+iLow)/2;
-		iCompare = CompareKey( key, GetAt(i));
+		iCompare = CompareKey( key, this->GetAt(i));
 		if ( iCompare == 0 )
 			break;
 		if ( iCompare > 0 ) 
@@ -451,15 +456,15 @@ int CGObSortArray<TYPE, KEY_TYPE>::AddSortKey( TYPE pNew, KEY_TYPE key )
 	if ( !iCompare ) 
 	{
 		// duplicate should not happen. BAD! ??? DestructElements
-		delete ElementAt(index);
-		ElementAt(index) = pNew;
+		delete this->ElementAt(index);
+		this->ElementAt(index) = pNew;
 		return( -1 );
 	}
 	if ( iCompare > 0 )
 	{
 		index++;
 	}
-	InsertAt( index, pNew );
+	this->InsertAt( index, pNew );
 	return( index );
 }
 

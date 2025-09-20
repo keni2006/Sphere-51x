@@ -3,7 +3,7 @@
 //
 
 #ifdef GRAY_SVR
-#include "../graysvr/graysvr.h"
+#include "../GraySvr/graysvr.h"
 #elif defined(GRAY_MAP)
 #include "../graymap/graymap.h"
 #elif defined(GRAY_CLIENT)

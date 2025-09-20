@@ -64,7 +64,8 @@ bool CClient::OnTarg_Obj_Set( CObjUID uid )
 	CGString sLogMsg;
 	sLogMsg.Format( "'%s' commands uid=0%lx (%s) to '%s'", GetName(), pObj->GetUID(), pObj->GetName(), (const TCHAR*) m_Targ_Text );
 
-	bool fRet = pObj->r_Verb( CScript( szTemp, pArg ), this );
+        CScript verb( szTemp, pArg );
+        bool fRet = pObj->r_Verb( verb, this );
 	if ( ! fRet )
 	{
 //failed:
@@ -1469,7 +1470,7 @@ bool CClient::OnTarg_Use_Item( CObjUID uid, const CPointMap & pt, ITEMID_TYPE id
 	{
 		trigtype = ITRIG_TARGON_ITEM;
 	}
-	if ( pItemUse->OnTrigger( trigtype, m_pChar, pObjTarg ? pObjTarg->GetUID() : 0 ))
+	if ( pItemUse->OnTrigger( trigtype, m_pChar, pObjTarg ? pObjTarg->GetUID() : CObjUID( 0 ) ))
 	{
 		return true;
 	}

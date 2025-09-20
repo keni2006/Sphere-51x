@@ -152,7 +152,7 @@ bool CGrayInstall::OpenFile( VERFILE_TYPE i )
 	if ( pszName == NULL ) 
 		return( false );
 
-	return( OpenFile( m_File[i], pszName, OF_READ|OF_SHARE_DENY_WRITE ));
+        return( OpenFile( m_File[i], pszName, OF_READ|OF_SHARE_DENY_NONE ));
 }
 
 VERFILE_TYPE CGrayInstall::OpenFiles( DWORD dwMask )
