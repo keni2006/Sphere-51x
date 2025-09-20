@@ -478,10 +478,16 @@ void CWorld::NotifyStorageObjectRemoved( CObjBase * pObj )
 	if ( pStorage == NULL || ! pStorage->IsEnabled())
 		return;
 
+	if ( pObj->IsStorageDeleted())
+		return;
+
 	if ( ! pStorage->DeleteObject( pObj ))
 	{
 		g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to mark object 0%lx as deleted in MySQL.\n", (unsigned long) pObj->GetUID());
+		return;
 	}
+
+	pObj->MarkDirty( StorageDirtyType_Delete );
 }
 
 void CWorld::FlushDeletedObjects()

@@ -138,8 +138,13 @@ short CChar::Skill_GetAdjusted( SKILL_TYPE skill ) const
 void CChar::Skill_SetBase( SKILL_TYPE skill, short wValue )
 {
 	ASSERT( IsSkillBase(skill));
+	short wPrevValue = m_Skill[skill];
 	if ( wValue < 0 ) wValue = 0;
 	m_Skill[skill] = wValue;
+	if ( wPrevValue != wValue )
+	{
+		MarkDirty( StorageDirtyType_Save );
+	}
 	if ( IsClient())
 	{
 		// Update the skills list

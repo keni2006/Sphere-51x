@@ -477,6 +477,7 @@ void CChar::Stat_Set( STAT_TYPE i, short iVal )
 	}
 	m_Stat[i] = iVal;
 	UpdateStatsFlag();
+	MarkDirty( StorageDirtyType_Save );
 }
 
 bool CChar::ReadScript( CScript &s, bool fRestock, bool fNewbie )
@@ -2842,6 +2843,10 @@ void CChar::UpdateStats( STAT_TYPE type, int iChange, int iLimit )
 		cmd.StatChng.m_val = m_StatVal[type].m_val;
 		m_pClient->xSendPkt( &cmd, sizeof(cmd.StatChng));
 	}
+	if ( iChange )
+	{
+		MarkDirty( StorageDirtyType_Save );
+	}
 }
 
 void CChar::UpdateAnimate( ANIM_TYPE action, bool fTranslate, bool fBackward, BYTE iFrameDelay )
@@ -3202,6 +3207,7 @@ void CChar::UpdateMove( CPointMap pold, CClient * pExcludeClient )
 {
 	// Who now sees this char ?
 	// Did they just see him move ?
+	MarkDirty( StorageDirtyType_Save );
 	for ( CClient * pClient = g_Serv.GetClientHead(); pClient!=NULL; pClient = pClient->GetNext())
 	{
 		if ( pClient == pExcludeClient ) 
@@ -4859,6 +4865,7 @@ bool CChar::MoveTo( CPointMap pt )
 	SetTopPoint( pt );
 
 	ASSERT( ! CObjBase::IsWeird());
+	MarkDirty( StorageDirtyType_Save );
 	return true;
 }
 

@@ -760,7 +760,7 @@ bool CAccount::CheckBlockedEmail( const TCHAR * pszEmail) // static
 	while ( s.ReadKey())
 	{
 		int len2 = strlen( s.GetKey());
-		if ( len2 < len1 ) 
+		if ( len2 < len1 )
 			continue;
 		if ( ! strcmpi( pszEmail + len1 - len2, s.GetKey()))
 		{
@@ -771,10 +771,78 @@ bool CAccount::CheckBlockedEmail( const TCHAR * pszEmail) // static
 	return( true );
 }
 
+void CAccount::RequestStorageUpdate()
+{
+	if ( g_Serv.IsLoading())
+		return;
+	CWorldStorageMySQL * pStorage = g_World.Storage();
+	if ( pStorage == NULL || ! pStorage->IsEnabled())
+		return;
+	if ( ! pStorage->UpsertAccount( *this ))
+	{
+		g_Log.Event( LOGM_ACCOUNTS|LOGL_WARN, "Failed to persist account '%s' changes to MySQL.\n", GetName());
+	}
+}
+
+void CAccount::SetPassword( const TCHAR * pszPassword )
+{
+	const TCHAR * pszNew = pszPassword ? pszPassword : _TEXT( "" );
+	if ( m_sPassword.Compare( pszNew ) == 0 )
+		return;
+	m_sPassword = pszNew;
+	RequestStorageUpdate();
+}
+
+void CAccount::ClearPassword()
+{
+	if ( m_sPassword.IsEmpty())
+		return;
+	m_sPassword.Empty();
+	RequestStorageUpdate();
+}
+
+void CAccount::SetPrivFlags( WORD wPrivFlags )
+{
+	WORD wPrev = m_PrivFlags;
+	m_PrivFlags |= wPrivFlags;
+	if ( m_PrivFlags != wPrev )
+	{
+		RequestStorageUpdate();
+	}
+}
+
+void CAccount::ClearPrivFlags( WORD wPrivFlags )
+{
+	WORD wPrev = m_PrivFlags;
+	m_PrivFlags &= ~wPrivFlags;
+	if ( m_PrivFlags != wPrev )
+	{
+		RequestStorageUpdate();
+	}
+}
+
+void CAccount::TogPrivFlags( WORD wPrivFlags )
+{
+	WORD wPrev = m_PrivFlags;
+	m_PrivFlags ^= wPrivFlags;
+	if ( m_PrivFlags != wPrev )
+	{
+		RequestStorageUpdate();
+	}
+}
+
+void CAccount::SetPrivLevel( PLEVEL_TYPE plevel )
+{
+	if ( m_PrivLevel == plevel )
+		return;
+	m_PrivLevel = plevel;
+	RequestStorageUpdate();
+}
+
 bool CAccount::SetEmailAddress( const TCHAR * pszEmail, bool fBlockHost )
 {
-	if ( pszEmail == NULL ) 
-		return( false );
+        if ( pszEmail == NULL )
+                return( false );
 	GETNONWHITESPACE( pszEmail );	// Skip leading spaces.
 	if ( ! g_Serv.IsValidEmailAddressFormat( pszEmail ))
 		return( false );
@@ -788,6 +856,7 @@ bool CAccount::SetEmailAddress( const TCHAR * pszEmail, bool fBlockHost )
 	m_sEMail = pszEmail;
 	m_iEmailFailures = 0;
 	ClearPrivFlags( PRIV_EMAIL_VALID );	// we have not tried it yet.
+	RequestStorageUpdate();
 	return( true );
 }
 

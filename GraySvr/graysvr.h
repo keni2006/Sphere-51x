@@ -448,6 +448,13 @@ enum NPC_MEM_ACT_TYPE	// A simgle primary memory about the object.
 	NPC_MEM_ACT_IGNORE,			// I looted or looked at and discarded this item (ignore it)
 };
 
+enum StorageDirtyType
+{
+	StorageDirtyType_None = 0,
+	StorageDirtyType_Save,
+	StorageDirtyType_Delete,
+};
+
 class CObjBase : public CObjBaseTemplate, public CScriptObj
 {
 	// All items or chars have these base attributes.
@@ -457,6 +464,8 @@ private:
 	CVarDefMap m_TagDefs;		// Dynamic TAG values assigned to the object
 	CVarDefMap m_BaseDefs;	// Script VAR/KEY values assigned to the object
 	CObjUID m_uidOwner;		// Script visible owner reference
+	bool m_fStorageNew;
+	bool m_fStorageDeleted;
 
 public:
 	static int sm_iCount;
@@ -541,12 +550,17 @@ public:
 	}
 	void SetOwnerObj(CObjUID uid);
 	void ClearOwnerObj();
+	bool IsStorageDeleted() const
+	{
+		return m_fStorageDeleted;
+	}
 
 public:
 	// Color
 	void SetColor( COLOR_TYPE color )
 	{
 		m_color = color;
+		MarkDirty( StorageDirtyType_Save );
 	}
 	COLOR_TYPE GetColor() const
 	{
@@ -618,6 +632,7 @@ public:
 	}
 
 	bool SetNamePool( const TCHAR * pszName );
+	void MarkDirty( StorageDirtyType type );
 
 	void Sound( SOUND_TYPE id, int iRepeat = 1 ) const; // Play sound effect from this location.
 	void Effect( EFFECT_TYPE motion, ITEMID_TYPE id, const CObjBase * pSource = NULL, BYTE speed = 5, BYTE loop = 1, bool explode = false ) const;
@@ -743,6 +758,7 @@ private:
 	bool ScheduleEmailMessage( WORD iEmailMessage );
 	static bool CheckBlockedEmail( const TCHAR * pszEmail);
 	bool SendOutgoingMail( int iMsg );
+	void RequestStorageUpdate();
 
 public:
 	CAccount( const TCHAR * pszName, bool fGuest = false );
@@ -768,30 +784,15 @@ public:
 	{
 		return( m_sPassword );
 	}
-	void SetPassword( const TCHAR * pszPassword )
-	{
-		m_sPassword = pszPassword;
-	}
-	void ClearPassword()
-	{
-		m_sPassword.Empty();	// can be set on next login.
-	}
+	void SetPassword( const TCHAR * pszPassword );
+	void ClearPassword();
 	bool IsPriv( WORD wPrivFlags ) const
-	{	// PRIV_GM
+	{		// PRIV_GM
 		return(( m_PrivFlags & wPrivFlags ) ? true : false);
 	}
-	void SetPrivFlags( WORD wPrivFlags )
-	{
-		m_PrivFlags |= wPrivFlags;
-	}
-	void ClearPrivFlags( WORD wPrivFlags )
-	{
-		m_PrivFlags &= ~wPrivFlags;
-	}
-	void TogPrivFlags( WORD wPrivFlags )
-	{
-		m_PrivFlags ^= wPrivFlags;
-	}
+	void SetPrivFlags( WORD wPrivFlags );
+	void ClearPrivFlags( WORD wPrivFlags );
+	void TogPrivFlags( WORD wPrivFlags );
 	PLEVEL_TYPE GetPrivLevel() const
 	{
 #ifdef NDEBUG
@@ -800,10 +801,7 @@ public:
 #endif
 		return( m_PrivLevel );	// PLEVEL_Counsel
 	}
-	void SetPrivLevel( PLEVEL_TYPE plevel )
-	{
-		m_PrivLevel = plevel;	// PLEVEL_Counsel
-	}
+	void SetPrivLevel( PLEVEL_TYPE plevel );
 	void CheckStart();
 
 	void UnlinkChar( CChar * pChar );
@@ -2529,6 +2527,8 @@ public:
 		return(( m_Attr & wAttr ) ? true : false );
 	}
 
+	void SetAttr( WORD wAttr );
+
 	int  GetDecayTime() const;
 	void SetDecayTime( int iTime = 0 );
 	SOUND_TYPE GetDropSound() const;
@@ -3943,10 +3943,27 @@ public:
 	}
 	void ModStat(UINT dwStatFlag, bool fMod )
 	{
+		bool fChanged = false;
 		if ( fMod )
-			m_StatFlag |= dwStatFlag;
+		{
+			if (( m_StatFlag & dwStatFlag ) != dwStatFlag )
+			{
+				m_StatFlag |= dwStatFlag;
+				fChanged = true;
+			}
+		}
 		else
-			m_StatFlag &= ~dwStatFlag;
+		{
+			if (( m_StatFlag & dwStatFlag ) != 0 )
+			{
+				m_StatFlag &= ~dwStatFlag;
+				fChanged = true;
+			}
+		}
+		if ( fChanged )
+		{
+			MarkDirty( StorageDirtyType_Save );
+		}
 	}
 	bool IsPriv( WORD flag ) const
 	{	// PRIV_GM flags

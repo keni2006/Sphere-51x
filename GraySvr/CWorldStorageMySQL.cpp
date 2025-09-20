@@ -10,6 +10,7 @@
 #include <fstream>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <sstream>
 #include <string>
@@ -299,6 +300,8 @@ CWorldStorageMySQL::CWorldStorageMySQL()
         m_sDatabaseName.Empty();
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
+        m_fDirtyThreadStop = false;
+        m_fDirtyThreadRunning = false;
 }
 
 CWorldStorageMySQL::~CWorldStorageMySQL()
@@ -349,6 +352,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 		if ( pResult != NULL )
 		{
 			g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u.\n", pszHost ? pszHost : "localhost", uiPort );
+			StartDirtyWorker();
 			return true;
 		}
 
@@ -370,6 +374,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
 void CWorldStorageMySQL::Disconnect()
 {
+	StopDirtyWorker();
 	if ( m_pConnection != NULL )
 	{
 		mysql_close( m_pConnection );
@@ -1864,6 +1869,131 @@ bool CWorldStorageMySQL::DeleteWorldObject( const CObjBase * pObject )
 bool CWorldStorageMySQL::DeleteObject( const CObjBase * pObject )
 {
         return DeleteWorldObject( pObject );
+}
+
+void CWorldStorageMySQL::MarkObjectDirty( const CObjBase & object, StorageDirtyType type )
+{
+        if ( ! IsEnabled())
+                return;
+
+        const unsigned long long uid = (unsigned long long) (UINT) object.GetUID();
+
+        std::unique_lock<std::mutex> lock( m_DirtyMutex );
+
+        if ( type == StorageDirtyType_Delete )
+        {
+                m_DirtyObjects.erase( uid );
+                return;
+        }
+
+        auto it = m_DirtyObjects.find( uid );
+        if ( it == m_DirtyObjects.end())
+        {
+                m_DirtyObjects.emplace( uid, StorageDirtyType_Save );
+                m_DirtyQueue.push_back( uid );
+                lock.unlock();
+                m_DirtyCondition.notify_one();
+                return;
+        }
+
+        if ( it->second != StorageDirtyType_Delete )
+        {
+                it->second = StorageDirtyType_Save;
+        }
+}
+
+void CWorldStorageMySQL::StartDirtyWorker()
+{
+        std::lock_guard<std::mutex> lock( m_DirtyMutex );
+        if ( m_fDirtyThreadRunning )
+                return;
+        m_fDirtyThreadStop = false;
+        m_DirtyThread = std::thread( &CWorldStorageMySQL::DirtyWorkerLoop, this );
+        m_fDirtyThreadRunning = true;
+}
+
+void CWorldStorageMySQL::StopDirtyWorker()
+{
+        {
+                std::lock_guard<std::mutex> lock( m_DirtyMutex );
+                if ( ! m_fDirtyThreadRunning )
+                        return;
+                m_fDirtyThreadStop = true;
+        }
+        m_DirtyCondition.notify_all();
+        if ( m_DirtyThread.joinable())
+        {
+                m_DirtyThread.join();
+        }
+        {
+                std::lock_guard<std::mutex> lock( m_DirtyMutex );
+                m_fDirtyThreadRunning = false;
+                m_fDirtyThreadStop = false;
+                m_DirtyQueue.clear();
+                m_DirtyObjects.clear();
+        }
+}
+
+void CWorldStorageMySQL::DirtyWorkerLoop()
+{
+        std::unique_lock<std::mutex> lock( m_DirtyMutex );
+        while ( true )
+        {
+                m_DirtyCondition.wait( lock, [this]()
+                {
+                        return m_fDirtyThreadStop || ! m_DirtyQueue.empty();
+                });
+
+                if ( m_fDirtyThreadStop && m_DirtyQueue.empty())
+                        break;
+
+                std::vector<std::pair<unsigned long long, StorageDirtyType>> batch;
+                while ( ! m_DirtyQueue.empty())
+                {
+                        unsigned long long uid = m_DirtyQueue.front();
+                        m_DirtyQueue.pop_front();
+                        auto it = m_DirtyObjects.find( uid );
+                        if ( it == m_DirtyObjects.end())
+                                continue;
+                        batch.emplace_back( uid, it->second );
+                        m_DirtyObjects.erase( it );
+                }
+
+                lock.unlock();
+                for ( const auto & entry : batch )
+                {
+                        if ( ! ProcessDirtyObject( entry.first, entry.second ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.\n", entry.first );
+                        }
+                }
+                lock.lock();
+        }
+}
+
+bool CWorldStorageMySQL::ProcessDirtyObject( unsigned long long uid, StorageDirtyType type )
+{
+        if ( type != StorageDirtyType_Save )
+                return true;
+        if ( ! IsEnabled())
+                return false;
+
+        CObjUID objUid( (UINT) uid );
+        CObjBase * pObject = objUid.ObjFind();
+        if ( pObject == NULL )
+                return true;
+
+        if ( pObject->IsChar())
+        {
+                CChar * pChar = dynamic_cast<CChar*>( pObject );
+                return ( pChar != NULL ) && SaveChar( *pChar );
+        }
+        if ( pObject->IsItem())
+        {
+                CItem * pItem = dynamic_cast<CItem*>( pObject );
+                return ( pItem != NULL ) && SaveItem( *pItem );
+        }
+        return false;
 }
 
 bool CWorldStorageMySQL::SaveSector( const CSector & sector )
