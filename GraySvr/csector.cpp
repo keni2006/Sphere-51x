@@ -529,12 +529,20 @@ void CSector::SetWeather( WEATHER_TYPE w )
 	}
 }
 
+bool CSector::MarkSaved()
+{
+        if ( m_fSaveParity == g_World.m_fSaveParity )
+                return false;
+        m_fSaveParity = g_World.m_fSaveParity;
+        return true;
+}
+
 void CSector::SetWeatherChance( bool fRain, int iChance )
 {
-	// Set via the client.
-	// Transfer from snow to rain does not work ! must be DRY first.
+        // Set via the client.
+        // Transfer from snow to rain does not work ! must be DRY first.
 
-	if ( iChance > 100 ) iChance = 100;
+        if ( iChance > 100 ) iChance = 100;
 	if ( iChance < 0 )
 	{
 		// just set back to defaults.
