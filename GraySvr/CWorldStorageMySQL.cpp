@@ -351,6 +351,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
         m_sDatabaseName = config.m_sDatabase;
+        m_sTableCharset.Empty();
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 
@@ -386,6 +387,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to set MySQL connection character set to '%s'.\n", pszRequestedCharset );
                                 mysql_close( m_pConnection );
                                 m_pConnection = NULL;
+                                m_sTableCharset.Empty();
                                 continue;
                         }
 
@@ -394,6 +396,8 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         {
                                 pszActiveCharset = pszRequestedCharset;
                         }
+
+                        m_sTableCharset = pszActiveCharset;
 
                         g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszActiveCharset );
                         StartDirtyWorker();
@@ -418,15 +422,16 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
 void CWorldStorageMySQL::Disconnect()
 {
-	StopDirtyWorker();
-	if ( m_pConnection != NULL )
-	{
-		mysql_close( m_pConnection );
-		m_pConnection = NULL;
-	}
+        StopDirtyWorker();
+        if ( m_pConnection != NULL )
+        {
+                mysql_close( m_pConnection );
+                m_pConnection = NULL;
+        }
 
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
+        m_sTableCharset.Empty();
         m_fAutoReconnect = false;
         m_iReconnectTries = 0;
         m_iReconnectDelay = 0;
@@ -451,9 +456,18 @@ MYSQL * CWorldStorageMySQL::GetHandle() const
 
 CGString CWorldStorageMySQL::GetPrefixedTableName( const char * name ) const
 {
-	CGString sName;
-	sName.Format( "%s%s", (const char *) m_sTablePrefix, name );
-	return sName;
+        CGString sName;
+        sName.Format( "%s%s", (const char *) m_sTablePrefix, name );
+        return sName;
+}
+
+const char * CWorldStorageMySQL::GetDefaultTableCharset() const
+{
+        if ( ! m_sTableCharset.IsEmpty())
+        {
+                return m_sTableCharset;
+        }
+        return "utf8mb4";
 }
 
 bool CWorldStorageMySQL::Query( const CGString & query, MYSQL_RES ** ppResult )
@@ -645,13 +659,14 @@ bool CWorldStorageMySQL::EnsureSchemaVersionTable()
         const CGString sTableName = GetPrefixedTableName( "schema_version" );
 
 	CGString sQuery;
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`id` INT NOT NULL,"
-		"`version` INT NOT NULL,"
-		"PRIMARY KEY (`id`)"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sTableName );
+sQuery.Format(
+"CREATE TABLE IF NOT EXISTS `%s` ("
+"`id` INT NOT NULL,"
+"`version` INT NOT NULL,"
+"PRIMARY KEY (`id`)"
+") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+(const char *) sTableName,
+GetDefaultTableCharset());
 	if ( ! ExecuteQuery( sQuery ))
 	{
 		return false;
@@ -751,8 +766,9 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                 "PRIMARY KEY (`id`),"
                 "UNIQUE KEY `ux_accounts_name` (`name`)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-                (const char *) sAccounts );
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sAccounts,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -762,33 +778,33 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`message_id` SMALLINT UNSIGNED NOT NULL,"
                 "PRIMARY KEY (`account_id`, `sequence`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-                (const char *) sAccountEmails, (const char *) sAccounts );
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`uid` BIGINT UNSIGNED NOT NULL,"
-		"`account_id` INT UNSIGNED NULL,"
-		"`name` VARCHAR(64) NULL,"
-		"`body_id` INT NULL,"
-		"`position_x` INT NULL,"
-		"`position_y` INT NULL,"
-		"`position_z` INT NULL,"
-		"`map_plane` INT NULL,"
-		"`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-		"PRIMARY KEY (`uid`),"
-		"KEY `ix_characters_account` (`account_id`),"
-		"FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sCharacters, (const char *) sAccounts );
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`uid` BIGINT UNSIGNED NOT NULL,"
+                "`account_id` INT UNSIGNED NULL,"
+                "`name` VARCHAR(64) NULL,"
+                "`body_id` INT NULL,"
+                "`position_x` INT NULL,"
+                "`position_y` INT NULL,"
+                "`position_z` INT NULL,"
+                "`map_plane` INT NULL,"
+                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                "PRIMARY KEY (`uid`),"
+                "KEY `ix_characters_account` (`account_id`),"
+                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sCharacters, (const char *) sAccounts, GetDefaultTableCharset());
 	vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`uid` BIGINT UNSIGNED NOT NULL,"
-		"`container_uid` BIGINT UNSIGNED NULL,"
-		"`owner_uid` BIGINT UNSIGNED NULL,"
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`uid` BIGINT UNSIGNED NOT NULL,"
+                "`container_uid` BIGINT UNSIGNED NULL,"
+                "`owner_uid` BIGINT UNSIGNED NULL,"
                 "`type` INT UNSIGNED NOT NULL DEFAULT 0,"
                 "`amount` INT UNSIGNED NOT NULL DEFAULT 0,"
                 "`color` INT UNSIGNED NOT NULL DEFAULT 0,"
@@ -797,87 +813,87 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`position_z` INT NULL,"
                 "`map_plane` INT NULL,"
                 "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-		"PRIMARY KEY (`uid`),"
-		"KEY `ix_items_container` (`container_uid`),"
-		"KEY `ix_items_owner` (`owner_uid`),"
-		"FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
-		"FOREIGN KEY (`owner_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sItems, (const char *) sItems, (const char *) sCharacters );
+                "PRIMARY KEY (`uid`),"
+                "KEY `ix_items_container` (`container_uid`),"
+                "KEY `ix_items_owner` (`owner_uid`),"
+                "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
+                "FOREIGN KEY (`owner_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sItems, (const char *) sItems, (const char *) sCharacters, GetDefaultTableCharset());
 	vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`item_uid` BIGINT UNSIGNED NOT NULL,"
-		"`prop` VARCHAR(64) NOT NULL,"
-		"`value` TEXT NULL,"
-		"PRIMARY KEY (`item_uid`, `prop`),"
-		"FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sItemProps, (const char *) sItems );
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`item_uid` BIGINT UNSIGNED NOT NULL,"
+                "`prop` VARCHAR(64) NOT NULL,"
+                "`value` TEXT NULL,"
+                "PRIMARY KEY (`item_uid`, `prop`),"
+                "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sItemProps, (const char *) sItems, GetDefaultTableCharset());
 	vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-		"`map_plane` INT NOT NULL,"
-		"`x1` INT NOT NULL,"
-		"`y1` INT NOT NULL,"
-		"`x2` INT NOT NULL,"
-		"`y2` INT NOT NULL,"
-		"`last_update` DATETIME NULL,"
-		"PRIMARY KEY (`id`),"
-		"UNIQUE KEY `ux_sectors_bounds` (`map_plane`, `x1`, `y1`, `x2`, `y2`)",
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sSectors );
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
+                "`map_plane` INT NOT NULL,"
+                "`x1` INT NOT NULL,"
+                "`y1` INT NOT NULL,"
+                "`x2` INT NOT NULL,"
+                "`y2` INT NOT NULL,"
+                "`last_update` DATETIME NULL,"
+                "PRIMARY KEY (`id`),"
+                "UNIQUE KEY `ux_sectors_bounds` (`map_plane`, `x1`, `y1`, `x2`, `y2`)",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sSectors, GetDefaultTableCharset());
 	vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-		"`account_id` INT UNSIGNED NULL,"
-		"`character_uid` BIGINT UNSIGNED NULL,"
-		"`reason` TEXT NULL,"
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
+                "`account_id` INT UNSIGNED NULL,"
+                "`character_uid` BIGINT UNSIGNED NULL,"
+                "`reason` TEXT NULL,"
                 "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
                 "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
                 "PRIMARY KEY (`id`),"
                 "KEY `ix_gm_pages_account` (`account_id`),"
                 "KEY `ix_gm_pages_character` (`character_uid`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,"
-		"FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sGMPages, (const char *) sAccounts, (const char *) sCharacters );
+                "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sGMPages, (const char *) sAccounts, (const char *) sCharacters, GetDefaultTableCharset());
 	vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-		"`name` VARCHAR(64) NOT NULL,"
-		"`address` VARCHAR(128) NULL,"
-		"`port` INT NULL,"
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
+                "`name` VARCHAR(64) NOT NULL,"
+                "`address` VARCHAR(128) NULL,"
+                "`port` INT NULL,"
                 "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
                 "`last_seen` DATETIME NULL,"
                 "PRIMARY KEY (`id`),"
                 "UNIQUE KEY `ux_servers_name` (`name`)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-                (const char *) sServers );
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sServers, GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
-	sQuery.Format(
-		"CREATE TABLE IF NOT EXISTS `%s` ("
-		"`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
-		"`character_uid` BIGINT UNSIGNED NULL,"
-		"`item_uid` BIGINT UNSIGNED NULL,"
-		"`expires_at` BIGINT NOT NULL,"
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+                "`character_uid` BIGINT UNSIGNED NULL,"
+                "`item_uid` BIGINT UNSIGNED NULL,"
+                "`expires_at` BIGINT NOT NULL,"
                 "`type` INT UNSIGNED NOT NULL,"
                 "`data` TEXT NULL,"
                 "PRIMARY KEY (`id`),"
                 "KEY `ix_timers_character` (`character_uid`),"
                 "KEY `ix_timers_item` (`item_uid`),"
                 "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
-		"FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
-		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-		(const char *) sTimers, (const char *) sCharacters, (const char *) sItems );
+                "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sTimers, (const char *) sCharacters, (const char *) sItems, GetDefaultTableCharset());
 	vQueries.push_back( sQuery );
 
 	for ( size_t i = 0; i < vQueries.size(); ++i )
@@ -943,15 +959,15 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
         }
 
         CGString sQuery;
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`account_id` INT UNSIGNED NOT NULL,"
-                "`sequence` SMALLINT UNSIGNED NOT NULL,"
-                "`message_id` SMALLINT UNSIGNED NOT NULL,"
-                "PRIMARY KEY (`account_id`, `sequence`),"
-                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-                (const char *) sAccountEmails, (const char *) sAccounts );
+sQuery.Format(
+"CREATE TABLE IF NOT EXISTS `%s` ("
+"`account_id` INT UNSIGNED NOT NULL,"
+"`sequence` SMALLINT UNSIGNED NOT NULL,"
+"`message_id` SMALLINT UNSIGNED NOT NULL,"
+"PRIMARY KEY (`account_id`, `sequence`),"
+"FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
+") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+(const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset());
         if ( ! ExecuteQuery( sQuery ))
         {
                 return false;
@@ -1009,11 +1025,12 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,\n"
                 "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL,\n"
                 "FOREIGN KEY (`top_level_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
                 (const char *) sWorldObjects,
                 (const char *) sAccounts,
                 (const char *) sWorldObjects,
-                (const char *) sWorldObjects );
+                (const char *) sWorldObjects,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1023,9 +1040,10 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "`checksum` VARCHAR(64) NULL,\n"
                 "PRIMARY KEY (`object_uid`),\n"
                 "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
                 (const char *) sWorldObjectData,
-                (const char *) sWorldObjects );
+                (const char *) sWorldObjects,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1038,9 +1056,10 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "PRIMARY KEY (`object_uid`,`component`,`name`,`sequence`),\n"
                 "KEY `ix_world_components_component` (`component`),\n"
                 "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
                 (const char *) sWorldObjectComponents,
-                (const char *) sWorldObjects );
+                (const char *) sWorldObjects,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1053,10 +1072,11 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "KEY `ix_world_relations_child` (`child_uid`),\n"
                 "FOREIGN KEY (`parent_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,\n"
                 "FOREIGN KEY (`child_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
                 (const char *) sWorldObjectRelations,
                 (const char *) sWorldObjects,
-                (const char *) sWorldObjects );
+                (const char *) sWorldObjects,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1067,8 +1087,9 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "`objects_count` INT NOT NULL DEFAULT 0,\n"
                 "`checksum` VARCHAR(64) NULL,\n"
                 "PRIMARY KEY (`id`)\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
-                (const char *) sWorldSavepoints );
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                (const char *) sWorldSavepoints,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1082,9 +1103,10 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "PRIMARY KEY (`id`),\n"
                 "KEY `ix_world_audit_object` (`object_uid`),\n"
                 "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
                 (const char *) sWorldObjectAudit,
-                (const char *) sWorldObjects );
+                (const char *) sWorldObjects,
+                GetDefaultTableCharset());
         vQueries.push_back( sQuery );
 
         for ( size_t i = 0; i < vQueries.size(); ++i )
