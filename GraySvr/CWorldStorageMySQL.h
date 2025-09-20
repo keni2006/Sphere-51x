@@ -275,6 +275,7 @@ private:
         unsigned int GetAccountId( const CGString & name );
         void UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts );
         CGString GetPrefixedTableName( const char * name ) const;
+        const char * GetDefaultTableCharset() const;
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
         bool SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
@@ -291,6 +292,7 @@ private:
         MYSQL * m_pConnection;
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
+        CGString m_sTableCharset;
         bool m_fAutoReconnect;
         int m_iReconnectTries;
         int m_iReconnectDelay;
