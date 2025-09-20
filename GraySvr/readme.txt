@@ -46,7 +46,12 @@ Configuration keys (`[SPHERE]` section of `spheredef.ini`):
 During compilation make sure the MySQL headers and import libraries are
 available. The Visual Studio project honours the `MYSQL_INCLUDE_DIR` and
 `MYSQL_LIB_DIR` environment variables but you may also edit the project settings
-manually.
+manually. The repository vendors the header files from Oracle's MySQL
+Connector/C 6.1.11 under
+`third_party\mysql-connector-c-6.1.11-win32` so `mysql.h` and related headers
+are available locally, but you still need to provide the appropriate
+`libmysql.lib`/`libmariadb.lib` and runtime DLL from your connector installation
+and ensure they are discoverable during linking/execution.
 
 3. First boot and migration workflow
 ------------------------------------
