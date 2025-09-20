@@ -1,8 +1,11 @@
 Example for connect ur sphere to mysql
 
 
-// Enable the MySQL/MariaDB backend. 
+// Enable the MySQL/MariaDB backend.
 MYSQL=1
+
+// Character set for the MySQL session.
+MYSQLCHARSET=utf8mb4
 
 // Connection settings for the MariaDB server.
 MYSQLHOST=127.0.0.1

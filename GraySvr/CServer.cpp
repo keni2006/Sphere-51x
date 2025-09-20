@@ -1805,6 +1805,7 @@ enum SC_TYPE
 	SC_MURDERDECAYTIME,		// m_iMurderDecayTime;
 	SC_MURDERMINCOUNT,              // m_iMurderMinCount;           // amount of murders before we get title.
         SC_MYSQL,
+        SC_MYSQLCHARSET,
         SC_MYSQLDB,
         SC_MYSQLHOST,
         SC_MYSQLPASS,
@@ -1903,6 +1904,7 @@ const TCHAR * CServer::sm_KeyTable[SC_QTY] =
 	"MURDERDECAYTIME",		// m_iMurderDecayTime;
 	"MURDERMINCOUNT",		// m_iMurderMinCount;		// amount of murders before we get title.
         "MYSQL",
+        "MYSQLCHARSET",
         "MYSQLDB",
         "MYSQLHOST",
         "MYSQLPASS",
@@ -2106,12 +2108,15 @@ do_mulfiles:
 	case SC_MURDERDECAYTIME:
 		m_iMurderDecayTime = s.GetArgVal() * TICK_PER_SEC;
 		break;
-	case SC_MYSQL:
-		m_mySQLConfig.m_fEnable = s.GetArgVal() != 0;
-		break;
-	case SC_MYSQLDB:
-		m_mySQLConfig.m_sDatabase = s.GetArgStr();
-		break;
+        case SC_MYSQL:
+                m_mySQLConfig.m_fEnable = s.GetArgVal() != 0;
+                break;
+        case SC_MYSQLCHARSET:
+                m_mySQLConfig.m_sCharset = s.GetArgStr();
+                break;
+        case SC_MYSQLDB:
+                m_mySQLConfig.m_sDatabase = s.GetArgStr();
+                break;
 	case SC_MYSQLHOST:
 		m_mySQLConfig.m_sHost = s.GetArgStr();
 		break;
@@ -2470,12 +2475,15 @@ do_mulfiles:
 	case SC_MURDERDECAYTIME:
 		sVal.FormatVal( m_iMurderDecayTime / (TICK_PER_SEC ));
 		break;
-	case SC_MYSQL:
-		sVal.FormatVal( m_mySQLConfig.m_fEnable );
-		break;
-	case SC_MYSQLDB:
-		sVal = m_mySQLConfig.m_sDatabase;
-		break;
+        case SC_MYSQL:
+                sVal.FormatVal( m_mySQLConfig.m_fEnable );
+                break;
+        case SC_MYSQLCHARSET:
+                sVal = m_mySQLConfig.m_sCharset;
+                break;
+        case SC_MYSQLDB:
+                sVal = m_mySQLConfig.m_sDatabase;
+                break;
 	case SC_MYSQLHOST:
 		sVal = m_mySQLConfig.m_sHost;
 		break;
