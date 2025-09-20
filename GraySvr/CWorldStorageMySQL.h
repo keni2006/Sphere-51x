@@ -37,6 +37,7 @@ struct in_addr;
 
 
 struct CServerMySQLConfig;
+enum StorageDirtyType : int;
 
 class CWorldStorageMySQL
 {

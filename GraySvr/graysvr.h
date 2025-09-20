@@ -450,7 +450,7 @@ enum NPC_MEM_ACT_TYPE	// A simgle primary memory about the object.
 	NPC_MEM_ACT_IGNORE,			// I looted or looked at and discarded this item (ignore it)
 };
 
-enum StorageDirtyType
+enum StorageDirtyType : int
 {
         StorageDirtyType_None = 0,
         StorageDirtyType_Save,
