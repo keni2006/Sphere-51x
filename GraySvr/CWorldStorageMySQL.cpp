@@ -326,6 +326,9 @@ CWorldStorageMySQL::CWorldStorageMySQL()
         m_iReconnectTries = 0;
         m_iReconnectDelay = 0;
         m_sDatabaseName.Empty();
+        m_sTablePrefix.Empty();
+        m_sTableCharset.Empty();
+        m_sTableCollation.Empty();
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
         m_fDirtyThreadStop = false;
@@ -352,6 +355,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         m_iReconnectDelay = config.m_iReconnectDelay;
         m_sDatabaseName = config.m_sDatabase;
         m_sTableCharset.Empty();
+        m_sTableCollation.Empty();
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 
@@ -380,31 +384,528 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
                 if ( pResult != NULL )
                 {
-                        const char * pszRequestedCharset = config.m_sCharset.IsEmpty() ? "utf8mb4" : (const char *) config.m_sCharset;
-                        if ( mysql_set_character_set( m_pConnection, pszRequestedCharset ) != 0 )
+                        std::string sRequestedCharsetOption;
+                        std::string sExplicitCollationOption;
+                        if ( !config.m_sCharset.IsEmpty() )
                         {
-                                LogMySQLError( m_pConnection, "mysql_set_character_set" );
-                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to set MySQL connection character set to '%s'.\n", pszRequestedCharset );
+                                sRequestedCharsetOption = (const char *) config.m_sCharset;
+                                auto trimWhitespace = []( std::string & sValue )
+                                {
+                                        size_t uStart = 0;
+                                        while ( uStart < sValue.size() && ( sValue[uStart] == ' ' || sValue[uStart] == '	' ) )
+                                        {
+                                                ++uStart;
+                                        }
+                                        size_t uEnd = sValue.size();
+                                        while ( uEnd > uStart && ( sValue[uEnd - 1] == ' ' || sValue[uEnd - 1] == '	' ) )
+                                        {
+                                                --uEnd;
+                                        }
+                                        sValue = sValue.substr( uStart, uEnd - uStart );
+                                };
+                                trimWhitespace( sRequestedCharsetOption );
+                                size_t uSpace = sRequestedCharsetOption.find_first_of( " 	" );
+                                if ( uSpace != std::string::npos )
+                                {
+                                        sExplicitCollationOption = sRequestedCharsetOption.substr( uSpace + 1 );
+                                        sRequestedCharsetOption.erase( uSpace );
+                                        trimWhitespace( sRequestedCharsetOption );
+                                        trimWhitespace( sExplicitCollationOption );
+                                }
+                        }
+
+                        const char * pszRequestedCharset = sRequestedCharsetOption.empty() ? "utf8mb4" : sRequestedCharsetOption.c_str();
+
+                        CGString sExplicitCollation;
+                        if ( !sExplicitCollationOption.empty() )
+                        {
+                                sExplicitCollation = sExplicitCollationOption.c_str();
+                        }
+
+                        auto deriveCharsetFromCollationName = [&]( const char * pszCollation ) -> std::string
+                        {
+                                std::string sResult;
+                                if ( pszCollation == NULL )
+                                {
+                                        return sResult;
+                                }
+                                std::string sName = pszCollation;
+                                size_t uUnderscore = sName.find( '_' );
+                                if ( uUnderscore != std::string::npos )
+                                {
+                                        sResult = sName.substr( 0, uUnderscore );
+                                }
+                                return sResult;
+                        };
+
+                        bool fCharsetListingUnavailable = false;
+
+                        auto fetchServerVariable = [&]( const char * pszVariableName ) -> CGString
+                        {
+                                CGString sValue;
+                                if ( pszVariableName == NULL || pszVariableName[0] == '\0' )
+                                {
+                                        return sValue;
+                                }
+
+                                CGString sQuery;
+                                sQuery.Format( "SHOW VARIABLES LIKE '%s';", pszVariableName );
+                                if ( mysql_query( m_pConnection, sQuery ) != 0 )
+                                {
+                                        LogMySQLError( m_pConnection, "SHOW VARIABLES" );
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to query MySQL variable '%s'.\n", pszVariableName );
+                                        return sValue;
+                                }
+
+                                MYSQL_RES * pVarResult = mysql_store_result( m_pConnection );
+                                if ( pVarResult == NULL )
+                                {
+                                        if ( mysql_errno( m_pConnection ) != 0 )
+                                        {
+                                                LogMySQLError( m_pConnection, "mysql_store_result" );
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to read MySQL variable '%s'.\n", pszVariableName );
+                                        }
+                                        return sValue;
+                                }
+
+                                MYSQL_ROW pRow = mysql_fetch_row( pVarResult );
+                                if ( pRow != NULL && mysql_num_fields( pVarResult ) >= 2 && pRow[1] != NULL )
+                                {
+                                        sValue = pRow[1];
+                                }
+                                mysql_free_result( pVarResult );
+                                return sValue;
+                        };
+
+                        auto fetchCharsetInfo = [&]( const char * pszCharset, CGString * pOutDefaultCollation ) -> bool
+                        {
+                                if ( fCharsetListingUnavailable || pszCharset == NULL || pszCharset[0] == '\0' )
+                                {
+                                        return false;
+                                }
+
+                                CGString sQuery;
+                                sQuery.Format( "SHOW CHARACTER SET WHERE Charset = '%s';", pszCharset );
+                                if ( mysql_query( m_pConnection, sQuery ) != 0 )
+                                {
+                                        LogMySQLError( m_pConnection, "SHOW CHARACTER SET" );
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to check support for MySQL character set '%s'.\n", pszCharset );
+                                        fCharsetListingUnavailable = true;
+                                        return false;
+                                }
+
+                                MYSQL_RES * pCharsetResult = mysql_store_result( m_pConnection );
+                                if ( pCharsetResult == NULL )
+                                {
+                                        if ( mysql_errno( m_pConnection ) != 0 )
+                                        {
+                                                LogMySQLError( m_pConnection, "mysql_store_result" );
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to read MySQL character set list while looking for '%s'.\n", pszCharset );
+                                        }
+                                        fCharsetListingUnavailable = true;
+                                        return false;
+                                }
+
+                                MYSQL_ROW pRow = mysql_fetch_row( pCharsetResult );
+                                bool fAvailable = pRow != NULL;
+                                if ( fAvailable && pOutDefaultCollation != NULL && mysql_num_fields( pCharsetResult ) >= 3 && pRow[2] != NULL )
+                                {
+                                        *pOutDefaultCollation = pRow[2];
+                                }
+                                mysql_free_result( pCharsetResult );
+                                return fAvailable;
+                        };
+
+                        auto fetchCollationInfo = [&]( const char * pszCollation, CGString * pOutCharset ) -> bool
+                        {
+                                if ( fCharsetListingUnavailable || pszCollation == NULL || pszCollation[0] == '\0' )
+                                {
+                                        return false;
+                                }
+
+                                CGString sQuery;
+                                sQuery.Format( "SHOW COLLATION LIKE '%s';", pszCollation );
+                                if ( mysql_query( m_pConnection, sQuery ) != 0 )
+                                {
+                                        LogMySQLError( m_pConnection, "SHOW COLLATION" );
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to check support for MySQL collation '%s'.\n", pszCollation );
+                                        fCharsetListingUnavailable = true;
+                                        return false;
+                                }
+
+                                MYSQL_RES * pCollationResult = mysql_store_result( m_pConnection );
+                                if ( pCollationResult == NULL )
+                                {
+                                        if ( mysql_errno( m_pConnection ) != 0 )
+                                        {
+                                                LogMySQLError( m_pConnection, "mysql_store_result" );
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to read MySQL collation list while looking for '%s'.\n", pszCollation );
+                                        }
+                                        fCharsetListingUnavailable = true;
+                                        return false;
+                                }
+
+                                MYSQL_ROW pRow = mysql_fetch_row( pCollationResult );
+                                bool fFound = pRow != NULL;
+                                if ( fFound && pOutCharset != NULL && mysql_num_fields( pCollationResult ) >= 2 && pRow[1] != NULL )
+                                {
+                                        *pOutCharset = pRow[1];
+                                }
+                                mysql_free_result( pCollationResult );
+                                return fFound;
+                        };
+
+                        auto trySetCharacterSet = [&]( const char * pszCharset, LOGL_TYPE logLevel, CGString & sOutDerivedCollation ) -> bool
+                        {
+                                sOutDerivedCollation.Empty();
+
+                                if ( pszCharset == NULL || pszCharset[0] == '\0' )
+                                {
+                                        m_sTableCharset.Empty();
+                                        return true;
+                                }
+
+                                auto applyCharset = [&]( const char * pszCharsetToApply ) -> bool
+                                {
+                                        if ( pszCharsetToApply == NULL || pszCharsetToApply[0] == '\0' )
+                                        {
+                                                return false;
+                                        }
+                                        if ( mysql_set_character_set( m_pConnection, pszCharsetToApply ) != 0 )
+                                        {
+                                                return false;
+                                        }
+
+                                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
+                                        if ( pszActiveCharset == NULL )
+                                        {
+                                                pszActiveCharset = pszCharsetToApply;
+                                        }
+
+                                        m_sTableCharset = pszActiveCharset;
+                                        return true;
+                                };
+
+                                if ( applyCharset( pszCharset ) )
+                                {
+                                        return true;
+                                }
+
+                                unsigned int uiError = mysql_errno( m_pConnection );
+                                const char * pszError = mysql_error( m_pConnection );
+                                std::string sErrorText = ( pszError != NULL && pszError[0] != '\0' ) ? pszError : "Unknown MySQL client error";
+
+                                CGString sCollationCharset;
+                                bool fCollationResolved = fetchCollationInfo( pszCharset, &sCollationCharset );
+                                if ( !fCollationResolved && fCharsetListingUnavailable )
+                                {
+                                        fCollationResolved = true;
+                                        sCollationCharset.Empty();
+                                }
+
+                                if ( fCollationResolved )
+                                {
+                                        const char * pszCollationCharset = sCollationCharset.IsEmpty() ? NULL : (const char *) sCollationCharset;
+                                        if ( pszCollationCharset == NULL )
+                                        {
+                                                std::string sParsedCharset = deriveCharsetFromCollationName( pszCharset );
+                                                if ( !sParsedCharset.empty() )
+                                                {
+                                                        pszCollationCharset = sParsedCharset.c_str();
+                                                }
+                                        }
+
+                                        if ( pszCollationCharset != NULL && applyCharset( pszCollationCharset ) )
+                                        {
+                                                sOutDerivedCollation = pszCharset;
+                                                return true;
+                                        }
+                                }
+
+                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "MySQL mysql_set_character_set error (%u): %s
+", uiError, sErrorText.c_str() );
+                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s'.\n", pszCharset );
+                                return false;
+                        };
+
+                        auto applyConnectionCollation = [&]( const char * pszCollation, LOGL_TYPE logLevel, CGString & sOutActiveCollation ) -> bool
+                        {
+                                if ( pszCollation == NULL || pszCollation[0] == '\0' )
+                                {
+                                        return false;
+                                }
+
+                                CGString sCollationCharset;
+                                bool fCollationAvailable = fetchCollationInfo( pszCollation, &sCollationCharset );
+                                if ( !fCollationAvailable && fCharsetListingUnavailable )
+                                {
+                                        fCollationAvailable = true;
+                                        sCollationCharset.Empty();
+                                }
+
+                                if ( !fCollationAvailable )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Requested MySQL collation '%s' is not supported by the server.\n", pszCollation );
+                                        return false;
+                                }
+
+                                const char * pszConnectionCharset = m_sTableCharset.IsEmpty() ? NULL : (const char *) m_sTableCharset;
+                                if ( pszConnectionCharset != NULL && !sCollationCharset.IsEmpty() && strcmpi( pszConnectionCharset, (const char *) sCollationCharset ) != 0 )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Requested MySQL collation '%s' is incompatible with character set '%s'.\n", pszCollation, pszConnectionCharset );
+                                        return false;
+                                }
+
+                                CGString sQuery;
+                                sQuery.Format( "SET collation_connection = '%s';", pszCollation );
+                                if ( mysql_query( m_pConnection, sQuery ) != 0 )
+                                {
+                                        LogMySQLError( m_pConnection, "SET collation_connection" );
+                                        g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection collation to '%s'.\n", pszCollation );
+                                        return false;
+                                }
+
+                                sOutActiveCollation = pszCollation;
+                                return true;
+                        };
+
+                        auto chooseTableCharset = [&]( const CGString & sConnectionCharset, const CGString & sConnectionCollation, const CGString & sRequestedCharsetName, const CGString & sPreferredCollation ) -> std::pair<CGString, CGString>
+                        {
+                                std::pair<CGString, CGString> result;
+
+                                auto considerCharset = [&]( const CGString & sCandidateCharset, const CGString & sCollationHint ) -> bool
+                                {
+                                        if ( sCandidateCharset.IsEmpty() )
+                                        {
+                                                return false;
+                                        }
+
+                                        if ( fCharsetListingUnavailable )
+                                        {
+                                                result.first = sCandidateCharset;
+                                                if ( !sCollationHint.IsEmpty() )
+                                                {
+                                                        result.second = sCollationHint;
+                                                }
+                                                return true;
+                                        }
+
+                                        CGString sDefaultCollation;
+                                        bool fAvailable = fetchCharsetInfo( sCandidateCharset, &sDefaultCollation );
+                                        if ( fCharsetListingUnavailable )
+                                        {
+                                                result.first = sCandidateCharset;
+                                                if ( !sCollationHint.IsEmpty() )
+                                                {
+                                                        result.second = sCollationHint;
+                                                }
+                                                return true;
+                                        }
+
+                                        if ( !fAvailable )
+                                        {
+                                                return false;
+                                        }
+
+                                        result.first = sCandidateCharset;
+
+                                        CGString sChosenCollation;
+                                        if ( !sCollationHint.IsEmpty() )
+                                        {
+                                                CGString sCollationCharset;
+                                                bool fCollationAvailable = fetchCollationInfo( sCollationHint, &sCollationCharset );
+                                                if ( fCharsetListingUnavailable )
+                                                {
+                                                        result.second = sCollationHint;
+                                                        return true;
+                                                }
+
+                                                if ( fCollationAvailable && ( sCollationCharset.IsEmpty() || strcmpi( (const char *) sCandidateCharset, (const char *) sCollationCharset ) == 0 ) )
+                                                {
+                                                        sChosenCollation = sCollationHint;
+                                                }
+                                        }
+
+                                        if ( sChosenCollation.IsEmpty() && !sDefaultCollation.IsEmpty() )
+                                        {
+                                                sChosenCollation = sDefaultCollation;
+                                        }
+
+                                        result.second = sChosenCollation;
+                                        return true;
+                                };
+
+                                if ( considerCharset( sConnectionCharset, sPreferredCollation.IsEmpty() ? sConnectionCollation : sPreferredCollation ) )
+                                {
+                                        return result;
+                                }
+
+                                if ( !sRequestedCharsetName.IsEmpty() && sRequestedCharsetName.CompareNoCase( sConnectionCharset ) != 0 )
+                                {
+                                        if ( considerCharset( sRequestedCharsetName, sPreferredCollation ) )
+                                        {
+                                                return result;
+                                        }
+                                }
+
+                                static const char * const pszFallbackCharsets[] = { "utf8", "utf8mb3", "latin1", NULL };
+                                for ( size_t i = 0; pszFallbackCharsets[i] != NULL; ++i )
+                                {
+                                        CGString sFallback = pszFallbackCharsets[i];
+                                        if ( considerCharset( sFallback, CGString() ) )
+                                        {
+                                                return result;
+                                        }
+                                }
+
+                                CGString sDatabaseCharset = fetchServerVariable( "character_set_database" );
+                                CGString sDatabaseCollation = fetchServerVariable( "collation_database" );
+                                if ( considerCharset( sDatabaseCharset, sPreferredCollation.IsEmpty() ? sDatabaseCollation : sPreferredCollation ) )
+                                {
+                                        return result;
+                                }
+
+                                result.first = sConnectionCharset;
+                                if ( result.second.IsEmpty() )
+                                {
+                                        result.second = sPreferredCollation.IsEmpty() ? sConnectionCollation : sPreferredCollation;
+                                }
+                                return result;
+                        };
+
+                        LOGL_TYPE initialFailureLog = LOGL_ERROR;
+                        if ( pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
+                        {
+                                initialFailureLog = LOGL_WARN;
+                        }
+
+                        CGString sDerivedCollation;
+                        bool fCharsetSet = trySetCharacterSet( pszRequestedCharset, initialFailureLog, sDerivedCollation );
+                        if ( !fCharsetSet && pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
+                        {
+                                const char * pszFallbackCharset = "utf8";
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL character set '%s' is not available, falling back to '%s'.
+", pszRequestedCharset, pszFallbackCharset );
+                                fCharsetSet = trySetCharacterSet( pszFallbackCharset, LOGL_ERROR, sDerivedCollation );
+                        }
+
+                        if ( !fCharsetSet )
+                        {
                                 mysql_close( m_pConnection );
                                 m_pConnection = NULL;
                                 m_sTableCharset.Empty();
+                                m_sTableCollation.Empty();
                                 continue;
                         }
 
-                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
-                        if ( pszActiveCharset == NULL )
+                        CGString sConnectionCharset = m_sTableCharset;
+                        CGString sConnectionCollation = fetchServerVariable( "collation_connection" );
+
+                        if ( sConnectionCollation.IsEmpty() && !sDerivedCollation.IsEmpty() )
                         {
-                                pszActiveCharset = pszRequestedCharset;
+                                applyConnectionCollation( sDerivedCollation, LOGL_WARN, sConnectionCollation );
                         }
 
-                        m_sTableCharset = pszActiveCharset;
+                        if ( !sExplicitCollation.IsEmpty() )
+                        {
+                                applyConnectionCollation( sExplicitCollation, LOGL_WARN, sConnectionCollation );
+                        }
+                        else if ( sConnectionCollation.IsEmpty() && !sDerivedCollation.IsEmpty() )
+                        {
+                                applyConnectionCollation( sDerivedCollation, LOGL_WARN, sConnectionCollation );
+                        }
 
-                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszActiveCharset );
+                        if ( sConnectionCollation.IsEmpty() )
+                        {
+                                sConnectionCollation = fetchServerVariable( "collation_connection" );
+                        }
+
+                        CGString sRequestedCharsetName;
+                        if ( pszRequestedCharset != NULL )
+                        {
+                                sRequestedCharsetName = pszRequestedCharset;
+                        }
+
+                        if ( !sDerivedCollation.IsEmpty() && ( pszRequestedCharset == NULL || strcmpi( pszRequestedCharset, (const char *) sDerivedCollation ) == 0 ) )
+                        {
+                                sRequestedCharsetName = sConnectionCharset;
+                        }
+
+                        CGString sPreferredTableCollation;
+                        if ( !sExplicitCollation.IsEmpty() )
+                        {
+                                sPreferredTableCollation = sExplicitCollation;
+                        }
+                        else if ( !sDerivedCollation.IsEmpty() )
+                        {
+                                sPreferredTableCollation = sDerivedCollation;
+                        }
+                        else
+                        {
+                                sPreferredTableCollation = sConnectionCollation;
+                        }
+
+                        std::pair<CGString, CGString> tableChoice = chooseTableCharset( sConnectionCharset, sConnectionCollation, sRequestedCharsetName, sPreferredTableCollation );
+                        CGString sTableCharset = tableChoice.first;
+                        CGString sTableCollation = tableChoice.second;
+
+                        if ( sTableCharset.IsEmpty() && fCharsetListingUnavailable )
+                        {
+                                sTableCharset = sConnectionCharset;
+                        }
+
+                        if ( sTableCharset.IsEmpty() )
+                        {
+                                sTableCharset = "latin1";
+                        }
+
+                        if ( sTableCollation.IsEmpty() && !sPreferredTableCollation.IsEmpty() )
+                        {
+                                sTableCollation = sPreferredTableCollation;
+                        }
+
+                        m_sTableCharset = sTableCharset;
+                        m_sTableCollation = sTableCollation;
+
+                        const char * pszConnectionCharset = sConnectionCharset.IsEmpty() ? NULL : (const char *) sConnectionCharset;
+                        if ( pszConnectionCharset == NULL || pszConnectionCharset[0] == '\0' )
+                        {
+                                pszConnectionCharset = sRequestedCharsetName.IsEmpty() ? NULL : (const char *) sRequestedCharsetName;
+                        }
+                        if ( pszConnectionCharset == NULL || pszConnectionCharset[0] == '\0' )
+                        {
+                                pszConnectionCharset = (const char *) m_sTableCharset;
+                        }
+
+                        const char * pszTableCharset = m_sTableCharset.IsEmpty() ? pszConnectionCharset : (const char *) m_sTableCharset;
+                        const char * pszConnectionCollation = sConnectionCollation.IsEmpty() ? NULL : (const char *) sConnectionCollation;
+                        const char * pszTableCollation = m_sTableCollation.IsEmpty() ? NULL : (const char *) m_sTableCollation;
+
+                        if ( pszConnectionCharset != NULL && pszTableCharset != NULL && strcmpi( pszConnectionCharset, pszTableCharset ) != 0 )
+                        {
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL connection character set '%s' is not supported for table definitions, using '%s' instead.
+", pszConnectionCharset, pszTableCharset );
+                        }
+
+                        CGString sConnectionCollationSuffix;
+                        if ( pszConnectionCollation != NULL && pszConnectionCollation[0] != '\0' )
+                        {
+                                sConnectionCollationSuffix.Format( ", collation '%s'", pszConnectionCollation );
+                        }
+
+                        CGString sTableCollationSuffix;
+                        if ( pszTableCollation != NULL && pszTableCollation[0] != '\0' )
+                        {
+                                sTableCollationSuffix.Format( ", collation '%s'", pszTableCollation );
+                        }
+
+                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'%s (tables use '%s'%s).
+", pszHost ? pszHost : "localhost", uiPort, pszConnectionCharset != NULL ? pszConnectionCharset : "unknown", (const char *) sConnectionCollationSuffix, pszTableCharset != NULL ? pszTableCharset : "unknown", (const char *) sTableCollationSuffix );
                         StartDirtyWorker();
                         return true;
                 }
 
-		LogMySQLError( m_pConnection, "mysql_real_connect" );
+                LogMySQLError( m_pConnection, "mysql_real_connect" );
 		mysql_close( m_pConnection );
 		m_pConnection = NULL;
 
@@ -432,6 +933,7 @@ void CWorldStorageMySQL::Disconnect()
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
+        m_sTableCollation.Empty();
         m_fAutoReconnect = false;
         m_iReconnectTries = 0;
         m_iReconnectDelay = 0;
@@ -468,6 +970,26 @@ const char * CWorldStorageMySQL::GetDefaultTableCharset() const
                 return m_sTableCharset;
         }
         return "utf8mb4";
+}
+
+const char * CWorldStorageMySQL::GetDefaultTableCollation() const
+{
+        if ( ! m_sTableCollation.IsEmpty())
+        {
+                return m_sTableCollation;
+        }
+        return NULL;
+}
+
+CGString CWorldStorageMySQL::GetDefaultTableCollationSuffix() const
+{
+        CGString sSuffix;
+        const char * pszCollation = GetDefaultTableCollation();
+        if ( pszCollation != NULL && pszCollation[0] != '\0' )
+        {
+                sSuffix.Format( " COLLATE=%s", pszCollation );
+        }
+        return sSuffix;
 }
 
 bool CWorldStorageMySQL::Query( const CGString & query, MYSQL_RES ** ppResult )
@@ -658,15 +1180,17 @@ bool CWorldStorageMySQL::EnsureSchemaVersionTable()
 {
         const CGString sTableName = GetPrefixedTableName( "schema_version" );
 
-	CGString sQuery;
-sQuery.Format(
+        CGString sQuery;
+        CGString sCollationSuffix = GetDefaultTableCollationSuffix();
+        sQuery.Format(
 "CREATE TABLE IF NOT EXISTS `%s` ("
 "`id` INT NOT NULL,"
 "`version` INT NOT NULL,"
 "PRIMARY KEY (`id`)"
-") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
 (const char *) sTableName,
-GetDefaultTableCharset());
+GetDefaultTableCharset(),
+(const char *) sCollationSuffix);
 	if ( ! ExecuteQuery( sQuery ))
 	{
 		return false;
@@ -766,9 +1290,10 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
                 "PRIMARY KEY (`id`),"
                 "UNIQUE KEY `ux_accounts_name` (`name`)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sAccounts,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -778,8 +1303,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`message_id` SMALLINT UNSIGNED NOT NULL,"
                 "PRIMARY KEY (`account_id`, `sequence`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset(), (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -796,8 +1321,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "PRIMARY KEY (`uid`),"
                 "KEY `ix_characters_account` (`account_id`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sCharacters, (const char *) sAccounts, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sCharacters, (const char *) sAccounts, GetDefaultTableCharset(), (const char *) sCollationSuffix);
 	vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -818,8 +1343,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "KEY `ix_items_owner` (`owner_uid`),"
                 "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
                 "FOREIGN KEY (`owner_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sItems, (const char *) sItems, (const char *) sCharacters, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sItems, (const char *) sItems, (const char *) sCharacters, GetDefaultTableCharset(), (const char *) sCollationSuffix);
 	vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -829,8 +1354,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`value` TEXT NULL,"
                 "PRIMARY KEY (`item_uid`, `prop`),"
                 "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sItemProps, (const char *) sItems, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sItemProps, (const char *) sItems, GetDefaultTableCharset(), (const char *) sCollationSuffix);
 	vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -844,8 +1369,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`last_update` DATETIME NULL,"
                 "PRIMARY KEY (`id`),"
                 "UNIQUE KEY `ux_sectors_bounds` (`map_plane`, `x1`, `y1`, `x2`, `y2`)",
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sSectors, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sSectors, GetDefaultTableCharset(), (const char *) sCollationSuffix);
 	vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -861,8 +1386,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "KEY `ix_gm_pages_character` (`character_uid`),"
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,"
                 "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sGMPages, (const char *) sAccounts, (const char *) sCharacters, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sGMPages, (const char *) sAccounts, (const char *) sCharacters, GetDefaultTableCharset(), (const char *) sCollationSuffix);
 	vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -875,8 +1400,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "`last_seen` DATETIME NULL,"
                 "PRIMARY KEY (`id`),"
                 "UNIQUE KEY `ux_servers_name` (`name`)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sServers, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sServers, GetDefaultTableCharset(), (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -892,8 +1417,8 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
                 "KEY `ix_timers_item` (`item_uid`),"
                 "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
                 "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-                (const char *) sTimers, (const char *) sCharacters, (const char *) sItems, GetDefaultTableCharset());
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sTimers, (const char *) sCharacters, (const char *) sItems, GetDefaultTableCharset(), (const char *) sCollationSuffix);
 	vQueries.push_back( sQuery );
 
 	for ( size_t i = 0; i < vQueries.size(); ++i )
@@ -959,15 +1484,16 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
         }
 
         CGString sQuery;
-sQuery.Format(
+        CGString sCollationSuffix = GetDefaultTableCollationSuffix();
+        sQuery.Format(
 "CREATE TABLE IF NOT EXISTS `%s` ("
 "`account_id` INT UNSIGNED NOT NULL,"
 "`sequence` SMALLINT UNSIGNED NOT NULL,"
 "`message_id` SMALLINT UNSIGNED NOT NULL,"
 "PRIMARY KEY (`account_id`, `sequence`),"
 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
-") ENGINE=InnoDB DEFAULT CHARSET=%s;",
-(const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset());
+") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+(const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset(), (const char *) sCollationSuffix);
         if ( ! ExecuteQuery( sQuery ))
         {
                 return false;
@@ -1002,6 +1528,7 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
 
         std::vector<CGString> vQueries;
         CGString sQuery;
+        CGString sCollationSuffix = GetDefaultTableCollationSuffix();
 
         sQuery.Format(
                 "CREATE TABLE IF NOT EXISTS `%s` (\n"
@@ -1025,12 +1552,13 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,\n"
                 "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL,\n"
                 "FOREIGN KEY (`top_level_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sWorldObjects,
                 (const char *) sAccounts,
                 (const char *) sWorldObjects,
                 (const char *) sWorldObjects,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1040,10 +1568,11 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "`checksum` VARCHAR(64) NULL,\n"
                 "PRIMARY KEY (`object_uid`),\n"
                 "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sWorldObjectData,
                 (const char *) sWorldObjects,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1056,10 +1585,11 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "PRIMARY KEY (`object_uid`,`component`,`name`,`sequence`),\n"
                 "KEY `ix_world_components_component` (`component`),\n"
                 "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sWorldObjectComponents,
                 (const char *) sWorldObjects,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1072,11 +1602,12 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "KEY `ix_world_relations_child` (`child_uid`),\n"
                 "FOREIGN KEY (`parent_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,\n"
                 "FOREIGN KEY (`child_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sWorldObjectRelations,
                 (const char *) sWorldObjects,
                 (const char *) sWorldObjects,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1087,9 +1618,10 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "`objects_count` INT NOT NULL DEFAULT 0,\n"
                 "`checksum` VARCHAR(64) NULL,\n"
                 "PRIMARY KEY (`id`)\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sWorldSavepoints,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         sQuery.Format(
@@ -1103,10 +1635,11 @@ bool CWorldStorageMySQL::ApplyMigration_2_3()
                 "PRIMARY KEY (`id`),\n"
                 "KEY `ix_world_audit_object` (`object_uid`),\n"
                 "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s;",
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
                 (const char *) sWorldObjectAudit,
                 (const char *) sWorldObjects,
-                GetDefaultTableCharset());
+                GetDefaultTableCharset(),
+                (const char *) sCollationSuffix);
         vQueries.push_back( sQuery );
 
         for ( size_t i = 0; i < vQueries.size(); ++i )
