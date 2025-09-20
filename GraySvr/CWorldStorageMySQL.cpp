@@ -622,8 +622,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                         }
                                 }
 
-                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "MySQL mysql_set_character_set error (%u): %s
-", uiError, sErrorText.c_str() );
+                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "MySQL mysql_set_character_set error (%u): %s", uiError, sErrorText.c_str() );
                                 g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s'.\n", pszCharset );
                                 return false;
                         };
@@ -784,8 +783,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         if ( !fCharsetSet && pszRequestedCharset != NULL && strcmpi( pszRequestedCharset, "utf8mb4" ) == 0 )
                         {
                                 const char * pszFallbackCharset = "utf8";
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL character set '%s' is not available, falling back to '%s'.
-", pszRequestedCharset, pszFallbackCharset );
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL character set '%s' is not available, falling back to '%s'.", pszRequestedCharset, pszFallbackCharset );
                                 fCharsetSet = trySetCharacterSet( pszFallbackCharset, LOGL_ERROR, sDerivedCollation );
                         }
 
@@ -883,8 +881,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
                         if ( pszConnectionCharset != NULL && pszTableCharset != NULL && strcmpi( pszConnectionCharset, pszTableCharset ) != 0 )
                         {
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL connection character set '%s' is not supported for table definitions, using '%s' instead.
-", pszConnectionCharset, pszTableCharset );
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL connection character set '%s' is not supported for table definitions, using '%s' instead.", pszConnectionCharset, pszTableCharset );
                         }
 
                         CGString sConnectionCollationSuffix;
@@ -899,8 +896,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 sTableCollationSuffix.Format( ", collation '%s'", pszTableCollation );
                         }
 
-                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'%s (tables use '%s'%s).
-", pszHost ? pszHost : "localhost", uiPort, pszConnectionCharset != NULL ? pszConnectionCharset : "unknown", (const char *) sConnectionCollationSuffix, pszTableCharset != NULL ? pszTableCharset : "unknown", (const char *) sTableCollationSuffix );
+                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'%s (tables use '%s'%s).", pszHost ? pszHost : "localhost", uiPort, pszConnectionCharset != NULL ? pszConnectionCharset : "unknown", (const char *) sConnectionCollationSuffix, pszTableCharset != NULL ? pszTableCharset : "unknown", (const char *) sTableCollationSuffix );
                         StartDirtyWorker();
                         return true;
                 }
