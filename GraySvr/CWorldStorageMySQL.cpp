@@ -19,6 +19,14 @@
 #include <unistd.h>
 #endif
 
+#ifdef _WIN32
+#include <errmsg.h>
+#include <mysqld_error.h>
+#else
+#include <mysql/errmsg.h>
+#include <mysql/mysqld_error.h>
+#endif
+
 namespace
 {
         static const int SCHEMA_VERSION_ROW = 1;      // Stores current schema version
@@ -363,32 +371,109 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
 	for ( int iAttempt = 0; iAttempt < iAttempts; ++iAttempt )
 	{
-		m_pConnection = mysql_init( NULL );
-		if ( m_pConnection == NULL )
-		{
-			g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to initialize MySQL handle.\n" );
-			return false;
-		}
+                const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
+                const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
+                const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
+                const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
+                unsigned int uiPort = ( config.m_iPort > 0 ) ? (unsigned int) config.m_iPort : 0;
+
+                bool fConnected = false;
+                unsigned int uiConnectError = 0;
+                std::string sConnectErrorText = "Unknown MySQL client error";
+                bool fAttemptedHandshakeCharset = false;
+                size_t uHandshakeFallbackIndex = 0;
+                static const char * const pszHandshakeFallbacks[] = { "utf8", "utf8mb3", "latin1", NULL };
+
+                while ( true )
+                {
+                        m_pConnection = mysql_init( NULL );
+                        if ( m_pConnection == NULL )
+                        {
+                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to initialize MySQL handle.\n" );
+                                return false;
+                        }
 
 #ifdef MYSQL_OPT_RECONNECT
-		bool fReconnect = m_fAutoReconnect != 0;
-		mysql_options( m_pConnection, MYSQL_OPT_RECONNECT, &fReconnect );
+                        bool fReconnect = m_fAutoReconnect != 0;
+                        mysql_options( m_pConnection, MYSQL_OPT_RECONNECT, &fReconnect );
 #endif
 
-		const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
-		const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
-		const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
-		const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
-		unsigned int uiPort = ( config.m_iPort > 0 ) ? (unsigned int) config.m_iPort : 0;
-
-                MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
-                if ( pResult != NULL )
-                {
-                        std::string sRequestedCharsetOption;
-                        std::string sExplicitCollationOption;
-                        if ( !config.m_sCharset.IsEmpty() )
+                        const char * pszHandshakeCharset = NULL;
+                        if ( fAttemptedHandshakeCharset )
                         {
-                                sRequestedCharsetOption = (const char *) config.m_sCharset;
+                                pszHandshakeCharset = pszHandshakeFallbacks[uHandshakeFallbackIndex];
+                                if ( pszHandshakeCharset != NULL && pszHandshakeCharset[0] != '\0' )
+                                {
+                                        mysql_options( m_pConnection, MYSQL_SET_CHARSET_NAME, pszHandshakeCharset );
+                                }
+                        }
+
+                        MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
+                        if ( pResult != NULL )
+                        {
+                                fConnected = true;
+                                if ( pszHandshakeCharset != NULL && pszHandshakeCharset[0] != '\0' )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL server %s:%u accepted fallback handshake character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszHandshakeCharset );
+                                }
+                                break;
+                        }
+
+                        uiConnectError = mysql_errno( m_pConnection );
+                        const char * pszConnectError = mysql_error( m_pConnection );
+                        if ( pszConnectError != NULL && pszConnectError[0] != '\0' )
+                        {
+                                sConnectErrorText = pszConnectError;
+                        }
+                        else
+                        {
+                                sConnectErrorText = "Unknown MySQL client error";
+                        }
+
+                        mysql_close( m_pConnection );
+                        m_pConnection = NULL;
+
+                        bool fCharsetError = ( uiConnectError == ER_UNKNOWN_CHARACTER_SET || uiConnectError == CR_CANT_READ_CHARSET );
+                        if ( fCharsetError )
+                        {
+                                if ( !fAttemptedHandshakeCharset )
+                                {
+                                        fAttemptedHandshakeCharset = true;
+                                        uHandshakeFallbackIndex = 0;
+                                }
+                                else
+                                {
+                                        ++uHandshakeFallbackIndex;
+                                }
+
+                                const char * pszRetryCharset = fAttemptedHandshakeCharset ? pszHandshakeFallbacks[uHandshakeFallbackIndex] : NULL;
+                                if ( pszRetryCharset != NULL && pszRetryCharset[0] != '\0' )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL mysql_real_connect error (%u): %s. Retrying with handshake character set '%s'.\n", uiConnectError, sConnectErrorText.c_str(), pszRetryCharset );
+                                        continue;
+                                }
+                        }
+
+                        break;
+                }
+
+                if ( !fConnected )
+                {
+                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "MySQL mysql_real_connect error (%u): %s\n", uiConnectError, sConnectErrorText.c_str() );
+                        if ( ( iAttempt + 1 ) < iAttempts )
+                        {
+                                int iDelay = std::max( m_iReconnectDelay, 1 );
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).\n", iDelay );
+                                std::this_thread::sleep_for( std::chrono::seconds( iDelay ));
+                        }
+                        continue;
+                }
+
+                std::string sRequestedCharsetOption;
+                std::string sExplicitCollationOption;
+                if ( !config.m_sCharset.IsEmpty() )
+                {
+                        sRequestedCharsetOption = (const char *) config.m_sCharset;
                                 auto trimWhitespace = []( std::string & sValue )
                                 {
                                         size_t uStart = 0;
@@ -789,6 +874,34 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
                         if ( !fCharsetSet )
                         {
+                                CGString sActiveCharset = fetchServerVariable( "character_set_connection" );
+                                if ( sActiveCharset.IsEmpty() )
+                                {
+                                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
+                                        if ( pszActiveCharset != NULL && pszActiveCharset[0] != '\0' )
+                                        {
+                                                sActiveCharset = pszActiveCharset;
+                                        }
+                                }
+
+                                if ( !sActiveCharset.IsEmpty() )
+                                {
+                                        const char * pszActiveCharset = (const char *) sActiveCharset;
+                                        m_sTableCharset = pszActiveCharset;
+                                        if ( pszRequestedCharset != NULL && pszRequestedCharset[0] != '\0' )
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to apply requested MySQL character set '%s', continuing with server default '%s'.\n", pszRequestedCharset, pszActiveCharset );
+                                        }
+                                        else
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Unable to apply requested MySQL character set, continuing with server default '%s'.\n", pszActiveCharset );
+                                        }
+                                        fCharsetSet = true;
+                                }
+                        }
+
+                        if ( !fCharsetSet )
+                        {
                                 mysql_close( m_pConnection );
                                 m_pConnection = NULL;
                                 m_sTableCharset.Empty();
@@ -900,18 +1013,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         StartDirtyWorker();
                         return true;
                 }
-
-                LogMySQLError( m_pConnection, "mysql_real_connect" );
-		mysql_close( m_pConnection );
-		m_pConnection = NULL;
-
-		if ( ( iAttempt + 1 ) < iAttempts )
-		{
-			int iDelay = std::max( m_iReconnectDelay, 1 );
-			g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).\n", iDelay );
-			std::this_thread::sleep_for( std::chrono::seconds( iDelay ));
-		}
-	}
+        }
 
 	g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).\n", std::max( iAttempts, 1 ) );
 	return false;
