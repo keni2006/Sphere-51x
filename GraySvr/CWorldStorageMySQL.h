@@ -1,7 +1,7 @@
 #ifndef _CWORLD_STORAGE_MYSQL_H_
 #define _CWORLD_STORAGE_MYSQL_H_
 
-#include "../common/cstring.h"
+#include "../Common/cstring.h"
 #include <functional>
 #include <vector>
 #include <condition_variable>

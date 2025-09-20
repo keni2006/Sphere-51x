@@ -385,7 +385,11 @@ failout:
                 }
 
                 fResult = CObjBaseTemplate::SetName( s.GetKey());
-                goto done;
+                if ( fResult )
+                {
+                        MarkDirty( StorageDirtyType_Save );
+                }
+                return fResult;
         }
 
         // NOTE: Name must be <= MAX_VISIBLE_NAME - items in game contains a lot of chars, so we must try setting the name to the available chars in the buffer
@@ -405,7 +409,6 @@ failout:
 
         fResult = CObjBaseTemplate::SetName( pszName );
 
-done:
         if ( fResult )
         {
                 MarkDirty( StorageDirtyType_Save );
@@ -1281,13 +1284,14 @@ do_try:
 			{
 				if ( pCharSrc == NULL || ! pCharSrc->CanTouch( this ))
 				{
-					goto failit;
+					pSrc->SysMessagef( "Can't %s object %s", pszVerb, GetName());
+					return( false );
 				}
 			}
 
-			if ( ! r_Verb( CScript( pszVerb ), pSrc ))
+			CScript scriptVerb( pszVerb );
+			if ( ! r_Verb( scriptVerb, pSrc ))
 			{
-failit:
 				pSrc->SysMessagef( "Can't %s object %s", pszVerb, GetName());
 				return( false );
 			}

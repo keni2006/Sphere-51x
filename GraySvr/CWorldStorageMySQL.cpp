@@ -783,7 +783,7 @@ bool CWorldStorageMySQL::ApplyMigration_0_1()
 		"`y2` INT NOT NULL,"
 		"`last_update` DATETIME NULL,"
 		"PRIMARY KEY (`id`),"
-		"UNIQUE KEY `ux_sectors_bounds` (`map_plane`, `x1`, `y1`, `x2`, `y2`)
+		"UNIQUE KEY `ux_sectors_bounds` (`map_plane`, `x1`, `y1`, `x2`, `y2`)",
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
 		(const char *) sSectors );
 	vQueries.push_back( sQuery );
@@ -851,6 +851,7 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
 {
         const CGString sAccounts = GetPrefixedTableName( "accounts" );
         const CGString sAccountEmails = GetPrefixedTableName( "account_emails" );
+        const CGString sTableName = GetPrefixedTableName( "schema_version" );
 
         if ( ! EnsureColumnExists( sAccounts, "priv_flags", "`priv_flags` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `plevel`" ))
         {
@@ -2011,7 +2012,7 @@ bool CWorldStorageMySQL::SaveSector( const CSector & sector )
         UniversalRecord record( *this, sSectors );
 
         const CPointMap base = sector.GetBase();
-        record.SetInt( "map_plane", base.m_mapplane );
+        record.SetInt( "map_plane", 0 );
         record.SetInt( "x1", base.m_x );
         record.SetInt( "y1", base.m_y );
         record.SetInt( "x2", base.m_x + SECTOR_SIZE_X );
@@ -2103,7 +2104,7 @@ bool CWorldStorageMySQL::SaveGMPage( const CGMPage & page )
         record.SetInt( "pos_x", page.m_p.m_x );
         record.SetInt( "pos_y", page.m_p.m_y );
         record.SetInt( "pos_z", page.m_p.m_z );
-        record.SetInt( "map_plane", page.m_p.m_mapplane );
+        record.SetInt( "map_plane", 0 );
 
         return ExecuteQuery( record.BuildInsert( false, true ));
 }

@@ -104,6 +104,7 @@ public:
 	{
 		return( m_pArg );
 	}
+	TCHAR * GetArgStr( bool * pfQuoted );
 	long GetArgVal();
 	long GetArgRange()
 	{

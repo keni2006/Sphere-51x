@@ -412,46 +412,53 @@ void CChar::NPC_OnHear( const TCHAR * pCmd, CChar * pSrc )
 		if ( NPC_OnHireHear( pSrc ))
 			return;
 	}
-	if ( FindStrWord( pCmd, "Bye" ) || FindStrWord( pCmd, "GoodBye" ))
-	{
-		r_Verb( CScript( "BYE" ), pSrc );
-		return;
-	}
-	if ( m_pNPC->m_Brain == NPCBRAIN_BANKER && FindStrWord( pCmd, "Bank" ))
-	{
-		r_Verb( CScript( "BANK" ), pSrc );
-		return;
-	}
-	if ( m_pNPC->m_Brain == NPCBRAIN_STABLE )
-	{
-		if ( FindStrWord( pCmd, "Retrieve" ))
-		{
-			r_Verb( CScript( "PETRETRIEVE" ), pSrc );
-			return;
-		}
-		if ( FindStrWord( pCmd, "Stable" ))
-		{
-			r_Verb( CScript( "PETSTABLE" ), pSrc );
-			return;
-		}
-	}
-	if ( FindStrWord( pCmd, "Move" ))
-	{
-		r_Verb( CScript( "LEAVE" ), pSrc );
-		return;
-	}
-	if ( m_pNPC->IsVendor())
-	{
-		if ( FindStrWord( pCmd, "Buy" ))
-		{
-			r_Verb( CScript( "BUY" ), pSrc );
-			return;
-		}
-		if ( FindStrWord( pCmd, "Sell" ))
-		{
-			r_Verb( CScript( "SELL" ), pSrc );
-			return;
-		}
+        if ( FindStrWord( pCmd, "Bye" ) || FindStrWord( pCmd, "GoodBye" ))
+        {
+                CScript scriptBye( "BYE" );
+                r_Verb( scriptBye, pSrc );
+                return;
+        }
+        if ( m_pNPC->m_Brain == NPCBRAIN_BANKER && FindStrWord( pCmd, "Bank" ))
+        {
+                CScript scriptBank( "BANK" );
+                r_Verb( scriptBank, pSrc );
+                return;
+        }
+        if ( m_pNPC->m_Brain == NPCBRAIN_STABLE )
+        {
+                if ( FindStrWord( pCmd, "Retrieve" ))
+                {
+                        CScript scriptRetrieve( "PETRETRIEVE" );
+                        r_Verb( scriptRetrieve, pSrc );
+                        return;
+                }
+                if ( FindStrWord( pCmd, "Stable" ))
+                {
+                        CScript scriptStable( "PETSTABLE" );
+                        r_Verb( scriptStable, pSrc );
+                        return;
+                }
+        }
+        if ( FindStrWord( pCmd, "Move" ))
+        {
+                CScript scriptLeave( "LEAVE" );
+                r_Verb( scriptLeave, pSrc );
+                return;
+        }
+        if ( m_pNPC->IsVendor())
+        {
+                if ( FindStrWord( pCmd, "Buy" ))
+                {
+                        CScript scriptBuy( "BUY" );
+                        r_Verb( scriptBuy, pSrc );
+                        return;
+                }
+                if ( FindStrWord( pCmd, "Sell" ))
+                {
+                        CScript scriptSell( "SELL" );
+                        r_Verb( scriptSell, pSrc );
+                        return;
+                }
 		if ( fMyPet )
 		{
 			if ( FindStrWord(pCmd,"STOCK") || FindStrWord(pCmd,"INVENTORY"))
@@ -1058,7 +1065,8 @@ restart_read:
 			len = 0;
 			goto restart_read;
 		}
-		if ( ! r_Verb( CScript( pszVerb ), this ))
+                CScript scriptVerb( pszVerb );
+                if ( ! r_Verb( scriptVerb, this ))
 		{
 			DEBUG_MSG(( "Bad Book Script verb '%s'\n", pszVerb ));
 		}
@@ -1704,7 +1712,7 @@ bool CChar::NPC_FightCast( CChar * pChar )
 
 	// select proper spell.
 	// defensive spells ???
-	int imaxspell = min(( iSkillVal / 12 ) * 8, SPELL_BASE_QTY );
+	int imaxspell = min(( iSkillVal / 12 ) * 8, static_cast<int>(SPELL_BASE_QTY) );
 
 	// does the creature have a spellbook.
 	CItem * pSpellbook = GetSpellbook();

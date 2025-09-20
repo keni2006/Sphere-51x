@@ -894,7 +894,7 @@ bool CWorld::LoadSectionFromStorage()
                         if ( m_uStorageLoadSectorIndex < m_StorageLoadSectors.size())
                         {
                                 const CWorldStorageMySQL::SectorData & data = m_StorageLoadSectors[m_uStorageLoadSectorIndex++];
-                                CPointMap base( data.m_iX1, data.m_iY1, 0, data.m_iMapPlane );
+                                CPointMap base( data.m_iX1, data.m_iY1, 0 );
                                 CSector * pSector = base.GetSector();
                                 if ( pSector != NULL )
                                 {
@@ -976,8 +976,7 @@ bool CWorld::LoadSectionFromStorage()
                                 pPage->m_lTime = record.m_lTime;
                                 pPage->m_p.m_x = record.m_iPosX;
                                 pPage->m_p.m_y = record.m_iPosY;
-                                pPage->m_p.m_z = record.m_iPosZ;
-                                pPage->m_p.m_mapplane = record.m_iMapPlane;
+pPage->m_p.m_z = record.m_iPosZ;
                                 return true;
                         }
                         m_iStorageLoadStage = 3;

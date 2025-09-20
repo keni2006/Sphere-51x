@@ -47,6 +47,9 @@
 #define strcmpi		_strcmpi	// Non ANSI equiv functions ?
 #define strnicmp	_strnicmp
 #define strupr		_strupr
+#ifndef socklen_t
+typedef int socklen_t;
+#endif
 
 #if defined(_MSC_VER) && ( _MSC_VER < 1100 )
 // MSC Version 5.0 defines these from the ANSI spec. MSC 4.1 does not.
@@ -198,10 +201,10 @@ public:
 		ip.SetPort( wPort );
 		return( Connect( ip ));
 	}
-	SOCKET Accept( struct sockaddr_in * pAddr, int * plen ) const
-	{
-		return( accept( m_hSocket, (struct sockaddr*) pAddr, plen ));
-	}
+        SOCKET Accept( struct sockaddr_in * pAddr, socklen_t * plen ) const
+        {
+                return( accept( m_hSocket, (struct sockaddr*) pAddr, plen ));
+        }
 	int Send( const void * pData, int len ) const
 	{
 		// RETURN: length sent
@@ -213,19 +216,19 @@ public:
 		// flags = MSG_PEEK or MSG_OOB
 		return( recv( m_hSocket, (char*) pData, len, flags ));
 	}
-	int GetSockName( struct sockaddr_in * pName ) const
-	{
-		// Get the address of the near end. (us)
-		int len = sizeof( *pName );
-		return( getsockname( m_hSocket, (struct sockaddr *) pName, &len ));
-	}
-	int GetPeerName( struct sockaddr_in * pName ) const
-	{
-		// Get the address of the far end.
-		// RETURN: 0 = success
-		int len = sizeof( *pName );
-		return( getpeername( m_hSocket, (struct sockaddr *) pName, &len ));
-	}
+        int GetSockName( struct sockaddr_in * pName ) const
+        {
+                // Get the address of the near end. (us)
+                socklen_t len = sizeof( *pName );
+                return( getsockname( m_hSocket, (struct sockaddr *) pName, &len ));
+        }
+        int GetPeerName( struct sockaddr_in * pName ) const
+        {
+                // Get the address of the far end.
+                // RETURN: 0 = success
+                socklen_t len = sizeof( *pName );
+                return( getpeername( m_hSocket, (struct sockaddr *) pName, &len ));
+        }
 	int SetSockOpt( int nOptionName, const void* optval, int optlen, int nLevel = SOL_SOCKET )
 	{
 		// level = SOL_SOCKET and IPPROTO_TCP.

@@ -6,7 +6,7 @@
 // So they may have full unicode chars inside.
 
 #ifdef GRAY_SVR
-#include "../graysvr/graysvr.h"
+#include "../GraySvr/graysvr.h"
 #else
 #include "graycom.h"
 #endif
@@ -416,13 +416,44 @@ bool CScript::ReadKeyParse() // Read line from script
 
 TCHAR * CScript::GetArgNextStr()
 {
-	Parse( m_pArg, &m_pArg );
-	return( m_pArg );
+Parse( m_pArg, &m_pArg );
+return( m_pArg );
+}
+
+TCHAR * CScript::GetArgStr( bool * pfQuoted )
+{
+	if ( pfQuoted != NULL )
+	{
+		*pfQuoted = false;
+	}
+	if ( m_pArg == NULL )
+	{
+		return NULL;
+	}
+
+	if ( pfQuoted != NULL && *m_pArg != '\0' )
+	{
+		TCHAR * pVal = m_pArg;
+		TCHAR chQuote = *pVal;
+		if ( chQuote == '"' || chQuote == '\'' )
+		{
+			++pVal;
+			size_t len = strlen( pVal );
+			if ( len > 0 && pVal[len - 1] == chQuote )
+			{
+				pVal[len - 1] = '\0';
+			}
+			*pfQuoted = true;
+			m_pArg = pVal;
+		}
+	}
+
+	return m_pArg;
 }
 
 long CScript::GetArgVal()
 {
-	return( Exp_GetVal( m_pArg ));
+return( Exp_GetVal( m_pArg ));
 }
 
 UINT CScript::GetArgHex()
@@ -1256,9 +1287,10 @@ bool CScriptObj::r_Verb( CScript & s, CTextConsole * pSrc ) // Execute command f
 	CScriptObj * pRef;
 	if ( r_GetRef( pszKey, pRef, pSrc ))
 	{
-		if ( ! pRef ) 
+		if ( ! pRef )
 			return( false );
-		return pRef->r_Verb( CScript( pszKey, s.GetArgStr()), pSrc );
+		CScript scriptVerb( pszKey, s.GetArgStr());
+		return pRef->r_Verb( scriptVerb, pSrc );
 	}
 
 	return r_LoadVal( s );	// default to loading values.

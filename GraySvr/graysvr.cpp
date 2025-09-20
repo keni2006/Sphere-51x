@@ -77,7 +77,9 @@
 // ADDNPC from scripts, "CONT" keyword
 
 #include "graysvr.h"	// predef header.
+#ifdef _WIN32
 #include <windows.h>
+#endif
 const TCHAR * g_Stat_Name[STAT_QTY] =
 {
 	"STR",
@@ -576,11 +578,38 @@ bool CLog::Open( TCHAR * pszBaseDirName )	// name set previously.
 
 
 
+#ifdef _WIN32
 void SetConsoleColor(WORD color)         //console color
 {
-	HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-	SetConsoleTextAttribute(hConsole, color);
+        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        SetConsoleTextAttribute(hConsole, color);
 }
+#else
+namespace
+{
+        constexpr WORD kNoConsoleColor = 0;
+}
+
+void SetConsoleColor(WORD)
+{
+        // Colorized console output is a Windows-specific feature.  On
+        // POSIX terminals we simply skip the attribute change and leave
+        // the text in the default color.
+}
+
+#ifndef FOREGROUND_RED
+#define FOREGROUND_RED           kNoConsoleColor
+#endif
+#ifndef FOREGROUND_GREEN
+#define FOREGROUND_GREEN         kNoConsoleColor
+#endif
+#ifndef FOREGROUND_BLUE
+#define FOREGROUND_BLUE          kNoConsoleColor
+#endif
+#ifndef FOREGROUND_INTENSITY
+#define FOREGROUND_INTENSITY     kNoConsoleColor
+#endif
+#endif
 
 int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 {

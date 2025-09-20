@@ -26,7 +26,40 @@
 #define IMULDIV(a,b,c) (((a)*(b))/(c))	// the windows version on MulDiv will round !
 
 // These must be made to work for both longs and ints
-#ifndef min					// limits.h ?
+#ifdef min					// limits.h ?
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
+#if defined(__cplusplus)
+template <typename T>
+inline T min( const T & a, const T & b )
+{
+	return ( a < b ) ? a : b;
+}
+
+template <typename T, typename U>
+inline T min( const T & a, const U & b )
+{
+	T bConverted = static_cast<T>(b);
+	return ( a < bConverted ) ? a : bConverted;
+}
+
+template <typename T>
+inline T max( const T & a, const T & b )
+{
+	return ( a > b ) ? a : b;
+}
+
+template <typename T, typename U>
+inline T max( const T & a, const U & b )
+{
+	T bConverted = static_cast<T>(b);
+	return ( a > bConverted ) ? a : bConverted;
+}
+#else
 #define min(x,y)	((x) <? (y))
 #define max(x,y)	((x) >? (y))
 #endif	// min
@@ -99,17 +132,35 @@
 #define DWORD		unsigned long	// 64 bits
 #endif	// BYTE
 
+#ifndef _WIN32
+#include <sys/time.h>
+inline DWORD GetTickCount()
+{
+	struct timeval tv;
+	gettimeofday( &tv, NULL );
+	return static_cast<DWORD>((tv.tv_sec * 1000UL) + (tv.tv_usec / 1000));
+}
+#endif
+
 #endif	// TRUE
 
 #ifndef _WIN32	
 #define _cdecl
+#if !defined(__cplusplus)
 #define bool int
 #define true 1
 #define false 0
+#endif
+#ifndef TCHAR
 #define TCHAR char
+#endif
+#ifndef LPCSTR
 #define LPCSTR const char *
+#endif
+#ifndef LPCTSTR
 #define LPCTSTR const char *
-#define MulDiv	IMULDIV
+#endif
+#define MulDiv  IMULDIV
 #endif
 
 #ifndef MAKELONG

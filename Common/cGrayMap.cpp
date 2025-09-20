@@ -7,7 +7,7 @@
 #include "../graymaker/graymaker.h"
 
 #elif defined(GRAY_SVR)
-#include "../graysvr/graysvr.h"
+#include "../GraySvr/graysvr.h"
 
 #elif defined(GRAY_MAP)
 #include "../graymap/graymap.h"
