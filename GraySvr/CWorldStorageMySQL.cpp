@@ -7,15 +7,285 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <fstream>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <sstream>
+#include <string>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace
 {
-	static const int SCHEMA_VERSION_ROW = 1;      // Stores current schema version
-	static const int SCHEMA_IMPORT_ROW = 2;       // Tracks legacy import state
-        static const int CURRENT_SCHEMA_VERSION = 2;
+        static const int SCHEMA_VERSION_ROW = 1;      // Stores current schema version
+        static const int SCHEMA_IMPORT_ROW = 2;       // Tracks legacy import state
+        static const int CURRENT_SCHEMA_VERSION = 3;
+}
+
+CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool fAutoBegin ) :
+        m_Storage( storage ),
+        m_fActive( false ),
+        m_fCommitted( false )
+{
+        if ( fAutoBegin )
+        {
+                m_fActive = m_Storage.BeginTransaction();
+        }
+}
+
+CWorldStorageMySQL::Transaction::~Transaction()
+{
+        if ( m_fActive && ! m_fCommitted )
+        {
+                m_Storage.RollbackTransaction();
+        }
+}
+
+bool CWorldStorageMySQL::Transaction::Begin()
+{
+        if ( m_fActive )
+        {
+                return true;
+        }
+        m_fActive = m_Storage.BeginTransaction();
+        return m_fActive;
+}
+
+bool CWorldStorageMySQL::Transaction::Commit()
+{
+        if ( ! m_fActive )
+        {
+                return false;
+        }
+        if ( ! m_Storage.CommitTransaction())
+        {
+                return false;
+        }
+        m_fCommitted = true;
+        m_fActive = false;
+        return true;
+}
+
+void CWorldStorageMySQL::Transaction::Rollback()
+{
+        if ( m_fActive )
+        {
+                m_Storage.RollbackTransaction();
+                m_fActive = false;
+        }
+        m_fCommitted = false;
+}
+
+CWorldStorageMySQL::UniversalRecord::UniversalRecord( CWorldStorageMySQL & storage ) :
+        m_Storage( storage )
+{
+}
+
+CWorldStorageMySQL::UniversalRecord::UniversalRecord( CWorldStorageMySQL & storage, const CGString & table ) :
+        m_Storage( storage ),
+        m_sTable( table )
+{
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetTable( const CGString & table )
+{
+        m_sTable = table;
+}
+
+void CWorldStorageMySQL::UniversalRecord::Clear()
+{
+        m_Fields.clear();
+}
+
+bool CWorldStorageMySQL::UniversalRecord::Empty() const
+{
+        return m_Fields.empty();
+}
+
+CWorldStorageMySQL::UniversalRecord::FieldEntry * CWorldStorageMySQL::UniversalRecord::FindField( const char * field )
+{
+        if ( field == NULL )
+        {
+                return NULL;
+        }
+        for ( size_t i = 0; i < m_Fields.size(); ++i )
+        {
+                if ( m_Fields[i].m_sName.CompareNoCase( field ) == 0 )
+                {
+                        return &m_Fields[i];
+                }
+        }
+        return NULL;
+}
+
+const CWorldStorageMySQL::UniversalRecord::FieldEntry * CWorldStorageMySQL::UniversalRecord::FindField( const char * field ) const
+{
+        if ( field == NULL )
+        {
+                return NULL;
+        }
+        for ( size_t i = 0; i < m_Fields.size(); ++i )
+        {
+                if ( m_Fields[i].m_sName.CompareNoCase( field ) == 0 )
+                {
+                        return &m_Fields[i];
+                }
+        }
+        return NULL;
+}
+
+void CWorldStorageMySQL::UniversalRecord::AddOrReplaceField( const char * field, const CGString & value )
+{
+        if ( field == NULL )
+        {
+                return;
+        }
+        FieldEntry * pEntry = FindField( field );
+        if ( pEntry != NULL )
+        {
+                pEntry->m_sValue = value;
+                return;
+        }
+
+        FieldEntry entry;
+        entry.m_sName = field;
+        entry.m_sValue = value;
+        m_Fields.push_back( entry );
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetRaw( const char * field, const CGString & expression )
+{
+        AddOrReplaceField( field, expression );
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetNull( const char * field )
+{
+        AddOrReplaceField( field, CGString( "NULL" ));
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetString( const char * field, const CGString & value )
+{
+        AddOrReplaceField( field, m_Storage.FormatStringValue( value ));
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetOptionalString( const char * field, const CGString & value )
+{
+        AddOrReplaceField( field, m_Storage.FormatOptionalStringValue( value ));
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetDateTime( const char * field, const CGString & value )
+{
+        AddOrReplaceField( field, m_Storage.FormatDateTimeValue( value ));
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetDateTime( const char * field, const CRealTime & value )
+{
+        AddOrReplaceField( field, m_Storage.FormatDateTimeValue( value ));
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetInt( const char * field, long long value )
+{
+        CGString sValue;
+#ifdef _WIN32
+        sValue.Format( "%I64d", value );
+#else
+        sValue.Format( "%lld", value );
+#endif
+        AddOrReplaceField( field, sValue );
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetUInt( const char * field, unsigned long long value )
+{
+        CGString sValue;
+#ifdef _WIN32
+        sValue.Format( "%I64u", value );
+#else
+        sValue.Format( "%llu", value );
+#endif
+        AddOrReplaceField( field, sValue );
+}
+
+void CWorldStorageMySQL::UniversalRecord::SetBool( const char * field, bool value )
+{
+        AddOrReplaceField( field, CGString( value ? "1" : "0" ));
+}
+
+CGString CWorldStorageMySQL::UniversalRecord::BuildInsert( bool fReplace, bool fUpdateOnDuplicate ) const
+{
+        CGString sQuery;
+        if ( m_sTable.IsEmpty() || m_Fields.empty())
+        {
+                return sQuery;
+        }
+
+        CGString sColumns;
+        CGString sValues;
+        for ( size_t i = 0; i < m_Fields.size(); ++i )
+        {
+                if ( ! sColumns.IsEmpty())
+                {
+                        sColumns += ",";
+                        sValues += ",";
+                }
+                CGString sColumn;
+                sColumn.Format( "`%s`", (const char *) m_Fields[i].m_sName );
+                sColumns += sColumn;
+                sValues += m_Fields[i].m_sValue;
+        }
+
+        const char * pszVerb = fReplace ? "REPLACE INTO" : "INSERT INTO";
+        sQuery.Format( "%s `%s` (%s) VALUES (%s)", pszVerb, (const char *) m_sTable, (const char *) sColumns, (const char *) sValues );
+
+        if ( ! fReplace && fUpdateOnDuplicate && ! m_Fields.empty())
+        {
+                sQuery += " ON DUPLICATE KEY UPDATE ";
+                for ( size_t i = 0; i < m_Fields.size(); ++i )
+                {
+                        if ( i > 0 )
+                        {
+                                sQuery += ",";
+                        }
+                        CGString sUpdate;
+                        sUpdate.Format( "`%s`=VALUES(`%s`)", (const char *) m_Fields[i].m_sName, (const char *) m_Fields[i].m_sName );
+                        sQuery += sUpdate;
+                }
+        }
+
+        sQuery += ";";
+        return sQuery;
+}
+
+CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & whereClause ) const
+{
+        CGString sQuery;
+        if ( m_sTable.IsEmpty() || m_Fields.empty())
+        {
+                return sQuery;
+        }
+
+        CGString sAssignments;
+        for ( size_t i = 0; i < m_Fields.size(); ++i )
+        {
+                if ( ! sAssignments.IsEmpty())
+                {
+                        sAssignments += ",";
+                }
+                CGString sAssign;
+                sAssign.Format( "`%s`=%s", (const char *) m_Fields[i].m_sName, (const char *) m_Fields[i].m_sValue );
+                sAssignments += sAssign;
+        }
+
+        sQuery.Format( "UPDATE `%s` SET %s", (const char *) m_sTable, (const char *) sAssignments );
+        if ( ! whereClause.IsEmpty())
+        {
+                sQuery += " ";
+                sQuery += whereClause;
+        }
+        sQuery += ";";
+        return sQuery;
 }
 
 CWorldStorageMySQL::CWorldStorageMySQL()
@@ -26,6 +296,7 @@ CWorldStorageMySQL::CWorldStorageMySQL()
         m_iReconnectDelay = 0;
         m_sDatabaseName.Empty();
         m_tLastAccountSync = 0;
+        m_iTransactionDepth = 0;
 }
 
 CWorldStorageMySQL::~CWorldStorageMySQL()
@@ -48,6 +319,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         m_iReconnectDelay = config.m_iReconnectDelay;
         m_sDatabaseName = config.m_sDatabase;
         m_tLastAccountSync = 0;
+        m_iTransactionDepth = 0;
 
 	const int iAttempts = std::max( m_fAutoReconnect ? m_iReconnectTries : 1, 1 );
 
@@ -108,6 +380,7 @@ void CWorldStorageMySQL::Disconnect()
         m_iReconnectTries = 0;
         m_iReconnectDelay = 0;
         m_tLastAccountSync = 0;
+        m_iTransactionDepth = 0;
 }
 
 bool CWorldStorageMySQL::IsConnected() const
@@ -166,12 +439,154 @@ bool CWorldStorageMySQL::Query( const CGString & query, MYSQL_RES ** ppResult )
 
 bool CWorldStorageMySQL::ExecuteQuery( const CGString & query )
 {
-	return Query( query, NULL );
+        return Query( query, NULL );
+}
+
+bool CWorldStorageMySQL::ExecuteRecordsInsert( const std::vector<UniversalRecord> & records )
+{
+        if ( records.empty())
+        {
+                return true;
+        }
+
+        for ( size_t i = 0; i < records.size(); ++i )
+        {
+                CGString sQuery = records[i].BuildInsert( false, false );
+                if ( sQuery.IsEmpty())
+                {
+                        return false;
+                }
+                if ( ! ExecuteQuery( sQuery ))
+                {
+                        return false;
+                }
+        }
+
+        return true;
+}
+
+bool CWorldStorageMySQL::ClearTable( const CGString & table )
+{
+        if ( table.IsEmpty())
+        {
+                return false;
+        }
+
+        CGString sQuery;
+        sQuery.Format( "DELETE FROM `%s`;", (const char *) table );
+        return ExecuteQuery( sQuery );
+}
+
+bool CWorldStorageMySQL::BeginTransaction()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        if ( m_iTransactionDepth == 0 )
+        {
+                if ( mysql_query( m_pConnection, "START TRANSACTION" ) != 0 )
+                {
+                        LogMySQLError( "START TRANSACTION" );
+                        return false;
+                }
+        }
+
+        ++m_iTransactionDepth;
+        return true;
+}
+
+bool CWorldStorageMySQL::CommitTransaction()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( m_iTransactionDepth <= 0 )
+        {
+                return false;
+        }
+
+        --m_iTransactionDepth;
+        if ( m_iTransactionDepth == 0 )
+        {
+                if ( mysql_query( m_pConnection, "COMMIT" ) != 0 )
+                {
+                        LogMySQLError( "COMMIT" );
+                        m_iTransactionDepth = 0;
+                        return false;
+                }
+        }
+        return true;
+}
+
+bool CWorldStorageMySQL::RollbackTransaction()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( m_iTransactionDepth <= 0 )
+        {
+                return true;
+        }
+
+        if ( mysql_query( m_pConnection, "ROLLBACK" ) != 0 )
+        {
+                        LogMySQLError( "ROLLBACK" );
+                        m_iTransactionDepth = 0;
+                        return false;
+        }
+
+        m_iTransactionDepth = 0;
+        return true;
+}
+
+bool CWorldStorageMySQL::WithTransaction( const std::function<bool()> & callback )
+{
+        if ( ! callback )
+        {
+                return false;
+        }
+
+        Transaction transaction( *this );
+        if ( ! transaction.IsActive())
+        {
+                if ( ! transaction.Begin())
+                {
+                        return false;
+                }
+        }
+
+        bool fResult = false;
+        try
+        {
+                fResult = callback();
+        }
+        catch (...)
+        {
+                transaction.Rollback();
+                throw;
+        }
+
+        if ( fResult )
+        {
+                if ( transaction.Commit())
+                {
+                        return true;
+                }
+                transaction.Rollback();
+                return false;
+        }
+
+        transaction.Rollback();
+        return false;
 }
 
 bool CWorldStorageMySQL::EnsureSchemaVersionTable()
 {
-	const CGString sTableName = GetPrefixedTableName( "schema_version" );
+        const CGString sTableName = GetPrefixedTableName( "schema_version" );
 
 	CGString sQuery;
 	sQuery.Format(
@@ -488,6 +903,129 @@ bool CWorldStorageMySQL::ApplyMigration_1_2()
         return true;
 }
 
+bool CWorldStorageMySQL::ApplyMigration_2_3()
+{
+        const CGString sAccounts = GetPrefixedTableName( "accounts" );
+        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
+        const CGString sWorldObjectData = GetPrefixedTableName( "world_object_data" );
+        const CGString sWorldObjectComponents = GetPrefixedTableName( "world_object_components" );
+        const CGString sWorldObjectRelations = GetPrefixedTableName( "world_object_relations" );
+        const CGString sWorldSavepoints = GetPrefixedTableName( "world_savepoints" );
+        const CGString sWorldObjectAudit = GetPrefixedTableName( "world_object_audit" );
+
+        std::vector<CGString> vQueries;
+        CGString sQuery;
+
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`uid` BIGINT UNSIGNED NOT NULL,\n"
+                "`object_type` VARCHAR(32) NOT NULL,\n"
+                "`object_subtype` VARCHAR(64) NULL,\n"
+                "`name` VARCHAR(128) NULL,\n"
+                "`account_id` INT UNSIGNED NULL,\n"
+                "`container_uid` BIGINT UNSIGNED NULL,\n"
+                "`top_level_uid` BIGINT UNSIGNED NULL,\n"
+                "`position_x` INT NULL,\n"
+                "`position_y` INT NULL,\n"
+                "`position_z` INT NULL,\n"
+                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+                "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n"
+                "PRIMARY KEY (`uid`),\n"
+                "KEY `ix_world_objects_type` (`object_type`),\n"
+                "KEY `ix_world_objects_account` (`account_id`),\n"
+                "KEY `ix_world_objects_container` (`container_uid`),\n"
+                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,\n"
+                "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL,\n"
+                "FOREIGN KEY (`top_level_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sWorldObjects,
+                (const char *) sAccounts,
+                (const char *) sWorldObjects,
+                (const char *) sWorldObjects );
+        vQueries.push_back( sQuery );
+
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`object_uid` BIGINT UNSIGNED NOT NULL,\n"
+                "`data` LONGTEXT NOT NULL,\n"
+                "`checksum` VARCHAR(64) NULL,\n"
+                "PRIMARY KEY (`object_uid`),\n"
+                "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sWorldObjectData,
+                (const char *) sWorldObjects );
+        vQueries.push_back( sQuery );
+
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`object_uid` BIGINT UNSIGNED NOT NULL,\n"
+                "`component` VARCHAR(32) NOT NULL,\n"
+                "`name` VARCHAR(128) NOT NULL,\n"
+                "`sequence` INT NOT NULL DEFAULT 0,\n"
+                "`value` LONGTEXT NULL,\n"
+                "PRIMARY KEY (`object_uid`,`component`,`name`,`sequence`),\n"
+                "KEY `ix_world_components_component` (`component`),\n"
+                "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sWorldObjectComponents,
+                (const char *) sWorldObjects );
+        vQueries.push_back( sQuery );
+
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`parent_uid` BIGINT UNSIGNED NOT NULL,\n"
+                "`child_uid` BIGINT UNSIGNED NOT NULL,\n"
+                "`relation` VARCHAR(32) NOT NULL,\n"
+                "`sequence` INT NOT NULL DEFAULT 0,\n"
+                "PRIMARY KEY (`parent_uid`,`child_uid`,`relation`,`sequence`),\n"
+                "KEY `ix_world_relations_child` (`child_uid`),\n"
+                "FOREIGN KEY (`parent_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,\n"
+                "FOREIGN KEY (`child_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sWorldObjectRelations,
+                (const char *) sWorldObjects,
+                (const char *) sWorldObjects );
+        vQueries.push_back( sQuery );
+
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
+                "`label` VARCHAR(64) NULL,\n"
+                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+                "`objects_count` INT NOT NULL DEFAULT 0,\n"
+                "`checksum` VARCHAR(64) NULL,\n"
+                "PRIMARY KEY (`id`)\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sWorldSavepoints );
+        vQueries.push_back( sQuery );
+
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
+                "`object_uid` BIGINT UNSIGNED NOT NULL,\n"
+                "`changed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+                "`change_type` VARCHAR(32) NOT NULL,\n"
+                "`data_before` LONGTEXT NULL,\n"
+                "`data_after` LONGTEXT NULL,\n"
+                "PRIMARY KEY (`id`),\n"
+                "KEY `ix_world_audit_object` (`object_uid`),\n"
+                "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+                (const char *) sWorldObjectAudit,
+                (const char *) sWorldObjects );
+        vQueries.push_back( sQuery );
+
+        for ( size_t i = 0; i < vQueries.size(); ++i )
+        {
+                if ( ! ExecuteQuery( vQueries[i] ))
+                {
+                        return false;
+                }
+        }
+
+        return true;
+}
+
 bool CWorldStorageMySQL::ColumnExists( const CGString & table, const char * column ) const
 {
         if ( m_pConnection == NULL )
@@ -628,6 +1166,64 @@ CGString CWorldStorageMySQL::FormatIPAddressValue( const struct in_addr & value 
                 return CGString( "NULL" );
         }
         return FormatStringValue( CGString( pszIP ));
+}
+
+CGString CWorldStorageMySQL::ComputeSerializedChecksum( const CGString & serialized ) const
+{
+        const char * pData = (const char *) serialized;
+        size_t len = (size_t) serialized.GetLength();
+
+        unsigned long long hash = 1469598103934665603ULL;
+        for ( size_t i = 0; i < len; ++i )
+        {
+                hash ^= (unsigned char) pData[i];
+                hash *= 1099511628211ULL;
+        }
+
+        CGString sHash;
+#ifdef _WIN32
+        sHash.Format( "%016I64x", hash );
+#else
+        sHash.Format( "%016llx", hash );
+#endif
+        return sHash;
+}
+
+void CWorldStorageMySQL::AppendVarDefComponents( const CGString & table, unsigned long long uid, const CVarDefMap * pMap, const TCHAR * pszComp, std::vector<UniversalRecord> & outRecords )
+{
+        if ( table.IsEmpty() || pMap == NULL || pszComp == NULL || pszComp[0] == '\0' )
+        {
+                return;
+        }
+
+        const CGString sComponent = CGString( pszComp );
+        const size_t count = pMap->GetCount();
+        for ( size_t i = 0; i < count; ++i )
+        {
+                const CVarDefCont * pVar = pMap->GetAt( i );
+                if ( pVar == NULL )
+                {
+                        continue;
+                }
+
+                UniversalRecord record( *this, table );
+                record.SetUInt( "object_uid", uid );
+                record.SetString( "component", sComponent );
+                record.SetString( "name", CGString( pVar->GetKey()));
+                record.SetInt( "sequence", (int) i );
+
+                const TCHAR * pszVal = pVar->GetValStr();
+                if ( pszVal != NULL && pszVal[0] != '\0' )
+                {
+                        record.SetString( "value", CGString( pszVal ));
+                }
+                else
+                {
+                        record.SetNull( "value" );
+                }
+
+                outRecords.push_back( record );
+        }
 }
 
 unsigned int CWorldStorageMySQL::GetAccountId( const CGString & name )
@@ -839,13 +1435,35 @@ bool CWorldStorageMySQL::UpsertAccount( const CAccount & account )
                 return false;
         }
 
-        const CGString sAccounts = GetPrefixedTableName( "accounts" );
+        Transaction transaction( *this );
+        if ( ! transaction.Begin())
+        {
+                return false;
+        }
 
-        CGString sNameValue = FormatStringValue( CGString( account.GetName()));
-        CGString sPasswordValue = FormatStringValue( CGString( account.GetPassword()));
-        CGString sCommentValue = FormatOptionalStringValue( account.m_sComment );
-        CGString sEmailValue = FormatOptionalStringValue( account.m_sEMail );
-        CGString sChatNameValue = FormatOptionalStringValue( account.m_sChatName );
+        const CGString sAccounts = GetPrefixedTableName( "accounts" );
+        UniversalRecord accountRecord( *this, sAccounts );
+
+        CGString sName = CGString( account.GetName());
+        accountRecord.SetString( "name", sName );
+        accountRecord.SetString( "password", CGString( account.GetPassword()));
+        accountRecord.SetInt( "plevel", account.GetPrivLevel());
+        accountRecord.SetUInt( "priv_flags", (unsigned int) account.m_PrivFlags );
+
+        int statusValue = 0;
+        if ( account.IsPriv( PRIV_BLOCKED ))
+        {
+                statusValue |= 0x1;
+        }
+        if ( account.IsPriv( PRIV_JAILED ))
+        {
+                statusValue |= 0x2;
+        }
+        accountRecord.SetInt( "status", statusValue );
+
+        accountRecord.SetOptionalString( "comment", account.m_sComment );
+        accountRecord.SetOptionalString( "email", account.m_sEMail );
+        accountRecord.SetOptionalString( "chat_name", account.m_sChatName );
 
         CGString sLanguageRaw;
         if ( account.m_lang[0] )
@@ -857,83 +1475,35 @@ bool CWorldStorageMySQL::UpsertAccount( const CAccount & account )
                 szLang[3] = '\0';
                 sLanguageRaw = szLang;
         }
-        CGString sLanguageValue = FormatOptionalStringValue( sLanguageRaw );
+        accountRecord.SetOptionalString( "language", sLanguageRaw );
+        accountRecord.SetInt( "total_connect_time", account.m_Total_Connect_Time );
+        accountRecord.SetInt( "last_connect_time", account.m_Last_Connect_Time );
+        accountRecord.SetRaw( "last_ip", FormatIPAddressValue( account.m_Last_IP ));
+        accountRecord.SetRaw( "first_ip", FormatIPAddressValue( account.m_First_IP ));
+        accountRecord.SetDateTime( "last_login", account.m_Last_Connect_Date );
+        accountRecord.SetDateTime( "first_login", account.m_First_Connect_Date );
 
-        CGString sLastIPValue = FormatIPAddressValue( account.m_Last_IP );
-        CGString sFirstIPValue = FormatIPAddressValue( account.m_First_IP );
-        CGString sLastLoginValue = FormatDateTimeValue( account.m_Last_Connect_Date );
-        CGString sFirstLoginValue = FormatDateTimeValue( account.m_First_Connect_Date );
-
-        CGString sLastCharUIDValue;
         if ( account.m_uidLastChar.IsValidUID())
         {
-                sLastCharUIDValue.Format( "%u", (unsigned int) account.m_uidLastChar );
+                accountRecord.SetUInt( "last_char_uid", (unsigned int) account.m_uidLastChar );
         }
         else
         {
-                sLastCharUIDValue = "NULL";
+                accountRecord.SetNull( "last_char_uid" );
         }
 
-        int statusValue = 0;
-        if ( account.IsPriv( PRIV_BLOCKED ))
-        {
-                statusValue |= 0x1;
-        }
-        if ( account.IsPriv( PRIV_JAILED ))
-        {
-                statusValue |= 0x2;
-        }
+        accountRecord.SetUInt( "email_failures", (unsigned int) account.m_iEmailFailures );
 
-        CGString sQuery;
-        sQuery.Format(
-                "INSERT INTO `%s` ("
-                "`name`,`password`,`plevel`,`priv_flags`,`status`,`comment`,`email`,`chat_name`,`language`,"
-                "`total_connect_time`,`last_connect_time`,`last_ip`,`last_login`,`first_ip`,`first_login`,`last_char_uid`,`email_failures`)"
-                " VALUES (%s,%s,%d,%u,%d,%s,%s,%s,%s,%d,%d,%s,%s,%s,%s,%s,%u)"
-                " ON DUPLICATE KEY UPDATE "
-                "`password`=VALUES(`password`),"
-                "`plevel`=VALUES(`plevel`),"
-                "`priv_flags`=VALUES(`priv_flags`),"
-                "`status`=VALUES(`status`),"
-                "`comment`=VALUES(`comment`),"
-                "`email`=VALUES(`email`),"
-                "`chat_name`=VALUES(`chat_name`),"
-                "`language`=VALUES(`language`),"
-                "`total_connect_time`=VALUES(`total_connect_time`),"
-                "`last_connect_time`=VALUES(`last_connect_time`),"
-                "`last_ip`=VALUES(`last_ip`),"
-                "`last_login`=VALUES(`last_login`),"
-                "`first_ip`=VALUES(`first_ip`),"
-                "`first_login`=VALUES(`first_login`),"
-                "`last_char_uid`=VALUES(`last_char_uid`),"
-                "`email_failures`=VALUES(`email_failures`);",
-                (const char *) sAccounts,
-                (const char *) sNameValue,
-                (const char *) sPasswordValue,
-                account.GetPrivLevel(),
-                (unsigned int) account.m_PrivFlags,
-                statusValue,
-                (const char *) sCommentValue,
-                (const char *) sEmailValue,
-                (const char *) sChatNameValue,
-                (const char *) sLanguageValue,
-                (int) account.m_Total_Connect_Time,
-                (int) account.m_Last_Connect_Time,
-                (const char *) sLastIPValue,
-                (const char *) sLastLoginValue,
-                (const char *) sFirstIPValue,
-                (const char *) sFirstLoginValue,
-                (const char *) sLastCharUIDValue,
-                (unsigned int) account.m_iEmailFailures );
-
-        if ( ! ExecuteQuery( sQuery ))
+        if ( ! ExecuteQuery( accountRecord.BuildInsert( false, true )))
         {
+                transaction.Rollback();
                 return false;
         }
 
-        unsigned int accountId = GetAccountId( CGString( account.GetName()));
+        unsigned int accountId = GetAccountId( sName );
         if ( accountId == 0 )
         {
+                transaction.Rollback();
                 return false;
         }
 
@@ -942,18 +1512,33 @@ bool CWorldStorageMySQL::UpsertAccount( const CAccount & account )
         sDelete.Format( "DELETE FROM `%s` WHERE `account_id` = %u;", (const char *) sEmails, accountId );
         if ( ! ExecuteQuery( sDelete ))
         {
+                transaction.Rollback();
                 return false;
         }
 
+        std::vector<UniversalRecord> emailRecords;
         for ( int i = 0; i < account.m_EMailSchedule.GetCount(); ++i )
         {
-                CGString sInsert;
-                sInsert.Format( "INSERT INTO `%s` (`account_id`,`sequence`,`message_id`) VALUES (%u,%d,%u);",
-                        (const char *) sEmails, accountId, i, (unsigned int) account.m_EMailSchedule[i] );
-                if ( ! ExecuteQuery( sInsert ))
+                UniversalRecord emailRecord( *this, sEmails );
+                emailRecord.SetUInt( "account_id", accountId );
+                emailRecord.SetInt( "sequence", i );
+                emailRecord.SetUInt( "message_id", (unsigned int) account.m_EMailSchedule[i] );
+                emailRecords.push_back( emailRecord );
+        }
+
+        if ( ! emailRecords.empty())
+        {
+                if ( ! ExecuteRecordsInsert( emailRecords ))
                 {
+                        transaction.Rollback();
                         return false;
                 }
+        }
+
+        if ( ! transaction.Commit())
+        {
+                transaction.Rollback();
+                return false;
         }
 
         return true;
@@ -972,6 +1557,408 @@ bool CWorldStorageMySQL::DeleteAccount( const TCHAR * pszAccountName )
         CGString sQuery;
         sQuery.Format( "DELETE FROM `%s` WHERE `name` = '%s';", (const char *) sAccounts, (const char *) sEscName );
         return ExecuteQuery( sQuery );
+}
+
+bool CWorldStorageMySQL::SaveWorldObject( CObjBase * pObject )
+{
+        if ( ! IsConnected() || pObject == NULL )
+        {
+                return false;
+        }
+
+        return WithTransaction( [this, pObject]() -> bool
+        {
+                return SaveWorldObjectInternal( pObject );
+        });
+}
+
+bool CWorldStorageMySQL::SaveWorldObjects( const std::vector<CObjBase*> & objects )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        if ( objects.empty())
+        {
+                        return true;
+        }
+
+        return WithTransaction( [this, &objects]() -> bool
+        {
+                for ( size_t i = 0; i < objects.size(); ++i )
+                {
+                        CObjBase * pObject = objects[i];
+                        if ( pObject == NULL )
+                        {
+                                continue;
+                        }
+                        if ( ! SaveWorldObjectInternal( pObject ))
+                        {
+                                return false;
+                        }
+                }
+                return true;
+        });
+}
+
+bool CWorldStorageMySQL::DeleteWorldObject( const CObjBase * pObject )
+{
+        if ( ! IsConnected() || pObject == NULL )
+        {
+                return false;
+        }
+
+        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
+
+        return WithTransaction( [this, uid, sWorldObjects]() -> bool
+        {
+                CGString sQuery;
+#ifdef _WIN32
+                sQuery.Format( "DELETE FROM `%s` WHERE `uid` = %I64u;", (const char *) sWorldObjects, uid );
+#else
+                sQuery.Format( "DELETE FROM `%s` WHERE `uid` = %llu;", (const char *) sWorldObjects, uid );
+#endif
+                return ExecuteQuery( sQuery );
+        });
+}
+
+bool CWorldStorageMySQL::ClearWorldData()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        return WithTransaction( [this]() -> bool
+        {
+                const CGString sAudit = GetPrefixedTableName( "world_object_audit" );
+                const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+                const CGString sComponents = GetPrefixedTableName( "world_object_components" );
+                const CGString sData = GetPrefixedTableName( "world_object_data" );
+                const CGString sObjects = GetPrefixedTableName( "world_objects" );
+                const CGString sSavepoints = GetPrefixedTableName( "world_savepoints" );
+
+                if ( ! ClearTable( sAudit ))
+                {
+                        return false;
+                }
+                if ( ! ClearTable( sRelations ))
+                {
+                        return false;
+                }
+                if ( ! ClearTable( sComponents ))
+                {
+                        return false;
+                }
+                if ( ! ClearTable( sData ))
+                {
+                        return false;
+                }
+                if ( ! ClearTable( sObjects ))
+                {
+                        return false;
+                }
+                if ( ! ClearTable( sSavepoints ))
+                {
+                        return false;
+                }
+                return true;
+        });
+}
+
+bool CWorldStorageMySQL::SaveWorldObjectInternal( CObjBase * pObject )
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        CGString sSerialized;
+        if ( ! SerializeWorldObject( pObject, sSerialized ))
+        {
+                return false;
+        }
+
+        if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+        {
+                return false;
+        }
+        if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+        {
+                return false;
+        }
+        if ( ! RefreshWorldObjectComponents( pObject ))
+        {
+                return false;
+        }
+        if ( ! RefreshWorldObjectRelations( pObject ))
+        {
+                return false;
+        }
+
+        return true;
+}
+
+bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        char szTempName[L_tmpnam];
+        if ( tmpnam( szTempName ) == NULL )
+        {
+                return false;
+        }
+
+        CScript script;
+        if ( ! script.Open( szTempName, OF_WRITE | OF_TEXT ))
+        {
+                return false;
+        }
+
+        pObject->r_Write( script );
+        script.Close();
+
+        std::ifstream input( szTempName, std::ios::in | std::ios::binary );
+        if ( ! input.is_open())
+        {
+                ::remove( szTempName );
+                return false;
+        }
+
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        input.close();
+
+        const std::string serialized = buffer.str();
+        outSerialized = serialized.c_str();
+
+        ::remove( szTempName );
+        return true;
+}
+
+bool CWorldStorageMySQL::UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized )
+{
+        (void) serialized;
+
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
+        UniversalRecord record( *this, sWorldObjects );
+
+        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+        record.SetUInt( "uid", uid );
+
+        if ( pObject->IsChar())
+        {
+                record.SetString( "object_type", CGString( "char" ));
+        }
+        else
+        {
+                record.SetString( "object_type", CGString( "item" ));
+        }
+
+        CGString sSubtype;
+        sSubtype.Format( "0x%x", (unsigned int) pObject->GetBaseID());
+        record.SetString( "object_subtype", sSubtype );
+
+        const TCHAR * pszName = pObject->GetName();
+        if ( pszName != NULL )
+        {
+                record.SetOptionalString( "name", CGString( pszName ));
+        }
+        else
+        {
+                record.SetNull( "name" );
+        }
+
+        record.SetNull( "account_id" );
+        if ( pObject->IsChar())
+        {
+                CChar * pChar = dynamic_cast<CChar*>( pObject );
+                if ( pChar != NULL && pChar->m_pPlayer != NULL )
+                {
+                        CAccount * pAccount = pChar->m_pPlayer->GetAccount();
+                        if ( pAccount != NULL )
+                        {
+                                CGString sAccountName = CGString( pAccount->GetName());
+                                if ( ! sAccountName.IsEmpty())
+                                {
+                                        unsigned int accountId = GetAccountId( sAccountName );
+                                        if ( accountId > 0 )
+                                        {
+                                                record.SetUInt( "account_id", accountId );
+                                        }
+                                }
+                        }
+                }
+        }
+
+        record.SetNull( "container_uid" );
+        if ( pObject->IsItem())
+        {
+                const CItem * pItem = dynamic_cast<const CItem*>( pObject );
+                if ( pItem != NULL )
+                {
+                        const CObjBase * pContainer = pItem->GetContainer();
+                        if ( pContainer != NULL )
+                        {
+                                const unsigned long long containerUid = (unsigned long long) (UINT) pContainer->GetUID();
+                                record.SetUInt( "container_uid", containerUid );
+                        }
+                }
+        }
+
+        record.SetNull( "top_level_uid" );
+        CObjBaseTemplate * pTop = pObject->GetTopLevelObj();
+        if ( pTop != NULL )
+        {
+                CObjBase * pTopObj = dynamic_cast<CObjBase*>( pTop );
+                if ( pTopObj != NULL )
+                {
+                        const unsigned long long topUid = (unsigned long long) (UINT) pTopObj->GetUID();
+                        record.SetUInt( "top_level_uid", topUid );
+                }
+        }
+
+        record.SetNull( "position_x" );
+        record.SetNull( "position_y" );
+        record.SetNull( "position_z" );
+        if ( pObject->IsTopLevel())
+        {
+                const CPointMap & pt = pObject->GetTopPoint();
+                record.SetInt( "position_x", pt.m_x );
+                record.SetInt( "position_y", pt.m_y );
+                record.SetInt( "position_z", pt.m_z );
+        }
+        else if ( pObject->IsItem() && pObject->IsInContainer())
+        {
+                const CItem * pItem = dynamic_cast<const CItem*>( pObject );
+                if ( pItem != NULL )
+                {
+                        const CPointMap & pt = pItem->GetContainedPoint();
+                        record.SetInt( "position_x", pt.m_x );
+                        record.SetInt( "position_y", pt.m_y );
+                        record.SetInt( "position_z", pt.m_z );
+                }
+        }
+
+        return ExecuteQuery( record.BuildInsert( false, true ));
+}
+
+bool CWorldStorageMySQL::UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized )
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        const CGString sWorldObjectData = GetPrefixedTableName( "world_object_data" );
+        UniversalRecord record( *this, sWorldObjectData );
+
+        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+        record.SetUInt( "object_uid", uid );
+        record.SetString( "data", serialized );
+
+        CGString sChecksum = ComputeSerializedChecksum( serialized );
+        if ( ! sChecksum.IsEmpty())
+        {
+                record.SetString( "checksum", sChecksum );
+        }
+        else
+        {
+                record.SetNull( "checksum" );
+        }
+
+        return ExecuteQuery( record.BuildInsert( true, false ));
+}
+
+bool CWorldStorageMySQL::RefreshWorldObjectComponents( const CObjBase * pObject )
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        const CGString sComponents = GetPrefixedTableName( "world_object_components" );
+        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+
+        CGString sDelete;
+#ifdef _WIN32
+        sDelete.Format( "DELETE FROM `%s` WHERE `object_uid` = %I64u;", (const char *) sComponents, uid );
+#else
+        sDelete.Format( "DELETE FROM `%s` WHERE `object_uid` = %llu;", (const char *) sComponents, uid );
+#endif
+        if ( ! ExecuteQuery( sDelete ))
+        {
+                return false;
+        }
+
+        std::vector<UniversalRecord> records;
+        AppendVarDefComponents( sComponents, uid, pObject->GetTagDefs(), "TAG", records );
+        AppendVarDefComponents( sComponents, uid, pObject->GetBaseDefs(), "VAR", records );
+
+        if ( records.empty())
+        {
+                return true;
+        }
+
+        return ExecuteRecordsInsert( records );
+}
+
+bool CWorldStorageMySQL::RefreshWorldObjectRelations( const CObjBase * pObject )
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+
+        CGString sDelete;
+#ifdef _WIN32
+        sDelete.Format( "DELETE FROM `%s` WHERE `parent_uid` = %I64u OR `child_uid` = %I64u;", (const char *) sRelations, uid, uid );
+#else
+        sDelete.Format( "DELETE FROM `%s` WHERE `parent_uid` = %llu OR `child_uid` = %llu;", (const char *) sRelations, uid, uid );
+#endif
+        if ( ! ExecuteQuery( sDelete ))
+        {
+                return false;
+        }
+
+        std::vector<UniversalRecord> records;
+
+        if ( pObject->IsItem())
+        {
+                const CItem * pItem = dynamic_cast<const CItem*>( pObject );
+                if ( pItem != NULL )
+                {
+                        const CObjBase * pContainer = pItem->GetContainer();
+                        if ( pContainer != NULL )
+                        {
+                                UniversalRecord record( *this, sRelations );
+                                record.SetUInt( "parent_uid", (unsigned long long) (UINT) pContainer->GetUID());
+                                record.SetUInt( "child_uid", uid );
+                                record.SetString( "relation", CGString( pItem->IsEquipped() ? "equipped" : "container" ));
+                                record.SetInt( "sequence", 0 );
+                                records.push_back( record );
+                        }
+                }
+        }
+
+        if ( records.empty())
+        {
+                return true;
+        }
+
+        return ExecuteRecordsInsert( records );
 }
 
 bool CWorldStorageMySQL::IsLegacyImportCompleted()
@@ -1030,6 +2017,17 @@ bool CWorldStorageMySQL::ApplyMigration( int fromVersion )
                         return false;
                 }
                 if ( ! SetSchemaVersion( 2 ))
+                {
+                        return false;
+                }
+                break;
+
+        case 2:
+                if ( ! ApplyMigration_2_3())
+                {
+                        return false;
+                }
+                if ( ! SetSchemaVersion( 3 ))
                 {
                         return false;
                 }
