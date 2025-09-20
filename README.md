@@ -14,7 +14,7 @@ Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before 
 - Fix some problems with the protocol.
 - Fix server crashes after using incorrect values and parameters in scripts.
 - Ensure PvM and PvP points charge correctly by zones.
-- Implement MySQL data store without `SAVEWORLD`.
+- Implement MySQL data store without `SAVEWORLD`. +DONE
 
 
 ### 🎉 Features:
@@ -40,7 +40,7 @@ relational database instead of flat `.scp` files.
   `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR`, or update the project properties so
   the compiler can locate the headers and libraries.
 
-### New configuration keys (`spheredef.ini`)
+### New configuration keys (`spheredef.ini aka sphere.ini`)
 
 | Key          | Description |
 | ------------ | ----------- |
