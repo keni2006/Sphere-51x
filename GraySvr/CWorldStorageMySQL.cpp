@@ -414,29 +414,29 @@ CGString CWorldStorageMySQL::GetPrefixedTableName( const char * name ) const
 
 bool CWorldStorageMySQL::Query( const CGString & query, MYSQL_RES ** ppResult )
 {
-	if ( m_pConnection == NULL )
-	{
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "MySQL query attempted without an active connection.\n" );
-		return false;
-	}
+        if ( m_pConnection == NULL )
+        {
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL query attempted without an active connection.\n" );
+                return false;
+        }
 
-	if ( mysql_query( m_pConnection, query ) != 0 )
-	{
-		LogMySQLError( "mysql_query" );
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed query: %s\n", (const char *) query );
-		return false;
-	}
+        if ( mysql_query( m_pConnection, query ) != 0 )
+        {
+                LogMySQLError( "mysql_query" );
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s\n", (const char *) query );
+                return false;
+        }
 
-	if ( ppResult != NULL )
-	{
-		*ppResult = mysql_store_result( m_pConnection );
-		if ( *ppResult == NULL && mysql_errno( m_pConnection ) != 0 )
-		{
-			LogMySQLError( "mysql_store_result" );
-			g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to fetch result for query: %s\n", (const char *) query );
-			return false;
-		}
-	}
+        if ( ppResult != NULL )
+        {
+                *ppResult = mysql_store_result( m_pConnection );
+                if ( *ppResult == NULL && mysql_errno( m_pConnection ) != 0 )
+                {
+                        LogMySQLError( "mysql_store_result" );
+                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed to fetch result for query: %s\n", (const char *) query );
+                        return false;
+                }
+        }
 	else if ( mysql_field_count( m_pConnection ) != 0 )
 	{
 		MYSQL_RES * pResult = mysql_store_result( m_pConnection );
@@ -2863,10 +2863,10 @@ bool CWorldStorageMySQL::ApplyMigration( int fromVersion )
 
 bool CWorldStorageMySQL::EnsureSchema()
 {
-	if ( ! IsConnected())
-	{
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "Cannot ensure schema without an active MySQL connection.\n" );
-		return false;
+        if ( ! IsConnected())
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Cannot ensure schema without an active MySQL connection.\n" );
+                return false;
 	}
 
 	if ( ! EnsureSchemaVersionTable())
@@ -2898,14 +2898,31 @@ bool CWorldStorageMySQL::EnsureSchema()
 	return true;
 }
 
+WORD CWorldStorageMySQL::GetMySQLErrorLogMask( LOGL_TYPE level ) const
+{
+        WORD wMask = static_cast<WORD>( level );
+        if ( g_Serv.IsLoading())
+        {
+                wMask |= LOGM_INIT;
+        }
+        return wMask;
+}
+
 void CWorldStorageMySQL::LogMySQLError( const char * context )
 {
-	if ( m_pConnection == NULL )
-	{
-		g_Log.Event( LOGM_INIT|LOGL_ERROR, "MySQL %s error: no active connection.\n", context );
-		return;
-	}
+        if ( m_pConnection == NULL )
+        {
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL %s error: no active connection.\n", context );
+                return;
+        }
 
-	g_Log.Event( LOGM_INIT|LOGL_ERROR, "MySQL %s error (%u): %s\n", context, mysql_errno( m_pConnection ), mysql_error( m_pConnection ));
+        const unsigned int uiError = mysql_errno( m_pConnection );
+        const char * pszError = mysql_error( m_pConnection );
+        if ( pszError == NULL || pszError[0] == '\0' )
+        {
+                pszError = "Unknown MySQL client error";
+        }
+
+        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL %s error (%u): %s\n", context, uiError, pszError );
 }
 
