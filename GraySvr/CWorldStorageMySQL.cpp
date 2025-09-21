@@ -1436,9 +1436,24 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 sRequestedCharsetName = pszRequestedCharset;
                         }
 
-                        if ( !sDerivedCollation.IsEmpty() && ( pszRequestedCharset == NULL || strcmpi( pszRequestedCharset, (const char *) sDerivedCollation ) == 0 ) )
+                        if ( !sDerivedCollation.IsEmpty() )
                         {
-                                sRequestedCharsetName = sConnectionCharset;
+                                const bool fRequestedCharsetEmpty = ( pszRequestedCharset == NULL || pszRequestedCharset[0] == '\0' );
+                                bool fMatchesDerivedCharset = false;
+
+                                if ( !fRequestedCharsetEmpty )
+                                {
+                                        std::string sDerivedCharset = deriveCharsetFromCollationName( (const char *) sDerivedCollation );
+                                        if ( !sDerivedCharset.empty() )
+                                        {
+                                                fMatchesDerivedCharset = ( strcmpi( pszRequestedCharset, sDerivedCharset.c_str() ) == 0 );
+                                        }
+                                }
+
+                                if ( fRequestedCharsetEmpty || fMatchesDerivedCharset )
+                                {
+                                        sRequestedCharsetName = sConnectionCharset;
+                                }
                         }
 
                         CGString sPreferredTableCollation;
