@@ -866,8 +866,92 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 
-        std::string sessionCharset = "utf8mb4";
-        std::string sessionCollation;
+        const char * whitespace = " \t\n\r\f\v";
+
+        auto trimWhitespace = [whitespace]( std::string & value )
+        {
+                size_t begin = value.find_first_not_of( whitespace );
+                if ( begin == std::string::npos )
+                {
+                        value.clear();
+                        return;
+                }
+                size_t endPos = value.find_last_not_of( whitespace );
+                value = value.substr( begin, endPos - begin + 1 );
+        };
+
+        std::string requestedCharset;
+        std::string requestedCollation;
+        if ( !config.m_sCharset.IsEmpty())
+        {
+                requestedCharset = (const char *) config.m_sCharset;
+                trimWhitespace( requestedCharset );
+                size_t separator = requestedCharset.find_first_of( whitespace );
+                if ( separator != std::string::npos )
+                {
+                        requestedCollation = requestedCharset.substr( separator + 1 );
+                        requestedCharset.erase( separator );
+                        trimWhitespace( requestedCollation );
+                }
+                trimWhitespace( requestedCharset );
+        }
+
+        std::string sessionCharset = requestedCharset;
+        std::string sessionCollation = requestedCollation;
+
+        auto toLowerAscii = []( std::string & value )
+        {
+                std::transform( value.begin(), value.end(), value.begin(), []( unsigned char ch ) -> char
+                {
+                        return static_cast<char>( std::tolower( ch ));
+                });
+        };
+
+        toLowerAscii( sessionCharset );
+        toLowerAscii( sessionCollation );
+
+        std::string derivedCharset;
+        if ( !sessionCollation.empty())
+        {
+                size_t underscore = sessionCollation.find( '_' );
+                if ( underscore != std::string::npos )
+                {
+                        derivedCharset = sessionCollation.substr( 0, underscore );
+                }
+        }
+
+        if ( sessionCharset.empty() && !derivedCharset.empty())
+        {
+                sessionCharset = derivedCharset;
+        }
+        else if ( !sessionCharset.empty() && !derivedCharset.empty() && sessionCharset != derivedCharset )
+        {
+                g_Log.Event( LOGM_INIT|LOGL_WARN,
+                        "Requested charset '%s' does not match collation '%s'; using charset '%s'.",
+                        requestedCharset.empty() ? "(auto)" : requestedCharset.c_str(),
+                        requestedCollation.empty() ? "(none)" : requestedCollation.c_str(),
+                        derivedCharset.c_str());
+                sessionCharset = derivedCharset;
+        }
+
+        if ( sessionCharset.empty())
+        {
+                sessionCharset = "utf8mb4";
+        }
+
+        if ( !sessionCharset.empty() && !IsSafeMariaDbIdentifierToken( sessionCharset ))
+        {
+                std::string invalidCharset = sessionCharset;
+                sessionCharset = "utf8mb4";
+                g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid charset token '%s'; forcing 'utf8mb4'.", invalidCharset.c_str());
+        }
+
+        if ( !sessionCollation.empty() && !IsSafeMariaDbIdentifierToken( sessionCollation ))
+        {
+                std::string invalidCollation = sessionCollation;
+                sessionCollation.clear();
+                g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid collation token '%s'; ignoring requested value.", invalidCollation.c_str());
+        }
 
         const std::string setNamesCommand = BuildSetNamesCommand( sessionCharset, sessionCollation );
 
