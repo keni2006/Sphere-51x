@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <list>
 #include <new>
 #include <stdexcept>
 
@@ -325,7 +326,7 @@ public:
 
                 MYSQL * handle = RequireHandle( "mysql_options" );
 
-                m_StringOptions.push_back( value );
+                m_StringOptions.emplace_back( value );
                 const char * pszValue = m_StringOptions.back().c_str();
                 if ( mysql_options( handle, option, pszValue ) != 0 )
                 {
@@ -545,7 +546,7 @@ private:
         };
 
         std::unique_ptr<MYSQL, MysqlHandleDeleter> m_Handle;
-        std::vector<std::string> m_StringOptions;
+        std::list<std::string> m_StringOptions;
 };
 
 void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
