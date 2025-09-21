@@ -262,11 +262,11 @@ private:
         CGString FormatIPAddressValue( const CGString & value ) const;
         CGString FormatIPAddressValue( const struct in_addr & value ) const;
         unsigned int GetAccountId( const CGString & name );
-        void UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts );
-        CGString GetPrefixedTableName( const char * name ) const;
-        const char * GetDefaultTableCharset() const;
-        const char * GetDefaultTableCollation() const;
-        CGString GetDefaultTableCollationSuffix() const;
+	void UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts );
+	CGString GetPrefixedTableName( const char * name ) const;
+	const char * GetDefaultTableCharset() const;
+	const char * GetDefaultTableCollation() const;
+	CGString GetDefaultTableCollationSuffix() const;
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
         bool SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
@@ -280,9 +280,10 @@ private:
         bool ClearTable( const CGString & table );
         CGString GetAccountNameById( unsigned int accountId );
 
-        std::unique_ptr<MariaDbConnection> m_pConnection;
-        CGString m_sTablePrefix;
-        CGString m_sDatabaseName;
+	std::unique_ptr<MariaDbConnection> m_pConnection;
+	CGString m_sTablePrefix;
+	mutable bool m_fLoggedInvalidTablePrefix;
+	CGString m_sDatabaseName;
         CGString m_sTableCharset;
         CGString m_sTableCollation;
         bool m_fAutoReconnect;
