@@ -21,6 +21,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <new>
@@ -105,26 +106,66 @@ namespace
                 std::string m_Path;
         };
 
-        bool GenerateTempScriptPath( std::string & outPath )
+bool GenerateTempScriptPath( std::string & outPath )
+{
+        char szBaseName[L_tmpnam];
+        if ( tmpnam( szBaseName ) == NULL )
         {
-                char szBaseName[L_tmpnam];
-                if ( tmpnam( szBaseName ) == NULL )
-                {
-                        return false;
-                }
-
-                try
-                {
-                        outPath.assign( szBaseName );
-                        outPath += ".scp";
-                }
-                catch ( const std::bad_alloc & )
-                {
-                        return false;
-                }
-
-                return true;
+                return false;
         }
+
+        try
+        {
+                outPath.assign( szBaseName );
+                outPath += ".scp";
+        }
+        catch ( const std::bad_alloc & )
+        {
+                return false;
+        }
+
+        return true;
+}
+
+bool IsSafeMariaDbIdentifierToken( const std::string & token )
+{
+        if ( token.empty())
+        {
+                return false;
+        }
+
+        for ( char ch : token )
+        {
+                unsigned char uch = static_cast<unsigned char>( ch );
+                if (( uch != '_' ) && !std::isalnum( uch ))
+                {
+                        return false;
+                }
+        }
+
+        return true;
+}
+
+std::string BuildSetNamesCommand( const std::string & charset, const std::string & collation )
+{
+        if ( !IsSafeMariaDbIdentifierToken( charset ))
+        {
+                return std::string();
+        }
+
+        std::string command = "SET NAMES '";
+        command += charset;
+        command += "'";
+
+        if ( !collation.empty() && IsSafeMariaDbIdentifierToken( collation ))
+        {
+                command += " COLLATE '";
+                command += collation;
+                command += "'";
+        }
+
+        return command;
+}
 
         WORD GetMySQLErrorLogMask( LOGL_TYPE level )
         {
@@ -167,35 +208,18 @@ class MariaDbResult
 public:
         using Row = MYSQL_ROW;
 
-        MariaDbResult() noexcept :
-                m_pResult( NULL )
-        {
-        }
+        MariaDbResult() noexcept = default;
 
         explicit MariaDbResult( MYSQL_RES * result ) noexcept :
-                m_pResult( result )
+                m_Result( result )
         {
         }
 
         MariaDbResult( const MariaDbResult & ) = delete;
         MariaDbResult & operator=( const MariaDbResult & ) = delete;
 
-        MariaDbResult( MariaDbResult && other ) noexcept :
-                m_pResult( other.m_pResult )
-        {
-                other.m_pResult = NULL;
-        }
-
-        MariaDbResult & operator=( MariaDbResult && other ) noexcept
-        {
-                if ( this != &other )
-                {
-                        Reset();
-                        m_pResult = other.m_pResult;
-                        other.m_pResult = NULL;
-                }
-                return *this;
-        }
+        MariaDbResult( MariaDbResult && other ) noexcept = default;
+        MariaDbResult & operator=( MariaDbResult && other ) noexcept = default;
 
         ~MariaDbResult()
         {
@@ -204,43 +228,49 @@ public:
 
         void Reset( MYSQL_RES * result = NULL ) noexcept
         {
-                if ( m_pResult != NULL )
-                {
-                        mysql_free_result( m_pResult );
-                }
-                m_pResult = result;
+                m_Result.reset( result );
         }
 
         bool IsValid() const noexcept
         {
-                return m_pResult != NULL;
+                return m_Result.get() != NULL;
         }
 
         unsigned int NumFields() const noexcept
         {
-                return ( m_pResult != NULL ) ? mysql_num_fields( m_pResult ) : 0;
+                MYSQL_RES * handle = m_Result.get();
+                return ( handle != NULL ) ? mysql_num_fields( handle ) : 0;
         }
 
         Row FetchRow()
         {
-                if ( m_pResult == NULL )
+                MYSQL_RES * handle = m_Result.get();
+                if ( handle == NULL )
                 {
                         return NULL;
                 }
-                return mysql_fetch_row( m_pResult );
+                return mysql_fetch_row( handle );
         }
 
 private:
-        MYSQL_RES * m_pResult;
+        struct MysqlResultDeleter
+        {
+                void operator()( MYSQL_RES * result ) const noexcept
+                {
+                        if ( result != NULL )
+                        {
+                                mysql_free_result( result );
+                        }
+                }
+        };
+
+        std::unique_ptr<MYSQL_RES, MysqlResultDeleter> m_Result;
 };
 
 class MariaDbConnection
 {
 public:
-        MariaDbConnection() noexcept :
-                m_pHandle( NULL )
-        {
-        }
+        MariaDbConnection() noexcept = default;
 
         ~MariaDbConnection()
         {
@@ -252,55 +282,67 @@ public:
 
         void Close() noexcept
         {
-                if ( m_pHandle != NULL )
-                {
-                        mysql_close( m_pHandle );
-                        m_pHandle = NULL;
-                }
+                m_Handle.reset();
+                m_StringOptions.clear();
         }
 
         bool IsOpen() const noexcept
         {
-                return m_pHandle != NULL;
+                return m_Handle != NULL;
         }
 
         void Initialize()
         {
                 Close();
-                m_pHandle = mysql_init( NULL );
-                if ( m_pHandle == NULL )
+                MYSQL * handle = mysql_init( NULL );
+                if ( handle == NULL )
                 {
                         throw MariaDbException( "mysql_init", CR_OUT_OF_MEMORY, "mysql_init failed" );
                 }
+                m_Handle.reset( handle );
         }
 
         MYSQL * GetHandle() const noexcept
         {
-                return m_pHandle;
+                return m_Handle.get();
         }
 
         void SetOption( enum mysql_option option, const void * value )
         {
-                if ( m_pHandle == NULL )
+                MYSQL * handle = RequireHandle( "mysql_options" );
+                if ( mysql_options( handle, option, value ) != 0 )
                 {
-                        throw MariaDbException( "mysql_options", 0, "No active MariaDB connection" );
+                        throw MariaDbException( "mysql_options", mysql_errno( handle ), LastErrorMessage());
                 }
-                if ( mysql_options( m_pHandle, option, value ) != 0 )
+        }
+
+        void SetStringOption( enum mysql_option option, const std::string & value )
+        {
+                if ( value.empty())
                 {
-                        throw MariaDbException( "mysql_options", mysql_errno( m_pHandle ), LastErrorMessage());
+                        return;
+                }
+
+                MYSQL * handle = RequireHandle( "mysql_options" );
+
+                m_StringOptions.push_back( value );
+                const char * pszValue = m_StringOptions.back().c_str();
+                if ( mysql_options( handle, option, pszValue ) != 0 )
+                {
+                        unsigned int code = mysql_errno( handle );
+                        std::string message = LastErrorMessage();
+                        m_StringOptions.pop_back();
+                        throw MariaDbException( "mysql_options", code, message );
                 }
         }
 
         void RealConnect( const char * host, const char * user, const char * password, const char * database, unsigned int port )
         {
-                if ( m_pHandle == NULL )
+                MYSQL * handle = RequireHandle( "mysql_real_connect" );
+                MYSQL * result = mysql_real_connect( handle, host, user, password, database, port, NULL, 0 );
+                if ( result == NULL )
                 {
-                        throw MariaDbException( "mysql_real_connect", 0, "No active MariaDB connection" );
-                }
-                MYSQL * pResult = mysql_real_connect( m_pHandle, host, user, password, database, port, NULL, 0 );
-                if ( pResult == NULL )
-                {
-                        throw MariaDbException( "mysql_real_connect", mysql_errno( m_pHandle ), LastErrorMessage());
+                        throw MariaDbException( "mysql_real_connect", mysql_errno( handle ), LastErrorMessage());
                 }
         }
 
@@ -345,9 +387,27 @@ public:
                 {
                         return;
                 }
-                if ( mysql_set_character_set( m_pHandle, charset ) != 0 )
+
+                MYSQL * handle = RequireHandle( "mysql_set_character_set" );
+                if ( mysql_set_character_set( handle, charset ) != 0 )
                 {
-                        throw MariaDbException( "mysql_set_character_set", mysql_errno( m_pHandle ), LastErrorMessage());
+                        throw MariaDbException( "mysql_set_character_set", mysql_errno( handle ), LastErrorMessage());
+                }
+        }
+
+        void ConfigureCharacterSet( const std::string & charset, const std::string & collation )
+        {
+                if ( charset.empty())
+                {
+                        return;
+                }
+
+                SetCharacterSet( charset.c_str());
+
+                const std::string command = BuildSetNamesCommand( charset, collation );
+                if ( !command.empty())
+                {
+                        Execute( command );
                 }
         }
 
@@ -358,16 +418,18 @@ public:
                         return std::string();
                 }
 
+                MYSQL * handle = RequireHandle( "mysql_real_escape_string" );
                 std::string buffer;
                 buffer.resize( length * 2 + 1 );
-                unsigned long written = mysql_real_escape_string( m_pHandle, &buffer[0], input, static_cast<unsigned long>( length ));
+                unsigned long written = mysql_real_escape_string( handle, &buffer[0], input, static_cast<unsigned long>( length ));
                 buffer.resize( written );
                 return buffer;
         }
 
         const char * CharacterSetName() const noexcept
         {
-                return ( m_pHandle != NULL ) ? mysql_character_set_name( m_pHandle ) : NULL;
+                MYSQL * handle = m_Handle.get();
+                return ( handle != NULL ) ? mysql_character_set_name( handle ) : NULL;
         }
 
         struct CharacterSetInfo
@@ -379,13 +441,14 @@ public:
         CharacterSetInfo GetCharacterSetInfo() const
         {
                 CharacterSetInfo info;
-                if ( m_pHandle == NULL )
+                MYSQL * handle = m_Handle.get();
+                if ( handle == NULL )
                 {
                         return info;
                 }
 
                 MY_CHARSET_INFO csInfo;
-                mysql_get_character_set_info( m_pHandle, &csInfo );
+                mysql_get_character_set_info( handle, &csInfo );
                 if ( csInfo.csname != NULL )
                 {
                         info.m_sCharset = csInfo.csname;
@@ -399,17 +462,19 @@ public:
 
         unsigned int LastErrorCode() const noexcept
         {
-                return ( m_pHandle != NULL ) ? mysql_errno( m_pHandle ) : 0;
+                MYSQL * handle = m_Handle.get();
+                return ( handle != NULL ) ? mysql_errno( handle ) : 0;
         }
 
         std::string LastErrorMessage() const
         {
-                if ( m_pHandle == NULL )
+                MYSQL * handle = m_Handle.get();
+                if ( handle == NULL )
                 {
                         return "No active MariaDB connection";
                 }
 
-                const char * pszError = mysql_error( m_pHandle );
+                const char * pszError = mysql_error( handle );
                 if ( pszError == NULL || pszError[0] == '\0' )
                 {
                         return "Unknown MariaDB client error";
@@ -418,53 +483,69 @@ public:
         }
 
 private:
+        MYSQL * RequireHandle( const char * context ) const
+        {
+                MYSQL * handle = m_Handle.get();
+                if ( handle == NULL )
+                {
+                        throw MariaDbException( context, 0, "No active MariaDB connection" );
+                }
+                return handle;
+        }
+
         void ExecuteImpl( const char * pszQuery )
         {
-                if ( m_pHandle == NULL )
+                MYSQL * handle = RequireHandle( "mysql_query" );
+
+                if ( mysql_query( handle, pszQuery ) != 0 )
                 {
-                        throw MariaDbException( "mysql_query", 0, "No active MariaDB connection" );
+                        throw MariaDbException( "mysql_query", mysql_errno( handle ), LastErrorMessage());
                 }
 
-                if ( mysql_query( m_pHandle, pszQuery ) != 0 )
+                if ( mysql_field_count( handle ) != 0 )
                 {
-                        throw MariaDbException( "mysql_query", mysql_errno( m_pHandle ), LastErrorMessage());
-                }
-
-                if ( mysql_field_count( m_pHandle ) != 0 )
-                {
-                        MYSQL_RES * pResult = mysql_store_result( m_pHandle );
-                        if ( pResult != NULL )
+                        MYSQL_RES * result = mysql_store_result( handle );
+                        if ( result != NULL )
                         {
-                                mysql_free_result( pResult );
+                                mysql_free_result( result );
                         }
-                        else if ( mysql_errno( m_pHandle ) != 0 )
+                        else if ( mysql_errno( handle ) != 0 )
                         {
-                                throw MariaDbException( "mysql_store_result", mysql_errno( m_pHandle ), LastErrorMessage());
+                                throw MariaDbException( "mysql_store_result", mysql_errno( handle ), LastErrorMessage());
                         }
                 }
         }
 
         MariaDbResult QueryImpl( const char * pszQuery )
         {
-                if ( m_pHandle == NULL )
+                MYSQL * handle = RequireHandle( "mysql_query" );
+
+                if ( mysql_query( handle, pszQuery ) != 0 )
                 {
-                        throw MariaDbException( "mysql_query", 0, "No active MariaDB connection" );
+                        throw MariaDbException( "mysql_query", mysql_errno( handle ), LastErrorMessage());
                 }
 
-                if ( mysql_query( m_pHandle, pszQuery ) != 0 )
+                MYSQL_RES * result = mysql_store_result( handle );
+                if ( result == NULL && mysql_errno( handle ) != 0 )
                 {
-                        throw MariaDbException( "mysql_query", mysql_errno( m_pHandle ), LastErrorMessage());
+                        throw MariaDbException( "mysql_store_result", mysql_errno( handle ), LastErrorMessage());
                 }
-
-                MYSQL_RES * pResult = mysql_store_result( m_pHandle );
-                if ( pResult == NULL && mysql_errno( m_pHandle ) != 0 )
-                {
-                        throw MariaDbException( "mysql_store_result", mysql_errno( m_pHandle ), LastErrorMessage());
-                }
-                return MariaDbResult( pResult );
+                return MariaDbResult( result );
         }
 
-        MYSQL * m_pHandle;
+        struct MysqlHandleDeleter
+        {
+                void operator()( MYSQL * handle ) const noexcept
+                {
+                        if ( handle != NULL )
+                        {
+                                mysql_close( handle );
+                        }
+                }
+        };
+
+        std::unique_ptr<MYSQL, MysqlHandleDeleter> m_Handle;
+        std::vector<std::string> m_StringOptions;
 };
 
 void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
@@ -805,57 +886,64 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 trimWhitespace( requestedCharset );
         }
 
-        if ( requestedCharset.empty())
-        {
-                requestedCharset = "utf8mb4";
-        }
-
         std::string sessionCharset = requestedCharset;
         std::string sessionCollation = requestedCollation;
 
-        if ( !sessionCharset.empty())
+        auto toLowerAscii = []( std::string & value )
         {
-                const MARIADB_CHARSET_INFO * charsetInfo = mariadb_get_charset_by_name( sessionCharset.c_str());
-                if ( charsetInfo != NULL )
+                std::transform( value.begin(), value.end(), value.begin(), []( unsigned char ch ) -> char
                 {
-                        if ( charsetInfo->csname != NULL && charsetInfo->csname[0] != '\0' )
-                        {
-                                sessionCharset = charsetInfo->csname;
-                                if ( sessionCollation.empty() && charsetInfo->name != NULL && charsetInfo->name[0] != '\0' )
-                                {
-                                        sessionCollation = charsetInfo->name;
-                                }
-                        }
-                        else
-                        {
-                                const std::string collationToken = sessionCharset;
-                                if ( sessionCollation.empty())
-                                {
-                                        sessionCollation = collationToken;
-                                }
+                        return static_cast<char>( std::tolower( ch ));
+                });
+        };
 
-                                std::string derivedCharset;
-                                const char * underscore = std::strchr( collationToken.c_str(), '_' );
-                                if ( underscore != NULL && underscore != collationToken.c_str())
-                                {
-                                        derivedCharset.assign( collationToken.c_str(), underscore - collationToken.c_str());
-                                        const MARIADB_CHARSET_INFO * derivedInfo = mariadb_get_charset_by_name( derivedCharset.c_str());
-                                        if ( derivedInfo != NULL && derivedInfo->csname != NULL && derivedInfo->csname[0] != '\0' )
-                                        {
-                                                sessionCharset = derivedInfo->csname;
-                                        }
-                                        else if ( !derivedCharset.empty())
-                                        {
-                                                sessionCharset = derivedCharset;
-                                        }
-                                }
+        toLowerAscii( sessionCharset );
+        toLowerAscii( sessionCollation );
 
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MariaDB client did not provide canonical charset name for token '%s'; using normalized charset '%s'.",
-                                        collationToken.c_str(),
-                                        sessionCharset.empty() ? collationToken.c_str() : sessionCharset.c_str());
-                        }
+        std::string derivedCharset;
+        if ( !sessionCollation.empty())
+        {
+                size_t underscore = sessionCollation.find( '_' );
+                if ( underscore != std::string::npos )
+                {
+                        derivedCharset = sessionCollation.substr( 0, underscore );
                 }
         }
+
+        if ( sessionCharset.empty() && !derivedCharset.empty())
+        {
+                sessionCharset = derivedCharset;
+        }
+        else if ( !sessionCharset.empty() && !derivedCharset.empty() && sessionCharset != derivedCharset )
+        {
+                g_Log.Event( LOGM_INIT|LOGL_WARN,
+                        "Requested charset '%s' does not match collation '%s'; using charset '%s'.",
+                        requestedCharset.empty() ? "(auto)" : requestedCharset.c_str(),
+                        requestedCollation.empty() ? "(none)" : requestedCollation.c_str(),
+                        derivedCharset.c_str());
+                sessionCharset = derivedCharset;
+        }
+
+        if ( sessionCharset.empty())
+        {
+                sessionCharset = "utf8mb4";
+        }
+
+        if ( !sessionCharset.empty() && !IsSafeMariaDbIdentifierToken( sessionCharset ))
+        {
+                std::string invalidCharset = sessionCharset;
+                sessionCharset = "utf8mb4";
+                g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid charset token '%s'; forcing 'utf8mb4'.", invalidCharset.c_str());
+        }
+
+        if ( !sessionCollation.empty() && !IsSafeMariaDbIdentifierToken( sessionCollation ))
+        {
+                std::string invalidCollation = sessionCollation;
+                sessionCollation.clear();
+                g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid collation token '%s'; ignoring requested value.", invalidCollation.c_str());
+        }
+
+        const std::string setNamesCommand = BuildSetNamesCommand( sessionCharset, sessionCollation );
 
         const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
         const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
@@ -880,30 +968,23 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
                         if ( !sessionCharset.empty())
                         {
-                                connection->SetOption( MYSQL_OPT_SET_CHARSET_NAME, sessionCharset.c_str());
+                                connection->SetStringOption( MYSQL_OPT_SET_CHARSET_NAME, sessionCharset );
+                        }
+
+                        if ( !setNamesCommand.empty())
+                        {
+                                connection->SetStringOption( MYSQL_INIT_COMMAND, setNamesCommand );
                         }
 
                         connection->RealConnect( pszHost, pszUser, pszPassword, pszDatabase, uiPort );
 
-                        if ( !sessionCollation.empty() || !sessionCharset.empty())
+                        try
                         {
-                                try
-                                {
-                                        CGString sCommand;
-                                        if ( !sessionCollation.empty())
-                                        {
-                                                sCommand.Format( "SET NAMES '%s' COLLATE '%s';", sessionCharset.c_str(), sessionCollation.c_str());
-                                        }
-                                        else
-                                        {
-                                                sCommand.Format( "SET NAMES '%s';", sessionCharset.c_str());
-                                        }
-                                        connection->Execute( sCommand );
-                                }
-                                catch ( const MariaDbException & ex )
-                                {
-                                        LogMariaDbException( ex, LOGL_WARN );
-                                }
+                                connection->ConfigureCharacterSet( sessionCharset, sessionCollation );
+                        }
+                        catch ( const MariaDbException & ex )
+                        {
+                                LogMariaDbException( ex, LOGL_WARN );
                         }
 
                         MariaDbConnection::CharacterSetInfo activeInfo = connection->GetCharacterSetInfo();
