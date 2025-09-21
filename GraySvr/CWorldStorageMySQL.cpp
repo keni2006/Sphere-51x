@@ -1,6 +1,13 @@
 #include "graysvr.h"
 #include "CWorldStorageMySQL.h"
 
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
