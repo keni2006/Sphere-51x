@@ -3,6 +3,7 @@
 
 #include "../Common/cstring.h"
 #include <functional>
+#include <memory>
 #include <vector>
 #include <condition_variable>
 #include <deque>
@@ -21,23 +22,11 @@ class CGMPage;
 class CServRef;
 struct in_addr;
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <winsock2.h>
-#include <windows.h>
-#include <mysql.h>
-#else
-#include <mysql/mysql.h>
-#endif
-
-
 struct CServerMySQLConfig;
 enum StorageDirtyType : int;
+
+class MariaDbConnection;
+class MariaDbResult;
 
 class CWorldStorageMySQL
 {
@@ -190,7 +179,6 @@ public:
         void Disconnect();
         bool IsConnected() const;
         bool IsEnabled() const;
-        MYSQL * GetHandle() const;
 
         bool EnsureSchema();
         int GetSchemaVersion();
@@ -249,7 +237,7 @@ private:
         void DirtyWorkerLoop();
         bool ProcessDirtyObject( unsigned long long uid, StorageDirtyType type );
 
-        bool Query( const CGString & query, MYSQL_RES ** ppResult = NULL );
+        bool Query( const CGString & query, MariaDbResult * pResult = NULL );
         bool ExecuteQuery( const CGString & query );
         bool EnsureSchemaVersionTable();
         bool SetSchemaVersion( int version );
@@ -292,7 +280,7 @@ private:
         bool ClearTable( const CGString & table );
         CGString GetAccountNameById( unsigned int accountId );
 
-        MYSQL * m_pConnection;
+        std::unique_ptr<MariaDbConnection> m_pConnection;
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
         CGString m_sTableCharset;
