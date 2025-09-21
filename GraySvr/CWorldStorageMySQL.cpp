@@ -810,6 +810,53 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 requestedCharset = "utf8mb4";
         }
 
+        std::string sessionCharset = requestedCharset;
+        std::string sessionCollation = requestedCollation;
+
+        if ( !sessionCharset.empty())
+        {
+                const MARIADB_CHARSET_INFO * charsetInfo = mariadb_get_charset_by_name( sessionCharset.c_str());
+                if ( charsetInfo != NULL )
+                {
+                        if ( charsetInfo->csname != NULL && charsetInfo->csname[0] != '\0' )
+                        {
+                                sessionCharset = charsetInfo->csname;
+                                if ( sessionCollation.empty() && charsetInfo->name != NULL && charsetInfo->name[0] != '\0' )
+                                {
+                                        sessionCollation = charsetInfo->name;
+                                }
+                        }
+                        else
+                        {
+                                const std::string collationToken = sessionCharset;
+                                if ( sessionCollation.empty())
+                                {
+                                        sessionCollation = collationToken;
+                                }
+
+                                std::string derivedCharset;
+                                const char * underscore = std::strchr( collationToken.c_str(), '_' );
+                                if ( underscore != NULL && underscore != collationToken.c_str())
+                                {
+                                        derivedCharset.assign( collationToken.c_str(), underscore - collationToken.c_str());
+                                        const MARIADB_CHARSET_INFO * derivedInfo = mariadb_get_charset_by_name( derivedCharset.c_str());
+                                        if ( derivedInfo != NULL && derivedInfo->csname != NULL && derivedInfo->csname[0] != '\0' )
+                                        {
+                                                sessionCharset = derivedInfo->csname;
+                                        }
+                                        else if ( !derivedCharset.empty())
+                                        {
+                                                sessionCharset = derivedCharset;
+                                        }
+                                }
+
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "MariaDB client did not provide canonical charset name for token '%s'; using normalized charset '%s'.",
+                                        collationToken.c_str(),
+                                        sessionCharset.empty() ? collationToken.c_str() : sessionCharset.c_str());
+                        }
+                }
+        }
+
         const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
         const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
         const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
@@ -831,25 +878,25 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 connection->SetOption( MYSQL_OPT_RECONNECT, &reconnect );
                         }
 
-                        if ( !requestedCharset.empty())
+                        if ( !sessionCharset.empty())
                         {
-                                connection->SetOption( MYSQL_OPT_SET_CHARSET_NAME, requestedCharset.c_str());
+                                connection->SetOption( MYSQL_OPT_SET_CHARSET_NAME, sessionCharset.c_str());
                         }
 
                         connection->RealConnect( pszHost, pszUser, pszPassword, pszDatabase, uiPort );
 
-                        if ( !requestedCollation.empty() || !requestedCharset.empty())
+                        if ( !sessionCollation.empty() || !sessionCharset.empty())
                         {
                                 try
                                 {
                                         CGString sCommand;
-                                        if ( !requestedCollation.empty())
+                                        if ( !sessionCollation.empty())
                                         {
-                                                sCommand.Format( "SET NAMES '%s' COLLATE '%s';", requestedCharset.c_str(), requestedCollation.c_str());
+                                                sCommand.Format( "SET NAMES '%s' COLLATE '%s';", sessionCharset.c_str(), sessionCollation.c_str());
                                         }
                                         else
                                         {
-                                                sCommand.Format( "SET NAMES '%s';", requestedCharset.c_str());
+                                                sCommand.Format( "SET NAMES '%s';", sessionCharset.c_str());
                                         }
                                         connection->Execute( sCommand );
                                 }
@@ -860,9 +907,9 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         }
 
                         MariaDbConnection::CharacterSetInfo activeInfo = connection->GetCharacterSetInfo();
-                        if ( !requestedCharset.empty())
+                        if ( !sessionCharset.empty())
                         {
-                                m_sTableCharset = requestedCharset.c_str();
+                                m_sTableCharset = sessionCharset.c_str();
                         }
                         else if ( !activeInfo.m_sCharset.empty())
                         {
@@ -873,9 +920,9 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 m_sTableCharset.Empty();
                         }
 
-                        if ( !requestedCollation.empty())
+                        if ( !sessionCollation.empty())
                         {
-                                m_sTableCollation = requestedCollation.c_str();
+                                m_sTableCollation = sessionCollation.c_str();
                         }
                         else if ( !activeInfo.m_sCollation.empty())
                         {
