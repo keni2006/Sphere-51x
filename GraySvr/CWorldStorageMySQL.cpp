@@ -1,6 +1,5 @@
 #include "graysvr.h"
 #include "CWorldStorageMySQL.h"
-#include "CWorldStorageMySQLUtils.h"
 
 #ifdef max
 #undef max
@@ -124,6 +123,25 @@ bool GenerateTempScriptPath( std::string & outPath )
         catch ( const std::bad_alloc & )
         {
                 return false;
+        }
+
+        return true;
+}
+
+bool IsSafeMariaDbIdentifierToken( const std::string & token )
+{
+        if ( token.empty())
+        {
+                return false;
+        }
+
+        for ( char ch : token )
+        {
+                unsigned char uch = static_cast<unsigned char>( ch );
+                if (( uch != '_' ) && !std::isalnum( uch ))
+                {
+                        return false;
+                }
         }
 
         return true;
@@ -801,14 +819,13 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & wher
 
 CWorldStorageMySQL::CWorldStorageMySQL()
 {
-	m_pConnection.reset();
-	m_fAutoReconnect = false;
-	m_iReconnectTries = 0;
-	m_iReconnectDelay = 0;
-	m_sDatabaseName.Empty();
-	m_sTablePrefix.Empty();
-	m_fLoggedInvalidTablePrefix = false;
-	m_sTableCharset.Empty();
+        m_pConnection.reset();
+        m_fAutoReconnect = false;
+        m_iReconnectTries = 0;
+        m_iReconnectDelay = 0;
+        m_sDatabaseName.Empty();
+        m_sTablePrefix.Empty();
+        m_sTableCharset.Empty();
         m_sTableCollation.Empty();
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
@@ -830,27 +847,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 return false;
         }
 
-        m_fLoggedInvalidTablePrefix = false;
-
-        std::string normalizedPrefix;
-        std::string prefixError;
-        const char * rawPrefix = config.m_sTablePrefix.IsEmpty() ? NULL : (const char *) config.m_sTablePrefix;
-        NormalizeMySQLTablePrefix( rawPrefix, normalizedPrefix, &prefixError, true );
-
-        if ( !prefixError.empty())
-        {
-                g_Log.Event( LOGM_INIT|LOGL_ERROR, "%s", prefixError.c_str());
-        }
-
-        if ( normalizedPrefix.empty())
-        {
-                m_sTablePrefix.Empty();
-        }
-        else
-        {
-                m_sTablePrefix = normalizedPrefix.c_str();
-        }
-
+        m_sTablePrefix = config.m_sTablePrefix;
         m_fAutoReconnect = config.m_fAutoReconnect;
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
@@ -1062,7 +1059,6 @@ void CWorldStorageMySQL::Disconnect()
         m_pConnection.reset();
 
         m_sTablePrefix.Empty();
-        m_fLoggedInvalidTablePrefix = false;
         m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
@@ -1086,38 +1082,7 @@ bool CWorldStorageMySQL::IsEnabled() const
 CGString CWorldStorageMySQL::GetPrefixedTableName( const char * name ) const
 {
         CGString sName;
-        if ( name == NULL )
-        {
-                return sName;
-        }
-
-        std::string prefixedName;
-        std::string errorMessage;
-        const char * rawPrefix = m_sTablePrefix.IsEmpty() ? NULL : (const char *) m_sTablePrefix;
-        if ( !BuildMySQLPrefixedTableName( rawPrefix, name, prefixedName, &errorMessage ))
-        {
-                if ( !m_fLoggedInvalidTablePrefix )
-                {
-                        if ( errorMessage.empty())
-                        {
-                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "MySQL table prefix validation failed while building table name; ignoring configured prefix." );
-                        }
-                        else
-                        {
-                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "%s Ignoring configured MySQL table prefix.", errorMessage.c_str());
-                        }
-                        m_fLoggedInvalidTablePrefix = true;
-                }
-
-                prefixedName.assign( name );
-        }
-
-        if ( prefixedName.empty())
-        {
-                prefixedName.assign( name );
-        }
-
-        sName = prefixedName.c_str();
+        sName.Format( "%s%s", (const char *) m_sTablePrefix, name );
         return sName;
 }
 
