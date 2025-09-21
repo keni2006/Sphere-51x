@@ -37,11 +37,33 @@ SRC := $(wildcard *.cpp)
 
 # Exe file
 # INCLUDE = -Ih -I/usr/ea/h
-INCLUDE += -I/usr/include/mysql
 
-# Default libraries
-LIBS += -L/usr/lib/mysql
-LIBS += -lmysqlclient
+# MariaDB Connector/C downloaded via `scripts/fetch_mariadb_connector.bat`.
+# Override `MARIADB_DIR` when targeting a custom installation.
+MARIADB_DIR ?= ../third_party/mariadb-connector-c-3.3.8-linux
+MARIADB_CONFIG_LOCAL := $(abspath $(MARIADB_DIR))/bin/mariadb_config
+MARIADB_CONFIG_SYSTEM := $(shell command -v mariadb_config 2>/dev/null)
+MYSQL_CONFIG_SYSTEM   := $(shell command -v mysql_config 2>/dev/null)
+
+ifneq ($(wildcard $(MARIADB_CONFIG_LOCAL)),)
+INCLUDE += $(shell $(MARIADB_CONFIG_LOCAL) --cflags 2>/dev/null)
+LIBS    += $(shell $(MARIADB_CONFIG_LOCAL) --libs 2>/dev/null)
+else ifneq ($(wildcard $(MARIADB_DIR)/include),)
+INCLUDE += -I$(MARIADB_DIR)/include -I$(MARIADB_DIR)/include/mariadb -I$(MARIADB_DIR)/include/mariadb/mysql
+LIBS    += -L$(MARIADB_DIR)/lib/mariadb -lmariadb
+else ifneq ($(strip $(MARIADB_CONFIG_SYSTEM)),)
+INCLUDE += $(shell $(MARIADB_CONFIG_SYSTEM) --cflags 2>/dev/null)
+LIBS    += $(shell $(MARIADB_CONFIG_SYSTEM) --libs 2>/dev/null)
+else ifneq ($(strip $(MYSQL_CONFIG_SYSTEM)),)
+INCLUDE += $(shell $(MYSQL_CONFIG_SYSTEM) --cflags 2>/dev/null)
+LIBS    += $(shell $(MYSQL_CONFIG_SYSTEM) --libs 2>/dev/null)
+endif
+
+# Legacy system-wide MySQL headers/libraries can still be injected manually if
+# desired, for example:
+#INCLUDE += -I/usr/include/mysql
+#LIBS += -L/usr/lib/mysql
+#LIBS += -lmysqlclient
 
 #LIBS += -lc_p
 #LIBS += -lefence
