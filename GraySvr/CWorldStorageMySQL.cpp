@@ -1,6 +1,5 @@
 #include "graysvr.h"
 #include "CWorldStorageMySQL.h"
-#include "CWorldStorageMySQLUtils.h"
 
 #ifdef max
 #undef max
@@ -124,6 +123,25 @@ bool GenerateTempScriptPath( std::string & outPath )
         catch ( const std::bad_alloc & )
         {
                 return false;
+        }
+
+        return true;
+}
+
+bool IsSafeMariaDbIdentifierToken( const std::string & token )
+{
+        if ( token.empty())
+        {
+                return false;
+        }
+
+        for ( char ch : token )
+        {
+                unsigned char uch = static_cast<unsigned char>( ch );
+                if (( uch != '_' ) && !std::isalnum( uch ))
+                {
+                        return false;
+                }
         }
 
         return true;
@@ -829,24 +847,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 return false;
         }
 
-        std::string normalizedPrefix;
-        std::string prefixError;
-        const char * rawPrefix = config.m_sTablePrefix.IsEmpty() ? NULL : (const char *) config.m_sTablePrefix;
-        if ( !NormalizeMySQLTablePrefix( rawPrefix, normalizedPrefix, &prefixError ))
-        {
-                g_Log.Event( LOGM_INIT|LOGL_ERROR, "%s", prefixError.c_str());
-                return false;
-        }
-
-        if ( normalizedPrefix.empty())
-        {
-                m_sTablePrefix.Empty();
-        }
-        else
-        {
-                m_sTablePrefix = normalizedPrefix.c_str();
-        }
-
+        m_sTablePrefix = config.m_sTablePrefix;
         m_fAutoReconnect = config.m_fAutoReconnect;
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
