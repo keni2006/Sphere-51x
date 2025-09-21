@@ -775,9 +775,10 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 
-        auto trimWhitespace = []( std::string & value )
+        const char * whitespace = " \t\n\r\f\v";
+
+        auto trimWhitespace = [whitespace]( std::string & value )
         {
-                const char * whitespace = " 	";
                 size_t begin = value.find_first_not_of( whitespace );
                 if ( begin == std::string::npos )
                 {
@@ -908,21 +909,18 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         if ( ( attempt + 1 ) < attempts )
                         {
                                 int delay = std::max( m_iReconnectDelay, 1 );
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).
-", delay );
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).", delay );
                                 std::this_thread::sleep_for( std::chrono::seconds( delay ));
                         }
                 }
                 catch ( const std::bad_alloc & )
                 {
-                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Out of memory while preparing MySQL connection.
-" );
+                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Out of memory while preparing MySQL connection." );
                         break;
                 }
         }
 
-        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).
-", std::max( attempts, 1 ) );
+        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).", std::max( attempts, 1 ) );
         return false;
 }
 
@@ -992,8 +990,7 @@ bool CWorldStorageMySQL::Query( const CGString & query, MariaDbResult * pResult 
 {
         if ( ! IsConnected())
         {
-                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL query attempted without an active connection.
-" );
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "MySQL query attempted without an active connection." );
                 return false;
         }
 
@@ -1012,8 +1009,7 @@ bool CWorldStorageMySQL::Query( const CGString & query, MariaDbResult * pResult 
         catch ( const MariaDbException & ex )
         {
                 LogMariaDbException( ex, LOGL_ERROR );
-                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s
-", (const char *) query );
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s", (const char *) query );
         }
         return false;
 }
