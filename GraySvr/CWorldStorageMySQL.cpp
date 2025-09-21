@@ -2,6 +2,7 @@
 #include "CWorldStorageMySQL.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <sstream>
@@ -17,6 +19,14 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#include <errmsg.h>
+#include <mysqld_error.h>
+#else
+#include <mysql/errmsg.h>
+#include <mysql/mysqld_error.h>
 #endif
 
 namespace
@@ -359,86 +369,365 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 
-	const int iAttempts = std::max( m_fAutoReconnect ? m_iReconnectTries : 1, 1 );
+        const int iAttempts = std::max( m_fAutoReconnect ? m_iReconnectTries : 1, 1 );
 
-	for ( int iAttempt = 0; iAttempt < iAttempts; ++iAttempt )
+        auto trimWhitespace = []( std::string & sValue )
+        {
+                size_t uStart = 0;
+                while ( uStart < sValue.size() && ( sValue[uStart] == ' ' || sValue[uStart] == '\t' ) )
+                {
+                        ++uStart;
+                }
+                size_t uEnd = sValue.size();
+                while ( uEnd > uStart && ( sValue[uEnd - 1] == ' ' || sValue[uEnd - 1] == '\t' ) )
+                {
+                        --uEnd;
+                }
+                sValue = sValue.substr( uStart, uEnd - uStart );
+        };
+
+        std::string sRequestedCharsetOption;
+        std::string sExplicitCollationOption;
+        if ( !config.m_sCharset.IsEmpty() )
+        {
+                sRequestedCharsetOption = (const char *) config.m_sCharset;
+                trimWhitespace( sRequestedCharsetOption );
+                size_t uSpace = sRequestedCharsetOption.find_first_of( " \t" );
+                if ( uSpace != std::string::npos )
+                {
+                        sExplicitCollationOption = sRequestedCharsetOption.substr( uSpace + 1 );
+                        sRequestedCharsetOption.erase( uSpace );
+                        trimWhitespace( sRequestedCharsetOption );
+                        trimWhitespace( sExplicitCollationOption );
+                }
+        }
+
+        auto sanitizeCharsetName = []( const char * pszName ) -> std::string
+        {
+                std::string sResult;
+                if ( pszName == NULL )
+                {
+                        return sResult;
+                }
+                for ( const char * p = pszName; *p != '\0'; ++p )
+                {
+                        unsigned char ch = static_cast<unsigned char>( *p );
+                        if ( ch == ' ' || ch == '-' || ch == '_' || ch == '.' )
+                        {
+                                continue;
+                        }
+                        sResult.push_back( static_cast<char>( std::tolower( ch ) ) );
+                }
+                return sResult;
+        };
+
+        auto deriveCharsetFromCollationName = []( const char * pszCollation ) -> std::string
+        {
+                std::string sResult;
+                if ( pszCollation == NULL )
+                {
+                        return sResult;
+                }
+                std::string sName = pszCollation;
+                size_t uUnderscore = sName.find( '_' );
+                if ( uUnderscore != std::string::npos )
+                {
+                        sResult = sName.substr( 0, uUnderscore );
+                }
+                return sResult;
+        };
+
+        std::string sInitialRequestedCharset;
+        if ( !sRequestedCharsetOption.empty() )
+        {
+                std::string sDerived = deriveCharsetFromCollationName( sRequestedCharsetOption.c_str() );
+                if ( sDerived.empty() )
+                {
+                        std::string sSanitized = sanitizeCharsetName( sRequestedCharsetOption.c_str() );
+                        if ( !sSanitized.empty() )
+                        {
+                                sDerived = sSanitized;
+                        }
+                }
+                if ( sDerived.empty() )
+                {
+                        sInitialRequestedCharset = sRequestedCharsetOption;
+                }
+                else
+                {
+                        sInitialRequestedCharset = sDerived;
+                }
+        }
+
+        const char * pszRequestedCharsetConfig = sInitialRequestedCharset.empty() ? NULL : sInitialRequestedCharset.c_str();
+
+        static const char * const pszHandshakeFallbacks[] = { "utf8", "utf8mb3", "latin1", "cp1251", "koi8r", NULL };
+
+        auto isHandshakeCharsetError = [&]( unsigned int uiError, const std::string & sErrorText ) -> bool
+        {
+                switch ( uiError )
+                {
+                        case ER_UNKNOWN_CHARACTER_SET:
+                        case ER_UNKNOWN_COLLATION:
+#ifdef ER_CHARACTER_SET_MISMATCH
+                        case ER_CHARACTER_SET_MISMATCH:
+#endif
+                        case CR_CANT_READ_CHARSET:
+                        case CR_SERVER_HANDSHAKE_ERR:
+                        case ER_HANDSHAKE_ERROR:
+                                return true;
+                        default:
+                                break;
+                }
+                if ( !sErrorText.empty() )
+                {
+                        std::string sLower = sErrorText;
+                        std::transform( sLower.begin(), sLower.end(), sLower.begin(), []( unsigned char ch ) -> char
+                        {
+                                return static_cast<char>( std::tolower( ch ) );
+                        } );
+                        if ( sLower.find( "character set" ) != std::string::npos || sLower.find( "collation" ) != std::string::npos )
+                        {
+                                return true;
+                        }
+                }
+                return false;
+        };
+
+        for ( int iAttempt = 0; iAttempt < iAttempts; ++iAttempt )
 	{
-		m_pConnection = mysql_init( NULL );
-		if ( m_pConnection == NULL )
-		{
-			g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to initialize MySQL handle.\n" );
-			return false;
-		}
+                const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
+                const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
+                const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
+                const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
+                unsigned int uiPort = ( config.m_iPort > 0 ) ? (unsigned int) config.m_iPort : 0;
+
+                std::vector<std::string> handshakeCandidates;
+                std::unordered_set<std::string> handshakeSeen;
+                handshakeCandidates.emplace_back();
+
+                auto addHandshakeCandidate = [&]( const std::string & sCandidate )
+                {
+                        if ( sCandidate.empty() )
+                        {
+                                return;
+                        }
+                        std::string sNormalized = sanitizeCharsetName( sCandidate.c_str() );
+                        if ( sNormalized.empty() )
+                        {
+                                return;
+                        }
+                        if ( handshakeSeen.insert( sNormalized ).second )
+                        {
+                                handshakeCandidates.push_back( sNormalized );
+                        }
+                };
+
+                if ( pszRequestedCharsetConfig != NULL )
+                {
+                        addHandshakeCandidate( pszRequestedCharsetConfig );
+                }
+                if ( !sExplicitCollationOption.empty() )
+                {
+                        std::string sCollationCharset = deriveCharsetFromCollationName( sExplicitCollationOption.c_str() );
+                        if ( !sCollationCharset.empty() )
+                        {
+                                addHandshakeCandidate( sCollationCharset );
+                        }
+                }
+                for ( size_t iFallback = 0; pszHandshakeFallbacks[iFallback] != NULL; ++iFallback )
+                {
+                        addHandshakeCandidate( pszHandshakeFallbacks[iFallback] );
+                }
+
+                bool fConnected = false;
+                unsigned int uiConnectError = 0;
+                std::string sConnectErrorText = "Unknown MySQL client error";
+
+                for ( size_t iCandidate = 0; iCandidate < handshakeCandidates.size(); ++iCandidate )
+                {
+                        const std::string & sCandidate = handshakeCandidates[iCandidate];
+                        const char * pszHandshakeCharset = sCandidate.empty() ? NULL : sCandidate.c_str();
+
+                        m_pConnection = mysql_init( NULL );
+                        if ( m_pConnection == NULL )
+                        {
+                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to initialize MySQL handle.\n" );
+                                return false;
+                        }
 
 #ifdef MYSQL_OPT_RECONNECT
-		bool fReconnect = m_fAutoReconnect != 0;
-		mysql_options( m_pConnection, MYSQL_OPT_RECONNECT, &fReconnect );
+                        bool fReconnect = m_fAutoReconnect != 0;
+                        mysql_options( m_pConnection, MYSQL_OPT_RECONNECT, &fReconnect );
 #endif
 
-		const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
-		const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
-		const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
-		const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
-		unsigned int uiPort = ( config.m_iPort > 0 ) ? (unsigned int) config.m_iPort : 0;
+                        if ( pszHandshakeCharset != NULL && pszHandshakeCharset[0] != '\0' )
+                        {
+                                mysql_options( m_pConnection, MYSQL_SET_CHARSET_NAME, pszHandshakeCharset );
+                        }
 
-                MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
-                if ( pResult != NULL )
+                        MYSQL * pResult = mysql_real_connect( m_pConnection, pszHost, pszUser, pszPassword, pszDatabase, uiPort, NULL, 0 );
+                        if ( pResult != NULL )
+                        {
+                                fConnected = true;
+                                if ( pszHandshakeCharset != NULL && iCandidate > 0 )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL server %s:%u accepted handshake character set '%s'.\n", pszHost ? pszHost : "localhost", uiPort, pszHandshakeCharset );
+                                }
+                                break;
+                        }
+
+                        uiConnectError = mysql_errno( m_pConnection );
+                        const char * pszConnectError = mysql_error( m_pConnection );
+                        if ( pszConnectError != NULL && pszConnectError[0] != '\0' )
+                        {
+                                sConnectErrorText = pszConnectError;
+                        }
+                        else
+                        {
+                                sConnectErrorText = "Unknown MySQL client error";
+                        }
+
+                        mysql_close( m_pConnection );
+                        m_pConnection = NULL;
+
+                        if ( isHandshakeCharsetError( uiConnectError, sConnectErrorText ) && ( iCandidate + 1 ) < handshakeCandidates.size() )
+                        {
+                                const std::string & sRetryCandidate = handshakeCandidates[iCandidate + 1];
+                                const char * pszRetryCharset = sRetryCandidate.empty() ? NULL : sRetryCandidate.c_str();
+                                if ( pszRetryCharset != NULL && pszRetryCharset[0] != '\0' )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL mysql_real_connect error (%u): %s. Retrying with handshake character set '%s'.\n", uiConnectError, sConnectErrorText.c_str(), pszRetryCharset );
+                                }
+                                else
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL mysql_real_connect error (%u): %s. Retrying without explicit handshake character set.\n", uiConnectError, sConnectErrorText.c_str() );
+                                }
+                                continue;
+                        }
+
+                        break;
+                }
+
+                if ( !fConnected )
                 {
-                        std::string sRequestedCharsetOption;
-                        std::string sExplicitCollationOption;
-                        if ( !config.m_sCharset.IsEmpty() )
+                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "MySQL mysql_real_connect error (%u): %s\n", uiConnectError, sConnectErrorText.c_str() );
+                        if ( ( iAttempt + 1 ) < iAttempts )
                         {
-                                sRequestedCharsetOption = (const char *) config.m_sCharset;
-                                auto trimWhitespace = []( std::string & sValue )
-                                {
-                                        size_t uStart = 0;
-                                        while ( uStart < sValue.size() && ( sValue[uStart] == ' ' || sValue[uStart] == '	' ) )
-                                        {
-                                                ++uStart;
-                                        }
-                                        size_t uEnd = sValue.size();
-                                        while ( uEnd > uStart && ( sValue[uEnd - 1] == ' ' || sValue[uEnd - 1] == '	' ) )
-                                        {
-                                                --uEnd;
-                                        }
-                                        sValue = sValue.substr( uStart, uEnd - uStart );
-                                };
-                                trimWhitespace( sRequestedCharsetOption );
-                                size_t uSpace = sRequestedCharsetOption.find_first_of( " 	" );
-                                if ( uSpace != std::string::npos )
-                                {
-                                        sExplicitCollationOption = sRequestedCharsetOption.substr( uSpace + 1 );
-                                        sRequestedCharsetOption.erase( uSpace );
-                                        trimWhitespace( sRequestedCharsetOption );
-                                        trimWhitespace( sExplicitCollationOption );
-                                }
+                                int iDelay = std::max( m_iReconnectDelay, 1 );
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).\n", iDelay );
+                                std::this_thread::sleep_for( std::chrono::seconds( iDelay ));
+                        }
+                        continue;
+                }
+
+                const char * pszRequestedCharset = ( pszRequestedCharsetConfig != NULL && pszRequestedCharsetConfig[0] != '\0' ) ? pszRequestedCharsetConfig : "utf8mb4";
+
+                CGString sExplicitCollation;
+                if ( !sExplicitCollationOption.empty() )
+                {
+                        sExplicitCollation = sExplicitCollationOption.c_str();
+                }
+
+                bool fCharsetListingUnavailable = false;
+
+                struct CharsetInfo
+                {
+                        CGString m_sName;
+                        CGString m_sDefaultCollation;
+                        std::string m_sNormalizedName;
+                };
+                std::vector<CharsetInfo> availableCharsets;
+                bool fAvailableCharsetsLoaded = false;
+
+                auto ensureCharsetList = [&]() -> bool
+                {
+                        if ( fCharsetListingUnavailable )
+                        {
+                                return false;
+                        }
+                        if ( fAvailableCharsetsLoaded )
+                        {
+                                return !availableCharsets.empty();
                         }
 
-                        const char * pszRequestedCharset = sRequestedCharsetOption.empty() ? "utf8mb4" : sRequestedCharsetOption.c_str();
-
-                        CGString sExplicitCollation;
-                        if ( !sExplicitCollationOption.empty() )
+                        CGString sQuery = "SHOW CHARACTER SET;";
+                        if ( mysql_query( m_pConnection, sQuery ) != 0 )
                         {
-                                sExplicitCollation = sExplicitCollationOption.c_str();
+                                LogMySQLError( m_pConnection, "SHOW CHARACTER SET" );
+                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to enumerate MySQL character sets.\n" );
+                                fCharsetListingUnavailable = true;
+                                return false;
                         }
 
-                        auto deriveCharsetFromCollationName = [&]( const char * pszCollation ) -> std::string
+                        MYSQL_RES * pCharsetResult = mysql_store_result( m_pConnection );
+                        if ( pCharsetResult == NULL )
                         {
-                                std::string sResult;
-                                if ( pszCollation == NULL )
+                                if ( mysql_errno( m_pConnection ) != 0 )
                                 {
-                                        return sResult;
+                                        LogMySQLError( m_pConnection, "mysql_store_result" );
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to read MySQL character set list.\n" );
                                 }
-                                std::string sName = pszCollation;
-                                size_t uUnderscore = sName.find( '_' );
-                                if ( uUnderscore != std::string::npos )
-                                {
-                                        sResult = sName.substr( 0, uUnderscore );
-                                }
-                                return sResult;
-                        };
+                                fCharsetListingUnavailable = true;
+                                return false;
+                        }
 
-                        bool fCharsetListingUnavailable = false;
+                        unsigned int uiFields = mysql_num_fields( pCharsetResult );
+                        MYSQL_ROW pRow;
+                        while ( ( pRow = mysql_fetch_row( pCharsetResult )) != NULL )
+                        {
+                                if ( pRow[0] == NULL )
+                                {
+                                        continue;
+                                }
+                                CharsetInfo info;
+                                info.m_sName = pRow[0];
+                                if ( uiFields >= 3 && pRow[2] != NULL )
+                                {
+                                        info.m_sDefaultCollation = pRow[2];
+                                }
+                                info.m_sNormalizedName = sanitizeCharsetName( (const char *) info.m_sName );
+                                availableCharsets.push_back( info );
+                        }
+                        mysql_free_result( pCharsetResult );
+                        fAvailableCharsetsLoaded = true;
+                        return !availableCharsets.empty();
+                };
+
+                auto resolveCharsetAlias = [&]( const char * pszAlias, CGString * pOutDefaultCollation ) -> CGString
+                {
+                        CGString sResolved;
+                        if ( pOutDefaultCollation != NULL )
+                        {
+                                pOutDefaultCollation->Empty();
+                        }
+                        if ( pszAlias == NULL || pszAlias[0] == '\0' )
+                        {
+                                return sResolved;
+                        }
+                        if ( !ensureCharsetList() )
+                        {
+                                return sResolved;
+                        }
+                        std::string sNormalizedAlias = sanitizeCharsetName( pszAlias );
+                        if ( sNormalizedAlias.empty() )
+                        {
+                                return sResolved;
+                        }
+                        for ( size_t i = 0; i < availableCharsets.size(); ++i )
+                        {
+                                if ( availableCharsets[i].m_sNormalizedName == sNormalizedAlias )
+                                {
+                                        sResolved = availableCharsets[i].m_sName;
+                                        if ( pOutDefaultCollation != NULL )
+                                        {
+                                                *pOutDefaultCollation = availableCharsets[i].m_sDefaultCollation;
+                                        }
+                                        break;
+                                }
+                        }
+                        return sResolved;
+                };
 
                         auto fetchServerVariable = [&]( const char * pszVariableName ) -> CGString
                         {
@@ -586,6 +875,197 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                         return true;
                                 };
 
+                                auto autoDetectCharset = [&]( const char * pszOriginal, unsigned int uiOriginalError, const std::string & sOriginalErrorText ) -> bool
+                                {
+                                        std::vector<std::pair<CGString, CGString>> primaryCandidates;
+                                        std::vector<std::pair<CGString, CGString>> secondaryCandidates;
+                                        std::unordered_set<std::string> seen;
+
+                                        auto addCandidate = [&]( const CGString & sCandidate, const CGString & sDefaultCollation, bool fPreferred )
+                                        {
+                                                const char * pszCandidate = sCandidate.IsEmpty() ? NULL : (const char *) sCandidate;
+                                                if ( pszCandidate == NULL || pszCandidate[0] == '\0' )
+                                                {
+                                                        return;
+                                                }
+                                                std::string sNormalized = sanitizeCharsetName( pszCandidate );
+                                                if ( sNormalized.empty() )
+                                                {
+                                                        return;
+                                                }
+                                                if ( !seen.insert( sNormalized ).second )
+                                                {
+                                                        return;
+                                                }
+                                                if ( fPreferred )
+                                                {
+                                                        primaryCandidates.emplace_back( sCandidate, sDefaultCollation );
+                                                }
+                                                else
+                                                {
+                                                        secondaryCandidates.emplace_back( sCandidate, sDefaultCollation );
+                                                }
+                                        };
+
+                                        auto addCandidateFromAlias = [&]( const char * pszCandidate, bool fPreferred, const std::string * pSkipNormalized )
+                                        {
+                                                if ( pszCandidate == NULL || pszCandidate[0] == '\0' )
+                                                {
+                                                        return;
+                                                }
+                                                CGString sAliasDefault;
+                                                CGString sResolved = resolveCharsetAlias( pszCandidate, &sAliasDefault );
+                                                CGString sCandidateValue;
+                                                CGString sDefaultValue;
+                                                if ( !sResolved.IsEmpty() )
+                                                {
+                                                        sCandidateValue = sResolved;
+                                                        sDefaultValue = sAliasDefault;
+                                                }
+                                                else
+                                                {
+                                                        sCandidateValue = pszCandidate;
+                                                }
+
+                                                const char * pszResolvedCandidate = sCandidateValue.IsEmpty() ? NULL : (const char *) sCandidateValue;
+                                                if ( pszResolvedCandidate == NULL || pszResolvedCandidate[0] == '\0' )
+                                                {
+                                                        return;
+                                                }
+
+                                                std::string sNormalized = sanitizeCharsetName( pszResolvedCandidate );
+                                                if ( sNormalized.empty() )
+                                                {
+                                                        return;
+                                                }
+
+                                                if ( pSkipNormalized != NULL && !pSkipNormalized->empty() && *pSkipNormalized == sNormalized && strcmpi( pszCandidate, pszResolvedCandidate ) == 0 )
+                                                {
+                                                        seen.insert( sNormalized );
+                                                        return;
+                                                }
+
+                                                addCandidate( sCandidateValue, sDefaultValue, fPreferred );
+                                        };
+
+                                        auto addCandidateFromVariable = [&]( const char * pszVariableName, bool fPreferred )
+                                        {
+                                                CGString sValue = fetchServerVariable( pszVariableName );
+                                                if ( !sValue.IsEmpty() )
+                                                {
+                                                        addCandidateFromAlias( (const char *) sValue, fPreferred, NULL );
+                                                }
+                                        };
+
+                                        std::string sOriginalNormalized = sanitizeCharsetName( pszOriginal );
+                                        std::string sConfiguredNormalized = sanitizeCharsetName( pszRequestedCharsetConfig );
+
+                                        if ( pszRequestedCharsetConfig != NULL )
+                                        {
+                                                addCandidateFromAlias( pszRequestedCharsetConfig, true, &sConfiguredNormalized );
+                                        }
+
+                                        if ( pszOriginal != NULL )
+                                        {
+                                                addCandidateFromAlias( pszOriginal, true, &sOriginalNormalized );
+                                        }
+
+                                        auto addUtf8FamilyFallbacks = [&]( const std::string & sNormalized )
+                                        {
+                                                if ( sNormalized.size() >= 4 && sNormalized.compare( 0, 4, "utf8" ) == 0 )
+                                                {
+                                                        static const char * const pszUtf8Family[] = { "utf8", "utf8mb3", "utf8mb4", NULL };
+                                                        for ( size_t i = 0; pszUtf8Family[i] != NULL; ++i )
+                                                        {
+                                                                std::string sFamilyNormalized = sanitizeCharsetName( pszUtf8Family[i] );
+                                                                if ( !sFamilyNormalized.empty() && sFamilyNormalized == sNormalized )
+                                                                {
+                                                                        continue;
+                                                                }
+                                                                addCandidateFromAlias( pszUtf8Family[i], true, NULL );
+                                                        }
+                                                }
+                                        };
+
+                                        addUtf8FamilyFallbacks( sOriginalNormalized );
+                                        addUtf8FamilyFallbacks( sConfiguredNormalized );
+
+                                        for ( size_t i = 0; pszHandshakeFallbacks[i] != NULL; ++i )
+                                        {
+                                                bool fPreferred = false;
+                                                std::string sNormalized = sanitizeCharsetName( pszHandshakeFallbacks[i] );
+                                                if ( sNormalized == "utf8" || sNormalized == "utf8mb3" || sNormalized == "utf8mb4" )
+                                                {
+                                                        fPreferred = true;
+                                                }
+                                                addCandidateFromAlias( pszHandshakeFallbacks[i], fPreferred, NULL );
+                                        }
+
+                                        addCandidateFromVariable( "character_set_connection", false );
+                                        addCandidateFromVariable( "character_set_server", false );
+                                        addCandidateFromVariable( "character_set_database", false );
+                                        addCandidateFromVariable( "character_set_system", false );
+
+                                        if ( ensureCharsetList() )
+                                        {
+                                                for ( size_t i = 0; i < availableCharsets.size(); ++i )
+                                                {
+                                                        addCandidate( availableCharsets[i].m_sName, availableCharsets[i].m_sDefaultCollation, false );
+                                                }
+                                        }
+
+                                        CGString sActiveCharsetCandidate;
+                                        const char * pszActive = mysql_character_set_name( m_pConnection );
+                                        if ( pszActive != NULL && pszActive[0] != '\0' )
+                                        {
+                                                sActiveCharsetCandidate = pszActive;
+                                        }
+
+                                        auto tryCandidates = [&]( const std::vector<std::pair<CGString, CGString>> & candidates ) -> bool
+                                        {
+                                                for ( size_t i = 0; i < candidates.size(); ++i )
+                                                {
+                                                        const char * pszCandidate = candidates[i].first.IsEmpty() ? NULL : (const char *) candidates[i].first;
+                                                        if ( pszCandidate == NULL || pszCandidate[0] == '\0' )
+                                                        {
+                                                                continue;
+                                                        }
+                                                        if ( applyCharset( pszCandidate ) )
+                                                        {
+                                                                if ( !candidates[i].second.IsEmpty() )
+                                                                {
+                                                                        sOutDerivedCollation = candidates[i].second;
+                                                                }
+                                                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s' (%u: %s); using '%s'.\n", pszOriginal != NULL ? pszOriginal : "", uiOriginalError, sOriginalErrorText.c_str(), pszCandidate );
+                                                                return true;
+                                                        }
+                                                }
+                                                return false;
+                                        };
+
+                                        if ( tryCandidates( primaryCandidates ) )
+                                        {
+                                                return true;
+                                        }
+
+                                        if ( tryCandidates( secondaryCandidates ) )
+                                        {
+                                                return true;
+                                        }
+
+                                        if ( !sActiveCharsetCandidate.IsEmpty() )
+                                        {
+                                                const char * pszCandidate = (const char *) sActiveCharsetCandidate;
+                                                if ( seen.insert( sanitizeCharsetName( pszCandidate ) ).second && applyCharset( pszCandidate ) )
+                                                {
+                                                        g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s' (%u: %s); using '%s'.\n", pszOriginal != NULL ? pszOriginal : "", uiOriginalError, sOriginalErrorText.c_str(), pszCandidate );
+                                                        return true;
+                                                }
+                                        }
+
+                                        return false;
+                                };
+
                                 if ( applyCharset( pszCharset ) )
                                 {
                                         return true;
@@ -618,8 +1098,30 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                         if ( pszCollationCharset != NULL && applyCharset( pszCollationCharset ) )
                                         {
                                                 sOutDerivedCollation = pszCharset;
+                                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s' (%u: %s); using '%s'.\n", pszCharset, uiError, sErrorText.c_str(), pszCollationCharset );
                                                 return true;
                                         }
+                                }
+
+                                CGString sAliasDefault;
+                                CGString sResolvedAlias = resolveCharsetAlias( pszCharset, &sAliasDefault );
+                                if ( !sResolvedAlias.IsEmpty() )
+                                {
+                                        const char * pszResolved = (const char *) sResolvedAlias;
+                                        if ( applyCharset( pszResolved ) )
+                                        {
+                                                if ( !sAliasDefault.IsEmpty() )
+                                                {
+                                                        sOutDerivedCollation = sAliasDefault;
+                                                }
+                                                g_Log.Event( GetMySQLErrorLogMask( logLevel ), "Failed to set MySQL connection character set to '%s' (%u: %s); using '%s'.\n", pszCharset, uiError, sErrorText.c_str(), pszResolved );
+                                                return true;
+                                        }
+                                }
+
+                                if ( autoDetectCharset( pszCharset, uiError, sErrorText ) )
+                                {
+                                        return true;
                                 }
 
                                 g_Log.Event( GetMySQLErrorLogMask( logLevel ), "MySQL mysql_set_character_set error (%u): %s", uiError, sErrorText.c_str() );
@@ -747,7 +1249,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                         }
                                 }
 
-                                static const char * const pszFallbackCharsets[] = { "utf8", "utf8mb3", "latin1", NULL };
+                                static const char * const pszFallbackCharsets[] = { "utf8", "utf8mb3", "latin1", "cp1251", "koi8r", NULL };
                                 for ( size_t i = 0; pszFallbackCharsets[i] != NULL; ++i )
                                 {
                                         CGString sFallback = pszFallbackCharsets[i];
@@ -785,6 +1287,34 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 const char * pszFallbackCharset = "utf8";
                                 g_Log.Event( LOGM_INIT|LOGL_WARN, "MySQL character set '%s' is not available, falling back to '%s'.", pszRequestedCharset, pszFallbackCharset );
                                 fCharsetSet = trySetCharacterSet( pszFallbackCharset, LOGL_ERROR, sDerivedCollation );
+                        }
+
+                        if ( !fCharsetSet )
+                        {
+                                CGString sActiveCharset = fetchServerVariable( "character_set_connection" );
+                                if ( sActiveCharset.IsEmpty() )
+                                {
+                                        const char * pszActiveCharset = mysql_character_set_name( m_pConnection );
+                                        if ( pszActiveCharset != NULL && pszActiveCharset[0] != '\0' )
+                                        {
+                                                sActiveCharset = pszActiveCharset;
+                                        }
+                                }
+
+                                if ( !sActiveCharset.IsEmpty() )
+                                {
+                                        const char * pszActiveCharset = (const char *) sActiveCharset;
+                                        m_sTableCharset = pszActiveCharset;
+                                        if ( pszRequestedCharset != NULL && pszRequestedCharset[0] != '\0' )
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Failed to apply requested MySQL character set '%s', continuing with server default '%s'.\n", pszRequestedCharset, pszActiveCharset );
+                                        }
+                                        else
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Unable to apply requested MySQL character set, continuing with server default '%s'.\n", pszActiveCharset );
+                                        }
+                                        fCharsetSet = true;
+                                }
                         }
 
                         if ( !fCharsetSet )
@@ -900,18 +1430,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         StartDirtyWorker();
                         return true;
                 }
-
-                LogMySQLError( m_pConnection, "mysql_real_connect" );
-		mysql_close( m_pConnection );
-		m_pConnection = NULL;
-
-		if ( ( iAttempt + 1 ) < iAttempts )
-		{
-			int iDelay = std::max( m_iReconnectDelay, 1 );
-			g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).\n", iDelay );
-			std::this_thread::sleep_for( std::chrono::seconds( iDelay ));
-		}
-	}
+        }
 
 	g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).\n", std::max( iAttempts, 1 ) );
 	return false;
