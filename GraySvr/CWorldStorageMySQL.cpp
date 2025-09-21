@@ -23,6 +23,7 @@
 #include <vector>
 #include <sstream>
 #include <string>
+#include <new>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -43,6 +44,80 @@ namespace
         static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
         static const int CURRENT_SCHEMA_VERSION = 3;
+
+        class TempFileGuard
+        {
+        public:
+                TempFileGuard()
+                {
+                }
+
+                explicit TempFileGuard( std::string path ) :
+                        m_Path( std::move( path ))
+                {
+                }
+
+                ~TempFileGuard()
+                {
+                        if ( ! m_Path.empty())
+                        {
+                                ::remove( m_Path.c_str());
+                        }
+                }
+
+                TempFileGuard( const TempFileGuard & ) = delete;
+                TempFileGuard & operator=( const TempFileGuard & ) = delete;
+
+                TempFileGuard( TempFileGuard && other ) noexcept :
+                        m_Path( std::move( other.m_Path ))
+                {
+                        other.m_Path.clear();
+                }
+
+                TempFileGuard & operator=( TempFileGuard && other ) noexcept
+                {
+                        if ( this != &other )
+                        {
+                                m_Path = std::move( other.m_Path );
+                                other.m_Path.clear();
+                        }
+                        return *this;
+                }
+
+                const std::string & GetPath() const
+                {
+                        return m_Path;
+                }
+
+                bool IsValid() const
+                {
+                        return ! m_Path.empty();
+                }
+
+        private:
+                std::string m_Path;
+        };
+
+        bool GenerateTempScriptPath( std::string & outPath )
+        {
+                char szBaseName[L_tmpnam];
+                if ( tmpnam( szBaseName ) == NULL )
+                {
+                        return false;
+                }
+
+                try
+                {
+                        outPath.assign( szBaseName );
+                        outPath += ".scp";
+                }
+                catch ( const std::bad_alloc & )
+                {
+                        return false;
+                }
+
+                return true;
+        }
 
         WORD GetMySQLErrorLogMask( LOGL_TYPE level )
         {
@@ -3613,14 +3688,20 @@ bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & ou
                 return false;
         }
 
-        char szTempName[L_tmpnam];
-        if ( tmpnam( szTempName ) == NULL )
+        std::string sTempPath;
+        if ( ! GenerateTempScriptPath( sTempPath ))
+        {
+                return false;
+        }
+
+        TempFileGuard tempFile( sTempPath );
+        if ( ! tempFile.IsValid())
         {
                 return false;
         }
 
         CScript script;
-        if ( ! script.Open( szTempName, OF_WRITE | OF_TEXT ))
+        if ( ! script.Open( tempFile.GetPath().c_str(), OF_WRITE | OF_TEXT ))
         {
                 return false;
         }
@@ -3628,10 +3709,9 @@ bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & ou
         pObject->r_Write( script );
         script.Close();
 
-        std::ifstream input( szTempName, std::ios::in | std::ios::binary );
+        std::ifstream input( tempFile.GetPath().c_str(), std::ios::in | std::ios::binary );
         if ( ! input.is_open())
         {
-                ::remove( szTempName );
                 return false;
         }
 
@@ -3642,32 +3722,35 @@ bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & ou
         const std::string serialized = buffer.str();
         outSerialized = serialized.c_str();
 
-::remove( szTempName );
-return true;
+        return true;
 }
 
 bool CWorldStorageMySQL::ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const
 {
-        char szTempName[L_tmpnam];
-        if ( tmpnam( szTempName ) == NULL )
+        std::string sTempPath;
+        if ( ! GenerateTempScriptPath( sTempPath ))
+        {
+                return false;
+        }
+
+        TempFileGuard tempFile( sTempPath );
+        if ( ! tempFile.IsValid())
         {
                 return false;
         }
 
         {
-                std::ofstream output( szTempName, std::ios::out | std::ios::binary );
+                std::ofstream output( tempFile.GetPath().c_str(), std::ios::out | std::ios::binary );
                 if ( ! output.is_open())
                 {
-                        ::remove( szTempName );
                         return false;
                 }
                 output << (const char *) serialized;
         }
 
         CScript script;
-        if ( ! script.Open( szTempName, OF_READ | OF_TEXT ))
+        if ( ! script.Open( tempFile.GetPath().c_str(), OF_READ | OF_TEXT ))
         {
-                ::remove( szTempName );
                 return false;
         }
 
@@ -3678,7 +3761,6 @@ bool CWorldStorageMySQL::ApplyWorldObjectData( CObjBase & object, const CGString
         }
 
         script.Close();
-        ::remove( szTempName );
         return fResult;
 }
 
