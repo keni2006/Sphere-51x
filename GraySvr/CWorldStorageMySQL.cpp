@@ -1,4 +1,8 @@
+#ifndef UNIT_TEST
 #include "graysvr.h"
+#else
+#include "../tests/stubs/graysvr.h"
+#endif
 #include "CWorldStorageMySQL.h"
 
 #ifdef max
@@ -11,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -166,6 +171,283 @@ std::string BuildSetNamesCommand( const std::string & charset, const std::string
         }
 
         return command;
+}
+
+std::string BytesToHexDebugString( const std::string & value )
+{
+        static const char kHexDigits[] = "0123456789ABCDEF";
+        std::string hex;
+        hex.reserve( value.size() * 3 );
+
+        bool first = true;
+        for ( unsigned char ch : value )
+        {
+                if ( !first )
+                {
+                        hex.push_back( ' ' );
+                }
+                first = false;
+
+                hex.push_back( kHexDigits[ ( ch >> 4 ) & 0x0F ] );
+                hex.push_back( kHexDigits[ ch & 0x0F ] );
+        }
+
+        return hex;
+}
+
+bool DecodeUtf8( const std::string & input, std::vector<uint32_t> & codepoints )
+{
+        codepoints.clear();
+
+        for ( size_t i = 0; i < input.size(); )
+        {
+                unsigned char byte = static_cast<unsigned char>( input[i] );
+                if ( byte < 0x80 )
+                {
+                        codepoints.push_back( byte );
+                        ++i;
+                        continue;
+                }
+
+                size_t remaining = input.size() - i;
+                uint32_t codepoint = 0;
+                size_t length = 0;
+
+                if ( ( byte & 0xE0 ) == 0xC0 )
+                {
+                        length = 2;
+                        if ( remaining < length )
+                        {
+                                return false;
+                        }
+
+                        unsigned char b1 = static_cast<unsigned char>( input[i + 1] );
+                        if (( b1 & 0xC0 ) != 0x80 )
+                        {
+                                return false;
+                        }
+
+                        codepoint = static_cast<uint32_t>((( byte & 0x1F ) << 6 ) | ( b1 & 0x3F ));
+                        if ( codepoint < 0x80 )
+                        {
+                                return false; // overlong sequence
+                        }
+                }
+                else if ( ( byte & 0xF0 ) == 0xE0 )
+                {
+                        length = 3;
+                        if ( remaining < length )
+                        {
+                                return false;
+                        }
+
+                        unsigned char b1 = static_cast<unsigned char>( input[i + 1] );
+                        unsigned char b2 = static_cast<unsigned char>( input[i + 2] );
+                        if (( b1 & 0xC0 ) != 0x80 || ( b2 & 0xC0 ) != 0x80 )
+                        {
+                                return false;
+                        }
+
+                        codepoint = static_cast<uint32_t>((( byte & 0x0F ) << 12 ) |
+                                (( b1 & 0x3F ) << 6 ) |
+                                ( b2 & 0x3F ));
+
+                        if ( codepoint < 0x800 || ( codepoint >= 0xD800 && codepoint <= 0xDFFF ))
+                        {
+                                return false; // overlong or surrogate
+                        }
+                }
+                else if ( ( byte & 0xF8 ) == 0xF0 )
+                {
+                        length = 4;
+                        if ( remaining < length )
+                        {
+                                return false;
+                        }
+
+                        unsigned char b1 = static_cast<unsigned char>( input[i + 1] );
+                        unsigned char b2 = static_cast<unsigned char>( input[i + 2] );
+                        unsigned char b3 = static_cast<unsigned char>( input[i + 3] );
+
+                        if (( b1 & 0xC0 ) != 0x80 || ( b2 & 0xC0 ) != 0x80 || ( b3 & 0xC0 ) != 0x80 )
+                        {
+                                return false;
+                        }
+
+                        codepoint = static_cast<uint32_t>((( byte & 0x07 ) << 18 ) |
+                                (( b1 & 0x3F ) << 12 ) |
+                                (( b2 & 0x3F ) << 6 ) |
+                                ( b3 & 0x3F ));
+
+                        if ( codepoint < 0x10000 || codepoint > 0x10FFFF )
+                        {
+                                return false; // overlong or out of range
+                        }
+                }
+                else
+                {
+                        return false;
+                }
+
+                codepoints.push_back( codepoint );
+                i += length;
+        }
+
+        return true;
+}
+
+void AppendUtf8Codepoint( uint32_t codepoint, std::string & output )
+{
+        if ( codepoint <= 0x7F )
+        {
+                output.push_back( static_cast<char>( codepoint ));
+        }
+        else if ( codepoint <= 0x7FF )
+        {
+                output.push_back( static_cast<char>( 0xC0 | (( codepoint >> 6 ) & 0x1F )));
+                output.push_back( static_cast<char>( 0x80 | ( codepoint & 0x3F )));
+        }
+        else if ( codepoint <= 0xFFFF )
+        {
+                output.push_back( static_cast<char>( 0xE0 | (( codepoint >> 12 ) & 0x0F )));
+                output.push_back( static_cast<char>( 0x80 | (( codepoint >> 6 ) & 0x3F )));
+                output.push_back( static_cast<char>( 0x80 | ( codepoint & 0x3F )));
+        }
+        else
+        {
+                output.push_back( static_cast<char>( 0xF0 | (( codepoint >> 18 ) & 0x07 )));
+                output.push_back( static_cast<char>( 0x80 | (( codepoint >> 12 ) & 0x3F )));
+                output.push_back( static_cast<char>( 0x80 | (( codepoint >> 6 ) & 0x3F )));
+                output.push_back( static_cast<char>( 0x80 | ( codepoint & 0x3F )));
+        }
+}
+
+bool ValidatePrefixCodepoints( const std::vector<uint32_t> & codepoints )
+{
+        for ( uint32_t codepoint : codepoints )
+        {
+                if ( codepoint <= 0x7F )
+                {
+                        unsigned char ch = static_cast<unsigned char>( codepoint );
+                        if (( ch != '_' ) && !std::isalnum( ch ))
+                        {
+                                return false;
+                        }
+                }
+                else
+                {
+                        if (( codepoint >= 0x0400 && codepoint <= 0x04FF ) || codepoint == 0x2116 )
+                        {
+                                continue;
+                        }
+
+                        return false;
+                }
+        }
+
+        return true;
+}
+
+static const uint16_t kCp1251ToUnicode[128] = {
+        0x0402, 0x0403, 0x201A, 0x0453, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x20AC, 0x2030, 0x0409, 0x2039, 0x040A, 0x040C, 0x040B, 0x040F,
+        0x0452, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0xFFFD, 0x2122, 0x0459, 0x203A, 0x045A, 0x045C, 0x045B, 0x045F,
+        0x00A0, 0x040E, 0x045E, 0x0408, 0x00A4, 0x0490, 0x00A6, 0x00A7,
+        0x0401, 0x00A9, 0x0404, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x0407,
+        0x00B0, 0x00B1, 0x0406, 0x0456, 0x0491, 0x00B5, 0x00B6, 0x00B7,
+        0x0451, 0x2116, 0x0454, 0x00BB, 0x0458, 0x0405, 0x0455, 0x0457,
+        0x0410, 0x0411, 0x0412, 0x0413, 0x0414, 0x0415, 0x0416, 0x0417,
+        0x0418, 0x0419, 0x041A, 0x041B, 0x041C, 0x041D, 0x041E, 0x041F,
+        0x0420, 0x0421, 0x0422, 0x0423, 0x0424, 0x0425, 0x0426, 0x0427,
+        0x0428, 0x0429, 0x042A, 0x042B, 0x042C, 0x042D, 0x042E, 0x042F,
+        0x0430, 0x0431, 0x0432, 0x0433, 0x0434, 0x0435, 0x0436, 0x0437,
+        0x0438, 0x0439, 0x043A, 0x043B, 0x043C, 0x043D, 0x043E, 0x043F,
+        0x0440, 0x0441, 0x0442, 0x0443, 0x0444, 0x0445, 0x0446, 0x0447,
+        0x0448, 0x0449, 0x044A, 0x044B, 0x044C, 0x044D, 0x044E, 0x044F
+};
+
+bool ConvertCp1251ToUtf8( const std::string & input, std::string & utf8, std::vector<uint32_t> & codepoints )
+{
+        codepoints.clear();
+        utf8.clear();
+
+        for ( unsigned char ch : input )
+        {
+                uint32_t codepoint = 0;
+                if ( ch < 0x80 )
+                {
+                        codepoint = ch;
+                }
+                else
+                {
+                        uint16_t mapped = kCp1251ToUnicode[ ch - 0x80 ];
+                        if ( mapped == 0xFFFD )
+                        {
+                                return false;
+                        }
+                        codepoint = mapped;
+                }
+
+                codepoints.push_back( codepoint );
+                AppendUtf8Codepoint( codepoint, utf8 );
+        }
+
+        return true;
+}
+
+bool NormalizeMySQLTablePrefix( CGString & prefix )
+{
+        if ( prefix.IsEmpty())
+        {
+                return true;
+        }
+
+        std::string normalized = (const char *) prefix;
+        const char * whitespace = " \t\n\r\f\v";
+        auto trimWhitespace = [whitespace]( std::string & value )
+        {
+                size_t begin = value.find_first_not_of( whitespace );
+                if ( begin == std::string::npos )
+                {
+                        value.clear();
+                        return;
+                }
+                size_t end = value.find_last_not_of( whitespace );
+                value = value.substr( begin, end - begin + 1 );
+        };
+
+        trimWhitespace( normalized );
+
+        if ( normalized.empty())
+        {
+                prefix.Empty();
+                return true;
+        }
+
+        std::vector<uint32_t> utf8Codepoints;
+        if ( DecodeUtf8( normalized, utf8Codepoints ) && ValidatePrefixCodepoints( utf8Codepoints ))
+        {
+                prefix = normalized.c_str();
+                return true;
+        }
+
+        std::vector<uint32_t> cp1251Codepoints;
+        std::string converted;
+        if ( ConvertCp1251ToUtf8( normalized, converted, cp1251Codepoints ) && ValidatePrefixCodepoints( cp1251Codepoints ))
+        {
+                prefix = converted.c_str();
+                g_Log.Event( LOGM_INIT|LOGL_EVENT,
+                        "Normalized MySQL table prefix bytes (%s) to UTF-8 value '%s'.",
+                        BytesToHexDebugString( normalized ).c_str(),
+                        converted.c_str());
+                return true;
+        }
+
+        g_Log.Event( LOGM_INIT|LOGL_ERROR,
+                "Invalid MySQL table prefix bytes (%s); allowed characters are ASCII alphanumerics, '_', or Cyrillic letters.",
+                BytesToHexDebugString( normalized ).c_str());
+        return false;
 }
 
         WORD GetMySQLErrorLogMask( LOGL_TYPE level )
@@ -554,6 +836,8 @@ void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
         g_Log.Event( GetMySQLErrorLogMask( level ), "MySQL %s error (%u): %s\n", ex.GetContext().c_str(), ex.GetCode(), ex.what());
 }
 
+#ifndef UNIT_TEST
+
 CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool fAutoBegin ) :
         m_Storage( storage ),
         m_fActive( false ),
@@ -817,6 +1101,8 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & wher
         return sQuery;
 }
 
+#endif // UNIT_TEST
+
 CWorldStorageMySQL::CWorldStorageMySQL()
 {
         m_pConnection.reset();
@@ -848,6 +1134,12 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         }
 
         m_sTablePrefix = config.m_sTablePrefix;
+        bool fValidTablePrefix = NormalizeMySQLTablePrefix( m_sTablePrefix );
+        if ( !fValidTablePrefix )
+        {
+                m_sTablePrefix.Empty();
+                return false;
+        }
         m_fAutoReconnect = config.m_fAutoReconnect;
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
@@ -1029,7 +1321,9 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 uiPort,
                                 pszActiveCharset,
                                 (const char *) sCollationSuffix );
+#ifndef UNIT_TEST
                         StartDirtyWorker();
+#endif
                         return true;
                 }
                 catch ( const MariaDbException & ex )
@@ -1055,7 +1349,9 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
 void CWorldStorageMySQL::Disconnect()
 {
+#ifndef UNIT_TEST
         StopDirtyWorker();
+#endif
         m_pConnection.reset();
 
         m_sTablePrefix.Empty();
@@ -1068,6 +1364,8 @@ void CWorldStorageMySQL::Disconnect()
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 }
+
+#ifndef UNIT_TEST
 
 bool CWorldStorageMySQL::IsConnected() const
 {
@@ -3615,4 +3913,6 @@ bool CWorldStorageMySQL::EnsureSchema()
 
         return true;
 }
+
+#endif // UNIT_TEST
 
