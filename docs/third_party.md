@@ -1,20 +1,15 @@
 # Third-party components
 
-SphereServer relies on the MariaDB/MySQL client libraries for its optional
-database backend. The repository keeps the legacy Oracle headers checked in for
-compatibility and ships a helper script that downloads the current MariaDB
-packages on demand:
+The repository vendors the header files and documentation of Oracle's
+**MySQL Connector/C 6.1.11** under
+`third_party/mysql-connector-c-6.1.11-win32`. This keeps the public MySQL C API
+headers (`mysql.h`, `mysql_com.h`, etc.) in-tree together with the GPLv2 license
+and MySQL FOSS License Exception. Pre-built import libraries and DLLs are not
+included; obtain them from your preferred MySQL/MariaDB Connector/C installation
+and make them available to the linker/runtime via `MYSQL_LIB_DIR` or the project
+settings.
 
-* **MariaDB Connector/C 3.3.8** (LGPL 2.1) can be fetched with
-  `scripts\fetch_mariadb_connector.bat`. The script downloads the official
-  Windows MSI and Ubuntu tarball, extracts them into `third_party/` and keeps the
-  directories out of Git via `.gitignore`. Run it whenever you need to refresh
-  the vendor drop. PowerShell 5+, `msiexec` and the `tar` utility available on
-  modern Windows installations are required.
-* **MySQL Connector/C 6.1.11** (GPLv2 + FOSS License Exception) remains checked
-  in under `third_party/mysql-connector-c-6.1.11-win32` for projects that still
-  rely on the older headers/import libraries.
-
-If you prefer a system-wide installation you can override the include and
-library search paths using the `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR`
-environment variables or by editing the IDE project settings.
+If you prefer a different version of the MySQL or MariaDB C client library you
+can override the include/library search paths by setting the
+`MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR` environment variables before compiling,
+or by editing the project configuration directly.
