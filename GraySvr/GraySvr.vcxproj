@@ -194,6 +194,7 @@
     <ClCompile Include="cvendoritem.cpp" />
     <ClCompile Include="CWorld.cpp" />
     <ClCompile Include="CWorldStorageMySQL.cpp" />
+    <ClCompile Include="CWorldStorageMySQLUtils.cpp" />
     <ClCompile Include="CVarDefMap.cpp" />
     <ClCompile Include="cworldimport.cpp" />
     <ClCompile Include="cworldmap.cpp" />
@@ -221,6 +222,7 @@
     <ClInclude Include="..\common\grayproto.h" />
     <ClInclude Include="CParty.h" />
     <ClInclude Include="CWorldStorageMySQL.h" />
+    <ClInclude Include="CWorldStorageMySQLUtils.h" />
     <ClInclude Include="CVarDefMap.h" />
     <ClInclude Include="graysvr.h" />
   </ItemGroup>
