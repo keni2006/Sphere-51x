@@ -34,18 +34,16 @@ relational database instead of flat `.scp` files.
 
 - MySQL Server **5.7** or newer (MariaDB **10.3**+ works as well) with InnoDB
   and `utf8mb4` enabled.
-- MariaDB Connector/C **3.3.8** (or any compatible client library). Run
-  `scripts\fetch_mariadb_connector.bat` after cloning the repository to download
-  the official Windows and Linux connector archives into `third_party/`. The
-  legacy Oracle MySQL Connector/C **6.1.11** headers remain available under
-  `third_party/mysql-connector-c-6.1.11-win32` for projects that still rely on
-  them. You can still override the include/library directories with the
-  `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR` environment variables if you would
-  rather target a system-wide installation.
-- When building with Visual Studio you can keep the defaults that point at the
-  bundled MariaDB connector or set the `MYSQL_INCLUDE_DIR` and
-  `MYSQL_LIB_DIR` environment variables to target a custom installation. Those
-  overrides take precedence over the bundled packages.
+- MySQL Connector/C (libmysqlclient) **5.7**+ or an equivalent MariaDB client
+  library available during compilation. The repository vendors the header files
+  and documentation of Oracle's MySQL Connector/C **6.1.11** under
+  `third_party/mysql-connector-c-6.1.11-win32` so the project has a local copy
+  of `mysql.h` and friends, but you must supply the import libraries/DLL
+  yourself.
+- When building with Visual Studio set the environment variables
+  `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR`, or update the project properties, to
+  point at your connector installation. Those overrides take precedence over
+  the bundled headers.
 
 ### New configuration keys (`spheredef.ini aka sphere.ini`)
 
