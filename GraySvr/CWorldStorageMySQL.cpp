@@ -1,8 +1,4 @@
-#ifndef UNIT_TEST
 #include "graysvr.h"
-#else
-#include "../tests/stubs/graysvr.h"
-#endif
 #include "CWorldStorageMySQL.h"
 
 #ifdef max
@@ -170,52 +166,6 @@ std::string BuildSetNamesCommand( const std::string & charset, const std::string
         }
 
         return command;
-}
-
-bool NormalizeMySQLTablePrefix( CGString & prefix )
-{
-        if ( prefix.IsEmpty())
-        {
-                return true;
-        }
-
-        std::string normalized = (const char *) prefix;
-
-        const char * whitespace = " \t\n\r\f\v";
-        auto trimWhitespace = [whitespace]( std::string & value )
-        {
-                size_t begin = value.find_first_not_of( whitespace );
-                if ( begin == std::string::npos )
-                {
-                        value.clear();
-                        return;
-                }
-                size_t end = value.find_last_not_of( whitespace );
-                value = value.substr( begin, end - begin + 1 );
-        };
-
-        trimWhitespace( normalized );
-
-        if ( normalized.empty())
-        {
-                prefix.Empty();
-                return true;
-        }
-
-        for ( char ch : normalized )
-        {
-                unsigned char uch = static_cast<unsigned char>( ch );
-                if ( ( uch >= 0x80 ) || ( uch != '_' && !std::isalnum( uch )))
-                {
-                        g_Log.Event( LOGM_INIT|LOGL_ERROR,
-                                "Invalid MySQL table prefix '%s'; only ASCII alphanumeric characters and '_' are allowed.",
-                                normalized.c_str());
-                        return false;
-                }
-        }
-
-        prefix = normalized.c_str();
-        return true;
 }
 
         WORD GetMySQLErrorLogMask( LOGL_TYPE level )
@@ -604,8 +554,6 @@ void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
         g_Log.Event( GetMySQLErrorLogMask( level ), "MySQL %s error (%u): %s\n", ex.GetContext().c_str(), ex.GetCode(), ex.what());
 }
 
-#ifndef UNIT_TEST
-
 CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool fAutoBegin ) :
         m_Storage( storage ),
         m_fActive( false ),
@@ -869,8 +817,6 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & wher
         return sQuery;
 }
 
-#endif // UNIT_TEST
-
 CWorldStorageMySQL::CWorldStorageMySQL()
 {
         m_pConnection.reset();
@@ -902,12 +848,6 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         }
 
         m_sTablePrefix = config.m_sTablePrefix;
-        bool fValidTablePrefix = NormalizeMySQLTablePrefix( m_sTablePrefix );
-        if ( !fValidTablePrefix )
-        {
-                m_sTablePrefix.Empty();
-                return false;
-        }
         m_fAutoReconnect = config.m_fAutoReconnect;
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
@@ -1089,9 +1029,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 uiPort,
                                 pszActiveCharset,
                                 (const char *) sCollationSuffix );
-#ifndef UNIT_TEST
                         StartDirtyWorker();
-#endif
                         return true;
                 }
                 catch ( const MariaDbException & ex )
@@ -1117,9 +1055,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 
 void CWorldStorageMySQL::Disconnect()
 {
-#ifndef UNIT_TEST
         StopDirtyWorker();
-#endif
         m_pConnection.reset();
 
         m_sTablePrefix.Empty();
@@ -1132,8 +1068,6 @@ void CWorldStorageMySQL::Disconnect()
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
 }
-
-#ifndef UNIT_TEST
 
 bool CWorldStorageMySQL::IsConnected() const
 {
@@ -3681,6 +3615,4 @@ bool CWorldStorageMySQL::EnsureSchema()
 
         return true;
 }
-
-#endif // UNIT_TEST
 
