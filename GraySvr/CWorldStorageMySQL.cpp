@@ -441,7 +441,7 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 		return false;
 	}
 
-        m_sTablePrefix = config.m_sTablePrefix;
+	m_sTablePrefix = config.m_sTablePrefix;
         m_fAutoReconnect = config.m_fAutoReconnect;
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
@@ -1512,10 +1512,9 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                         StartDirtyWorker();
                         return true;
                 }
-        }
 
-	g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).\n", std::max( iAttempts, 1 ) );
-	return false;
+        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).\n", std::max( iAttempts, 1 ) );
+        return false;
 }
 
 void CWorldStorageMySQL::Disconnect()
