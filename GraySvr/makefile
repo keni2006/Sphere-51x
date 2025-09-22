@@ -69,6 +69,7 @@ endif
 # ---------------------------------------------------------------------------
 # Source discovery
 SRC            := $(filter-out GrayLog.cpp,$(wildcard *.cpp))
+SRC            += $(wildcard Storage/*.cpp) $(wildcard Storage/*/*.cpp)
 COMMON_EXCLUDE := ../Common/cbitmap.cpp ../Common/cdata.cpp ../Common/cwindow.cpp ../Common/cmodver.cpp
 COMMONSRC      := $(filter-out $(COMMON_EXCLUDE),$(wildcard ../Common/*.cpp))
 

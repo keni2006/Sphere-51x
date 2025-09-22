@@ -7,6 +7,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #ifdef _WIN32
@@ -67,10 +68,14 @@ namespace MySql
                 }
 
         private:
+                using BindNullFlag = typename std::remove_pointer<decltype(MYSQL_BIND{}.is_null)>::type;
+                using BindNullStorage = typename std::conditional<std::is_same<BindNullFlag, bool>::value, unsigned char, BindNullFlag>::type;
+
                 void EnsureIndex( size_t index ) const;
                 void EnsureStorage( size_t index );
                 void BindRawData( size_t index, enum enum_field_types type, const void * data, size_t length, bool isUnsigned );
                 void BindIntegral( size_t index, long long value, bool isUnsigned );
+                BindNullFlag * GetNullFlagPointer( size_t index ) noexcept;
 
                 struct StatementDeleter
                 {
@@ -81,7 +86,7 @@ namespace MySql
                 std::vector<MYSQL_BIND> m_Binds;
                 std::vector<std::vector<unsigned char>> m_Buffers;
                 std::vector<unsigned long> m_Lengths;
-                std::vector<my_bool> m_IsNull;
+                std::vector<BindNullStorage> m_IsNull;
         };
 
         class MySqlConnection;
