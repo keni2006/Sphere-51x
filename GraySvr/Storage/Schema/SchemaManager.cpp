@@ -370,6 +370,43 @@ bool SchemaManager::ApplyMigration_2_3( MySqlStorageService & storage )
         CGString sQuery;
         CGString sCollationSuffix = storage.GetDefaultTableCollationSuffix();
 
+        const bool fRelationsTableExists = ColumnExists( storage, sWorldObjectRelations, "parent_uid" );
+        if ( fRelationsTableExists )
+        {
+                bool fRelationColumnExists = ColumnExists( storage, sWorldObjectRelations, "relation" );
+                if ( ! fRelationColumnExists && ColumnExists( storage, sWorldObjectRelations, "type" ))
+                {
+                        CGString sRenameQuery;
+                        sRenameQuery.Format(
+                                "ALTER TABLE `%s` CHANGE COLUMN `type` `relation` VARCHAR(32) NOT NULL;",
+                                (const char *) sWorldObjectRelations );
+                        if ( ! storage.ExecuteQuery( sRenameQuery ))
+                        {
+                                return false;
+                        }
+
+                        fRelationColumnExists = true;
+                }
+
+                if ( ! fRelationColumnExists )
+                {
+                        if ( ! EnsureColumnExists( storage, sWorldObjectRelations, "relation",
+                                "`relation` VARCHAR(32) NOT NULL AFTER `child_uid`" ))
+                        {
+                                return false;
+                        }
+                }
+
+                if ( ! ColumnExists( storage, sWorldObjectRelations, "sequence" ))
+                {
+                        if ( ! EnsureColumnExists( storage, sWorldObjectRelations, "sequence",
+                                "`sequence` INT NOT NULL DEFAULT 0 AFTER `relation`" ))
+                        {
+                                return false;
+                        }
+                }
+        }
+
         sQuery.Format(
                 "CREATE TABLE IF NOT EXISTS `%s` (\n"
                 "`uid` BIGINT UNSIGNED NOT NULL,\n"
