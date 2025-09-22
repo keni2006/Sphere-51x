@@ -95,12 +95,11 @@ typedef const TCHAR *		LPCTSTR;
 #define _LPCTSTR_DEFINED
 #endif  // _LPCTSTR_DEFINED
 
+// LPCWSTR always refers to wide (Unicode) strings in the Windows headers.
+// Defining it with the same base type avoids conflicting typedefs when the
+// platform SDK is included before or after this header.
 #ifndef _LPCWSTR_DEFINED
-#ifdef _UNICODE
 typedef const wchar_t *         LPCWSTR;
-#else
-typedef const char *            LPCWSTR;
-#endif
 #define _LPCWSTR_DEFINED
 #endif  // _LPCWSTR_DEFINED
 
@@ -145,12 +144,12 @@ typedef const char *            LPCWSTR;
 #define FAR		_far
 #endif	// ! _WIN32
 
-#ifndef BYTE	// might be a typedef ?
-#define BYTE 		unsigned char	// 8 bits
-#define WORD 		unsigned short	// 16 bits
-#define UINT		unsigned int    // 32 bits
-#define DWORD		unsigned long	// 64 bits
-#endif	// BYTE
+// Provide Windows compatible integral types without relying on macro
+// substitutions that collide with the Platform SDK typedefs.
+typedef unsigned char           BYTE;   // 8 bits
+typedef unsigned short          WORD;   // 16 bits
+typedef unsigned int            UINT;   // 32 bits
+typedef unsigned long           DWORD;  // 64 bits
 
 #ifndef _WIN32
 #include <sys/time.h>
