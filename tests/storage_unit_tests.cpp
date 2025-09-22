@@ -6,8 +6,8 @@
 #include "Storage/MySql/ConnectionManager.h"
 #include "Storage/MySql/MySqlConnection.h"
 
+#include <atomic>
 #include <stdexcept>
-#include <stop_token>
 #include <string>
 
 TEST_CASE( TestConnectionManagerParsesCharsetAndCollation )
@@ -102,13 +102,13 @@ TEST_CASE( TestDirtyQueueAggregatesAndRespectsCancellation )
 {
         Storage::DirtyQueue queue;
         Storage::DirtyQueue::Batch batch;
-        std::stop_source stopSource;
+        std::atomic_bool stopRequested( false );
 
         queue.Enqueue( 0x100u, StorageDirtyType_Save );
         queue.Enqueue( 0x200u, StorageDirtyType_Save );
         queue.Enqueue( 0x100u, StorageDirtyType_Save );
 
-        if ( !queue.WaitForBatch( batch, stopSource.get_token()))
+        if ( !queue.WaitForBatch( batch, stopRequested ))
         {
                 throw std::runtime_error( "Dirty queue did not produce batch" );
         }
@@ -121,7 +121,7 @@ TEST_CASE( TestDirtyQueueAggregatesAndRespectsCancellation )
         queue.Enqueue( 0x200u, StorageDirtyType_Save );
 
         batch.clear();
-        if ( !queue.WaitForBatch( batch, stopSource.get_token()))
+        if ( !queue.WaitForBatch( batch, stopRequested ))
         {
                 throw std::runtime_error( "Dirty queue did not return batch after delete/save" );
         }
@@ -132,9 +132,8 @@ TEST_CASE( TestDirtyQueueAggregatesAndRespectsCancellation )
 
         Storage::DirtyQueue idleQueue;
         Storage::DirtyQueue::Batch idleBatch;
-        std::stop_source cancelled;
-        cancelled.request_stop();
-        if ( idleQueue.WaitForBatch( idleBatch, cancelled.get_token()))
+        std::atomic_bool cancelled( true );
+        if ( idleQueue.WaitForBatch( idleBatch, cancelled ))
         {
                 throw std::runtime_error( "Dirty queue should have respected cancellation" );
         }

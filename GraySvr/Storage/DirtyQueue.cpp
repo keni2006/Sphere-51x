@@ -2,8 +2,6 @@
 
 #include "../graysvr.h"
 
-#include <vector>
-
 namespace Storage
 {
 DirtyQueue::DirtyQueue()
@@ -39,15 +37,15 @@ void DirtyQueue::Enqueue( unsigned long long uid, StorageDirtyType type )
                 }
 }
 
-bool DirtyQueue::WaitForBatch( Batch & batch, std::stop_token stopToken )
+bool DirtyQueue::WaitForBatch( Batch & batch, const std::atomic_bool & stopRequested )
 {
                 std::unique_lock<std::mutex> lock( m_Mutex );
-                const bool ready = m_Condition.wait( lock, stopToken, [this]()
+                while ( m_Queue.empty() && !stopRequested.load( std::memory_order_acquire ))
                 {
-                        return !m_Queue.empty();
-                });
+                        m_Condition.wait( lock );
+                }
 
-                if ( !ready && m_Queue.empty())
+                if ( m_Queue.empty())
                 {
                         return false;
                 }
@@ -69,6 +67,12 @@ void DirtyQueue::CollectBatch( Batch & batch )
                         batch.emplace_back( uid, it->second );
                         m_Pending.erase( it );
                 }
+}
+
+void DirtyQueue::NotifyAll()
+{
+                std::lock_guard<std::mutex> lock( m_Mutex );
+                m_Condition.notify_all();
 }
 }
 

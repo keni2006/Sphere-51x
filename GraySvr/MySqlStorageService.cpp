@@ -22,7 +22,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <atomic>
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <arpa/inet.h>
+#endif
 #include <fstream>
 #include <iomanip>
 #include <thread>
@@ -405,25 +411,33 @@ namespace Storage
                 void Schedule( MySqlStorageService::ObjectHandle handle, StorageDirtyType type );
 
         private:
-                void Run( std::stop_token stopToken );
+                void Run();
                 void ProcessBatch( const DirtyQueue::Batch & batch );
 
                 MySqlStorageService & m_Storage;
                 DirtyQueue m_Queue;
-                std::jthread m_Worker;
+                std::thread m_Worker;
+                std::atomic_bool m_StopRequested;
         };
 
         DirtyQueueProcessor::DirtyQueueProcessor( MySqlStorageService & storage ) :
                 m_Storage( storage ),
-                m_Worker( [this]( std::stop_token stopToken )
+                m_StopRequested( false ),
+                m_Worker( [this]()
                 {
-                        Run( stopToken );
+                        Run();
                 })
         {
         }
 
         DirtyQueueProcessor::~DirtyQueueProcessor()
         {
+                m_StopRequested.store( true, std::memory_order_release );
+                m_Queue.NotifyAll();
+                if ( m_Worker.joinable())
+                {
+                        m_Worker.join();
+                }
         }
 
         void DirtyQueueProcessor::Schedule( MySqlStorageService::ObjectHandle handle, StorageDirtyType type )
@@ -431,10 +445,10 @@ namespace Storage
                 m_Queue.Enqueue( handle, type );
         }
 
-        void DirtyQueueProcessor::Run( std::stop_token stopToken )
+        void DirtyQueueProcessor::Run()
         {
                 DirtyQueue::Batch batch;
-                while ( m_Queue.WaitForBatch( batch, stopToken ))
+                while ( m_Queue.WaitForBatch( batch, m_StopRequested ))
                 {
                         ProcessBatch( batch );
                 }
