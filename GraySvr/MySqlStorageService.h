@@ -1,17 +1,13 @@
-#ifndef _CWORLD_STORAGE_MYSQL_H_
-#define _CWORLD_STORAGE_MYSQL_H_
+#ifndef _MYSQL_STORAGE_SERVICE_H_
+#define _MYSQL_STORAGE_SERVICE_H_
 
 #include "../Common/cstring.h"
-#include "Storage/Database.h"
-#include "Storage/MySql/MySqlConnection.h"
+#include "Storage/DirtyQueue.h"
+#include "Storage/Schema/SchemaManager.h"
+#include "Storage/MySql/ConnectionManager.h"
 #include <functional>
 #include <memory>
 #include <vector>
-#include <condition_variable>
-#include <deque>
-#include <mutex>
-#include <thread>
-#include <unordered_map>
 
 class CAccount;
 class CObjBase;
@@ -27,24 +23,16 @@ struct in_addr;
 struct CServerMySQLConfig;
 enum StorageDirtyType : int;
 
-namespace Storage
-{
-        namespace MySql
-        {
-                class MySqlConnectionPool;
-        }
-}
-
-class CWorldStorageMySQL
+class MySqlStorageService
 {
 public:
-        CWorldStorageMySQL();
-        ~CWorldStorageMySQL();
+        MySqlStorageService();
+        ~MySqlStorageService();
 
         class Transaction
         {
         public:
-                explicit Transaction( CWorldStorageMySQL & storage, bool fAutoBegin = true );
+                explicit Transaction( MySqlStorageService & storage, bool fAutoBegin = true );
                 ~Transaction();
 
                 bool Begin();
@@ -56,7 +44,7 @@ public:
                 }
 
         private:
-                CWorldStorageMySQL & m_Storage;
+                MySqlStorageService & m_Storage;
                 bool m_fActive;
                 bool m_fCommitted;
         };
@@ -64,8 +52,8 @@ public:
         class UniversalRecord
         {
         public:
-                explicit UniversalRecord( CWorldStorageMySQL & storage );
-                UniversalRecord( CWorldStorageMySQL & storage, const CGString & table );
+                explicit UniversalRecord( MySqlStorageService & storage );
+                UniversalRecord( MySqlStorageService & storage, const CGString & table );
 
                 void SetTable( const CGString & table );
                 const CGString & GetTable() const
@@ -100,7 +88,7 @@ public:
                 const FieldEntry * FindField( const char * field ) const;
                 void AddOrReplaceField( const char * field, const CGString & value );
 
-                CWorldStorageMySQL & m_Storage;
+                MySqlStorageService & m_Storage;
                 CGString m_sTable;
                 std::vector<FieldEntry> m_Fields;
         };
@@ -182,8 +170,8 @@ public:
                 int m_iAgeHours;
         };
 
-        bool Connect( const CServerMySQLConfig & config );
-        void Disconnect();
+        bool Start( const CServerMySQLConfig & config );
+        void Stop();
         bool IsConnected() const;
         bool IsEnabled() const;
 
@@ -247,11 +235,7 @@ public:
 private:
         friend class Transaction;
         friend class UniversalRecord;
-
-        void StartDirtyWorker();
-        void StopDirtyWorker();
-        void DirtyWorkerLoop();
-        bool ProcessDirtyObject( unsigned long long uid, StorageDirtyType type );
+        friend class Storage::Schema::SchemaManager;
 
         bool Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult = NULL );
         bool ExecuteQuery( const CGString & query );
@@ -298,28 +282,17 @@ private:
         bool ClearTable( const CGString & table );
         CGString GetAccountNameById( unsigned int accountId );
 
-        mutable std::unique_ptr<Storage::MySql::MySqlConnectionPool> m_ConnectionPool;
-        Storage::DatabaseConfig m_DatabaseConfig;
-        mutable Storage::MySql::MySqlConnectionPool::ScopedConnection m_TransactionConnection;
-        std::unique_ptr<Storage::IDatabaseTransaction> m_TransactionGuard;
+        bool ProcessDirtyObject( unsigned long long uid, StorageDirtyType type );
+
+        Storage::MySql::ConnectionManager m_ConnectionManager;
+        Storage::Schema::SchemaManager m_SchemaManager;
+        Storage::DirtyQueue m_DirtyQueue;
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
         CGString m_sTableCharset;
         CGString m_sTableCollation;
-        bool m_fConnected;
-        bool m_fAutoReconnect;
-        int m_iReconnectTries;
-        int m_iReconnectDelay;
         time_t m_tLastAccountSync;
-        int m_iTransactionDepth;
-        std::mutex m_DirtyMutex;
-        std::condition_variable m_DirtyCondition;
-        std::deque<unsigned long long> m_DirtyQueue;
-        std::unordered_map<unsigned long long, StorageDirtyType> m_DirtyObjects;
-        std::thread m_DirtyThread;
-        bool m_fDirtyThreadStop;
-        bool m_fDirtyThreadRunning;
 };
 
-#endif // _CWORLD_STORAGE_MYSQL_H_
+#endif // _MYSQL_STORAGE_SERVICE_H_
 

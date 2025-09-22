@@ -457,7 +457,7 @@ enum StorageDirtyType : int
         StorageDirtyType_Delete,
 };
 
-#include "CWorldStorageMySQL.h"
+#include "MySqlStorageService.h"
 
 class CObjBase : public CObjBaseTemplate, public CScriptObj
 {
@@ -4937,14 +4937,14 @@ public:
         bool    m_fStorageLoadPrepared;
         bool    m_fStorageLoadFailed;
         int             m_iStorageLoadStage;
-        std::unique_ptr<CWorldStorageMySQL::Transaction> m_pSaveTransaction;
-        std::vector<CWorldStorageMySQL::WorldObjectRecord> m_StorageLoadObjects;
+        std::unique_ptr<MySqlStorageService::Transaction> m_pSaveTransaction;
+        std::vector<MySqlStorageService::WorldObjectRecord> m_StorageLoadObjects;
         size_t  m_uStorageLoadObjectIndex;
-        std::vector<CWorldStorageMySQL::SectorData> m_StorageLoadSectors;
+        std::vector<MySqlStorageService::SectorData> m_StorageLoadSectors;
         size_t  m_uStorageLoadSectorIndex;
-        std::vector<CWorldStorageMySQL::GMPageRecord> m_StorageLoadGMPages;
+        std::vector<MySqlStorageService::GMPageRecord> m_StorageLoadGMPages;
         size_t  m_uStorageLoadGMPageIndex;
-        std::vector<CWorldStorageMySQL::ServerRecord> m_StorageLoadServers;
+        std::vector<MySqlStorageService::ServerRecord> m_StorageLoadServers;
         size_t  m_uStorageLoadServerIndex;
 
         // World data.
@@ -4960,7 +4960,7 @@ public:
 	CAccountArray m_Accounts;	// All the player accounts. name sorted
         CMultiDefArray m_MultiDefs;
 
-        std::unique_ptr<CWorldStorageMySQL> m_pStorage;
+        std::unique_ptr<MySqlStorageService> m_pStorage;
 
 	static const TCHAR * sm_KeyTable[];
 
@@ -4970,7 +4970,7 @@ private:
         bool LoadAccountsFromScripts( bool fChanges, bool fClearChanges );
         bool LoadAccountsMySQL( bool fChanges, bool fClearChanges );
         bool ImportLegacyAccountsToMySQL();
-        void ApplyAccountData( CAccount & account, const CWorldStorageMySQL::AccountData & data );
+        void ApplyAccountData( CAccount & account, const MySqlStorageService::AccountData & data );
         CGString GetAccountFilePath( bool fChanges );
 
         void SaveTry(bool fForceImmediate); // Save world state
@@ -5112,8 +5112,8 @@ public:
         bool Load();
         void Close();
 
-        CWorldStorageMySQL * Storage();
-        const CWorldStorageMySQL * Storage() const;
+        MySqlStorageService * Storage();
+        const MySqlStorageService * Storage() const;
 
 	const TCHAR * GetName() const { return( "World" ); }
 

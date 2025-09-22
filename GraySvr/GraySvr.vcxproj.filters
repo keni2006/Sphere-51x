@@ -147,7 +147,7 @@
     <ClCompile Include="CWorld.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="CWorldStorageMySQL.cpp">
+    <ClCompile Include="MySqlStorageService.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CVarDefMap.cpp">
@@ -221,7 +221,7 @@
     <ClInclude Include="CParty.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="CWorldStorageMySQL.h">
+    <ClInclude Include="MySqlStorageService.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Storage\Database.h">
