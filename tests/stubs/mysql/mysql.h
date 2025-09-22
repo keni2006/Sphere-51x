@@ -8,12 +8,12 @@ extern "C" {
 
 typedef struct st_mysql
 {
-        int unused;
+        void * internal;
 } MYSQL;
 
 typedef struct st_mysql_res
 {
-        int unused;
+        void * internal;
 } MYSQL_RES;
 
 typedef char ** MYSQL_ROW;

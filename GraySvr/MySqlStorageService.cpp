@@ -392,6 +392,7 @@ TablePrefixNormalizationResult NormalizeMySqlTablePrefix( const std::string & ra
 
 namespace Storage
 {
+#if !defined(UNIT_TEST)
         class DirtyQueueProcessor
         {
         public:
@@ -492,6 +493,7 @@ namespace Storage
                         g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.", uid );
                 }
         }
+#endif // !UNIT_TEST
 
 namespace Repository
 {
@@ -1193,7 +1195,9 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
 
 void MySqlStorageService::Stop()
 {
+#ifndef UNIT_TEST
         m_DirtyProcessor.reset();
+#endif
         m_ConnectionManager.Disconnect();
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
@@ -1544,7 +1548,7 @@ bool MySqlStorageService::WithTransaction( const std::function<bool()> & callbac
 
 #endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
-#ifndef UNIT_TEST
+#if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
 
 CGString MySqlStorageService::ComputeSerializedChecksum( const CGString & serialized ) const
 {
@@ -1890,11 +1894,20 @@ bool MySqlStorageService::DeleteAccount( const TCHAR * pszAccountName )
         }
 
         const CGString sAccounts = GetPrefixedTableName( "accounts" );
+        const CGString sEmails = GetPrefixedTableName( "account_emails" );
         CGString sEscName = EscapeString( pszAccountName );
 
         CGString sQuery;
-        sQuery.Format( "DELETE FROM `%s` WHERE `name` = '%s';", (const char *) sAccounts, (const char *) sEscName );
-        return ExecuteQuery( sQuery );
+        sQuery.Format( "DELETE FROM `%s` WHERE `account_id` IN (SELECT `id` FROM `%s` WHERE `name` = '%s');",
+                (const char *) sEmails, (const char *) sAccounts, (const char *) sEscName );
+        if ( !ExecuteQuery( sQuery ))
+        {
+                return false;
+        }
+
+        CGString sDeleteAccount;
+        sDeleteAccount.Format( "DELETE FROM `%s` WHERE `name` = '%s';", (const char *) sAccounts, (const char *) sEscName );
+        return ExecuteQuery( sDeleteAccount );
 }
 
 bool MySqlStorageService::SaveWorldObject( CObjBase * pObject )
@@ -1961,6 +1974,7 @@ bool MySqlStorageService::DeleteObject( const CObjBase * pObject )
         return DeleteWorldObject( pObject );
 }
 
+#ifndef UNIT_TEST
 void MySqlStorageService::ScheduleSave( ObjectHandle handle, StorageDirtyType type )
 {
         if ( type == StorageDirtyType_None )
@@ -1978,7 +1992,9 @@ void MySqlStorageService::ScheduleSave( ObjectHandle handle, StorageDirtyType ty
                 m_DirtyProcessor->Schedule( handle, type );
         }
 }
+#endif
 
+#ifndef UNIT_TEST
 bool MySqlStorageService::SaveSector( const CSector & sector )
 {
         if ( ! IsConnected())
@@ -2036,6 +2052,7 @@ bool MySqlStorageService::SaveSector( const CSector & sector )
 
         return ExecuteQuery( record.BuildInsert( false, true ));
 }
+#endif
 
 bool MySqlStorageService::SaveChar( CChar & character )
 {
@@ -2047,6 +2064,7 @@ bool MySqlStorageService::SaveItem( CItem & item )
         return SaveWorldObject( &item );
 }
 
+#ifndef UNIT_TEST
 bool MySqlStorageService::SaveGMPage( const CGMPage & page )
 {
         if ( ! IsConnected())
@@ -2130,6 +2148,7 @@ bool MySqlStorageService::SaveServer( const CServRef & server )
 
         return ExecuteQuery( record.BuildInsert( false, true ));
 }
+#endif
 
 bool MySqlStorageService::ClearGMPages()
 {
@@ -2789,7 +2808,7 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
         return repository.InsertMany( records );
 }
 
-#endif // UNIT_TEST
+#endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
 bool MySqlStorageService::EnsureSchemaVersionTable()
 {

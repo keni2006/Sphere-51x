@@ -1,7 +1,11 @@
 #ifndef _MYSQL_STORAGE_SERVICE_H_
 #define _MYSQL_STORAGE_SERVICE_H_
 
+#if defined(UNIT_TEST)
+#include "../tests/stubs/cstring_stub.h"
+#else
 #include "../Common/cstring.h"
+#endif
 #include "Storage/Schema/SchemaManager.h"
 #include "Storage/MySql/ConnectionManager.h"
 #include <functional>
@@ -298,7 +302,9 @@ private:
 
         Storage::MySql::ConnectionManager m_ConnectionManager;
         Storage::Schema::SchemaManager m_SchemaManager;
+#ifndef UNIT_TEST
         std::unique_ptr<Storage::DirtyQueueProcessor> m_DirtyProcessor;
+#endif
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
         CGString m_sTableCharset;

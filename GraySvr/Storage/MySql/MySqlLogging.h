@@ -1,6 +1,10 @@
 #pragma once
 
+#if defined(UNIT_TEST)
+#include "../../../tests/stubs/common_stub.h"
+#else
 #include "../../../Common/common.h"
+#endif
 #include "Storage/Database.h"
 
 WORD GetMySQLErrorLogMask( LOGL_TYPE level );

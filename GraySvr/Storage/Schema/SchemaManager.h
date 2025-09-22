@@ -1,6 +1,10 @@
 #pragma once
 
+#if defined(UNIT_TEST)
+#include "../../../tests/stubs/cstring_stub.h"
+#else
 #include "../../../Common/cstring.h"
+#endif
 
 class MySqlStorageService;
 
