@@ -58,9 +58,11 @@ and ensure they are discoverable during linking/execution.
 
 1. Start the database server and confirm that the configured user can create
    tables inside the chosen schema.
-2. Launch GraySvr. On the first run with `MYSQL=1` the server runs the
-   migrations in `MySqlStorageService.cpp`. The resulting schema is documented in
-   `docs/database-schema.md` and the example `docs/mysql-schema.sql` script.
+2. Launch GraySvr. On the first run with `MYSQL=1` the storage façade
+   (`GraySvr/MySqlStorageService.cpp`) and schema manager
+   (`GraySvr/Storage/Schema/SchemaManager.cpp`) run every migration. The
+   resulting schema is documented in `docs/database-schema.md` and the example
+   `docs/mysql-schema.sql` script.
 3. Account data is imported automatically the first time the server connects to
    MySQL **while** the legacy `sphereaccu.scp` / `sphereacct.scp` files are still
    available in `WORLDSAVE`. Existing rows are preserved.
@@ -86,7 +88,7 @@ and ensure they are discoverable during linking/execution.
 - Use `/ACCOUNT UPDATE` after the first import to push recent account changes to
   MySQL.
 - GM pages, server listings and timers are also mirrored in MySQL. The
-  `Ensure*Columns` routines in `MySqlStorageService.cpp` will extend existing
-  tables automatically when newer builds add fields.
+  `Ensure*Columns` routines in `Storage/Schema/SchemaManager.cpp` extend
+  existing tables automatically when newer builds add fields.
 
 Good luck and welcome back to 0.51x shard development!
