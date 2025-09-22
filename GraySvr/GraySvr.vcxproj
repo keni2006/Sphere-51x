@@ -199,7 +199,11 @@
     <ClCompile Include="cworldmap.cpp" />
     <ClCompile Include="graysvr.cpp" />
     <ClCompile Include="Storage\Database.cpp" />
+    <ClCompile Include="Storage\DirtyQueue.cpp" />
+    <ClCompile Include="Storage\MySql\ConnectionManager.cpp" />
     <ClCompile Include="Storage\MySql\MySqlConnection.cpp" />
+    <ClCompile Include="Storage\MySql\MySqlLogging.cpp" />
+    <ClCompile Include="Storage\Schema\SchemaManager.cpp" />
     <ClCompile Include="ntservice.cpp" />
     <ClCompile Include="ntwindow.cpp" />
   </ItemGroup>
@@ -223,6 +227,12 @@
     <ClInclude Include="..\common\grayproto.h" />
     <ClInclude Include="CParty.h" />
     <ClInclude Include="MySqlStorageService.h" />
+    <ClInclude Include="Storage\Database.h" />
+    <ClInclude Include="Storage\DirtyQueue.h" />
+    <ClInclude Include="Storage\MySql\ConnectionManager.h" />
+    <ClInclude Include="Storage\MySql\MySqlConnection.h" />
+    <ClInclude Include="Storage\MySql\MySqlLogging.h" />
+    <ClInclude Include="Storage\Schema\SchemaManager.h" />
     <ClInclude Include="CVarDefMap.h" />
     <ClInclude Include="graysvr.h" />
   </ItemGroup>
