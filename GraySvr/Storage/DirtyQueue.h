@@ -2,11 +2,11 @@
 
 #include <condition_variable>
 #include <deque>
-#include <functional>
 #include <mutex>
-#include <thread>
+#include <stop_token>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 enum StorageDirtyType : int;
 
@@ -15,27 +15,21 @@ namespace Storage
         class DirtyQueue
         {
         public:
-                using ProcessCallback = std::function<bool(unsigned long long, StorageDirtyType)>;
+                using Batch = std::vector<std::pair<unsigned long long, StorageDirtyType>>;
 
                 DirtyQueue();
                 ~DirtyQueue();
 
-                void Start( ProcessCallback callback );
-                void Stop();
-
                 void Enqueue( unsigned long long uid, StorageDirtyType type );
+                bool WaitForBatch( Batch & batch, std::stop_token stopToken );
 
         private:
-                void WorkerLoop();
+                void CollectBatch( Batch & batch );
 
-                ProcessCallback m_Callback;
                 std::mutex m_Mutex;
-                std::condition_variable m_Condition;
+                std::condition_variable_any m_Condition;
                 std::deque<unsigned long long> m_Queue;
                 std::unordered_map<unsigned long long, StorageDirtyType> m_Pending;
-                std::thread m_Thread;
-                bool m_Stop;
-                bool m_Running;
         };
 }
 

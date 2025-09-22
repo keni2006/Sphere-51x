@@ -2,7 +2,6 @@
 #define _MYSQL_STORAGE_SERVICE_H_
 
 #include "../Common/cstring.h"
-#include "Storage/DirtyQueue.h"
 #include "Storage/Schema/SchemaManager.h"
 #include "Storage/MySql/ConnectionManager.h"
 #include <functional>
@@ -11,6 +10,7 @@
 
 namespace Storage
 {
+        class DirtyQueueProcessor;
 namespace Repository
 {
         class PreparedStatementRepository;
@@ -36,6 +36,8 @@ class MySqlStorageService
 public:
         MySqlStorageService();
         ~MySqlStorageService();
+
+        using ObjectHandle = unsigned long long;
 
         class Transaction
         {
@@ -206,7 +208,7 @@ public:
         bool SaveWorldObjects( const std::vector<CObjBase*> & objects );
         bool DeleteWorldObject( const CObjBase * pObject );
         bool DeleteObject( const CObjBase * pObject );
-        void MarkObjectDirty( const CObjBase & object, StorageDirtyType type );
+        void ScheduleSave( ObjectHandle handle, StorageDirtyType type );
         bool ClearWorldData();
 
         bool SaveSector( const CSector & sector );
@@ -294,11 +296,9 @@ private:
         bool ClearTable( const CGString & table );
         CGString GetAccountNameById( unsigned int accountId );
 
-        bool ProcessDirtyObject( unsigned long long uid, StorageDirtyType type );
-
         Storage::MySql::ConnectionManager m_ConnectionManager;
         Storage::Schema::SchemaManager m_SchemaManager;
-        Storage::DirtyQueue m_DirtyQueue;
+        std::unique_ptr<Storage::DirtyQueueProcessor> m_DirtyProcessor;
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
         CGString m_sTableCharset;

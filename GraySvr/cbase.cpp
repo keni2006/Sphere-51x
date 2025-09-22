@@ -428,13 +428,14 @@ void CObjBase::MarkDirty( StorageDirtyType type )
 	if ( pStorage == NULL || ! pStorage->IsEnabled())
 		return;
 
-	if ( type == StorageDirtyType_Delete )
-	{
-		m_fStorageNew = false;
-		m_fStorageDeleted = true;
-		pStorage->MarkObjectDirty( *this, StorageDirtyType_Delete );
-		return;
-	}
+        if ( type == StorageDirtyType_Delete )
+        {
+                m_fStorageNew = false;
+                m_fStorageDeleted = true;
+                const MySqlStorageService::ObjectHandle handle = static_cast<MySqlStorageService::ObjectHandle>((unsigned long long) (UINT) GetUID());
+                pStorage->ScheduleSave( handle, StorageDirtyType_Delete );
+                return;
+        }
 
 	if ( m_fStorageDeleted )
 		return;
@@ -446,7 +447,8 @@ void CObjBase::MarkDirty( StorageDirtyType type )
 		m_fStorageNew = false;
 	}
 
-	pStorage->MarkObjectDirty( *this, StorageDirtyType_Save );
+        const MySqlStorageService::ObjectHandle handle = static_cast<MySqlStorageService::ObjectHandle>((unsigned long long) (UINT) GetUID());
+        pStorage->ScheduleSave( handle, StorageDirtyType_Save );
 }
 
 void CObjBase::WriteTry( CScript & s )
