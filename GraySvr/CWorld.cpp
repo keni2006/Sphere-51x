@@ -4,7 +4,7 @@
 //
 
 #include "graysvr.h"	// predef header.
-#include "CWorldStorageMySQL.h"
+#include "MySqlStorageService.h"
 
 bool World_fDeleteCycle = false;
 
@@ -235,12 +235,12 @@ CWorld::~CWorld()
 	Close();
 }
 
-CWorldStorageMySQL * CWorld::Storage()
+MySqlStorageService * CWorld::Storage()
 {
 	return m_pStorage.get();
 }
 
-const CWorldStorageMySQL * CWorld::Storage() const
+const MySqlStorageService * CWorld::Storage() const
 {
 	return m_pStorage.get();
 }
@@ -309,7 +309,7 @@ void CWorld::GetBackupName( CGString & sArchive, TCHAR chType ) const
 
 bool CWorld::SaveStage() // Save world state in stages.
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage && pStorage->IsEnabled())
         {
                 return SaveStageStorage();
@@ -404,13 +404,13 @@ bool CWorld::BeginStorageSave()
         if ( m_fStorageSavePrepared )
                 return true;
 
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
         }
 
-        m_pSaveTransaction.reset( new CWorldStorageMySQL::Transaction( *pStorage ));
+        m_pSaveTransaction.reset( new MySqlStorageService::Transaction( *pStorage ));
         if ( ! m_pSaveTransaction || ! m_pSaveTransaction->IsActive())
         {
                 g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to begin MySQL transaction for world save.\n" );
@@ -450,7 +450,7 @@ bool CWorld::BeginStorageSave()
 
 void CWorld::AbortStorageSave()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         bool fHadActiveTransaction = ( m_pSaveTransaction && m_pSaveTransaction->IsActive());
         if ( m_pSaveTransaction )
         {
@@ -474,7 +474,7 @@ void CWorld::NotifyStorageObjectRemoved( CObjBase * pObj )
 	if ( pObj == NULL )
 		return;
 
-	CWorldStorageMySQL * pStorage = Storage();
+	MySqlStorageService * pStorage = Storage();
 	if ( pStorage == NULL || ! pStorage->IsEnabled())
 		return;
 
@@ -515,7 +515,7 @@ bool CWorld::SaveObjectToStorage( CObjBase * pObj )
                 }
         }
 
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                         return false;
@@ -568,7 +568,7 @@ bool CWorld::SaveStorageSector( CSector & sector )
         if ( ! sector.MarkSaved())
                 return true;
 
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -620,7 +620,7 @@ bool CWorld::SaveStorageSector( CSector & sector )
 
 bool CWorld::SaveStorageGMPages()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -640,7 +640,7 @@ bool CWorld::SaveStorageGMPages()
 
 bool CWorld::SaveStorageServers()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -667,7 +667,7 @@ bool CWorld::SaveStorageServers()
 
 bool CWorld::FinalizeStorageSave()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -732,7 +732,7 @@ bool CWorld::InitializeStorageLoad()
         if ( m_fStorageLoadPrepared )
                 return true;
 
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -870,7 +870,7 @@ bool CWorld::SaveStageStorage()
 
 bool CWorld::LoadSectionFromStorage()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -893,7 +893,7 @@ bool CWorld::LoadSectionFromStorage()
                 case 0:
                         if ( m_uStorageLoadSectorIndex < m_StorageLoadSectors.size())
                         {
-                                const CWorldStorageMySQL::SectorData & data = m_StorageLoadSectors[m_uStorageLoadSectorIndex++];
+                                const MySqlStorageService::SectorData & data = m_StorageLoadSectors[m_uStorageLoadSectorIndex++];
                                 CPointMap base( data.m_iX1, data.m_iY1, 0 );
                                 CSector * pSector = base.GetSector();
                                 if ( pSector != NULL )
@@ -925,7 +925,7 @@ bool CWorld::LoadSectionFromStorage()
                 case 1:
                         if ( m_uStorageLoadObjectIndex < m_StorageLoadObjects.size())
                         {
-                                const CWorldStorageMySQL::WorldObjectRecord & record = m_StorageLoadObjects[m_uStorageLoadObjectIndex++];
+                                const MySqlStorageService::WorldObjectRecord & record = m_StorageLoadObjects[m_uStorageLoadObjectIndex++];
                                 UINT uid = (UINT) record.m_uid;
                                 CObjBase * pObj = NULL;
 
@@ -970,7 +970,7 @@ bool CWorld::LoadSectionFromStorage()
                 case 2:
                         if ( m_uStorageLoadGMPageIndex < m_StorageLoadGMPages.size())
                         {
-                                const CWorldStorageMySQL::GMPageRecord & record = m_StorageLoadGMPages[m_uStorageLoadGMPageIndex++];
+                                const MySqlStorageService::GMPageRecord & record = m_StorageLoadGMPages[m_uStorageLoadGMPageIndex++];
                                 CGMPage * pPage = new CGMPage( record.m_sAccount );
                                 pPage->SetReason( record.m_sReason );
                                 pPage->m_lTime = record.m_lTime;
@@ -985,7 +985,7 @@ pPage->m_p.m_z = record.m_iPosZ;
                 case 3:
                         if ( m_uStorageLoadServerIndex < m_StorageLoadServers.size())
                         {
-                                const CWorldStorageMySQL::ServerRecord & record = m_StorageLoadServers[m_uStorageLoadServerIndex++];
+                                const MySqlStorageService::ServerRecord & record = m_StorageLoadServers[m_uStorageLoadServerIndex++];
                                 if ( ! record.m_sName.IsEmpty())
                                 {
                                         CServRef * pServ = new CServRef( record.m_sName, SOCKET_LOCAL_ADDRESS );
@@ -1021,7 +1021,7 @@ pPage->m_p.m_z = record.m_iPosZ;
 
 bool CWorld::LoadFromStorage()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsEnabled())
         {
                 return false;
@@ -1093,7 +1093,7 @@ bool CWorld::LoadFromStorage()
 
 void CWorld::SaveForce() // Save world state
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
 
         if ( fStorageEnabled )
@@ -1174,7 +1174,7 @@ void CWorld::SaveForce() // Save world state
 
 void CWorld::SaveTry( bool fForceImmediate ) // Save world state
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
 
         if ( fStorageEnabled )
@@ -1284,7 +1284,7 @@ void CWorld::SaveTry( bool fForceImmediate ) // Save world state
 
 void CWorld::Save( bool fForceImmediate ) // Save world state
 {
-	CWorldStorageMySQL * pStorage = Storage();
+	MySqlStorageService * pStorage = Storage();
 	const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
 
 	if ( g_Serv.m_fSecure ) // enable the try code.
@@ -1319,7 +1319,7 @@ bool CWorld::LoadSection()
 {
         // Load another section of the *WORLD.SCP file.
 
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage && pStorage->IsEnabled())
         {
                 return LoadSectionFromStorage();
@@ -1423,7 +1423,7 @@ bool CWorld::Load() // Load world from script
 	{
 		if ( ! m_pStorage )
 		{
-			m_pStorage.reset( new CWorldStorageMySQL());
+			m_pStorage.reset( new MySqlStorageService());
 		}
 
 		if ( ! m_pStorage->Connect( mySQLConfig ))

@@ -1,5 +1,5 @@
 #include "graysvr.h"
-#include "CWorldStorageMySQL.h"
+#include "MySqlStorageService.h"
 #include "mysql_stub.h"
 
 #include <iostream>
@@ -24,7 +24,7 @@ namespace
                 ResetMysqlQueryFlag();
                 g_Log.Clear();
 
-                CWorldStorageMySQL storage;
+                MySqlStorageService storage;
                 CServerMySQLConfig config;
                 config.m_fEnable = true;
                 std::string cp1251Prefix = BuildRawCp1251Prefix();
@@ -78,7 +78,7 @@ namespace
                 ResetMysqlQueryFlag();
                 g_Log.Clear();
 
-                CWorldStorageMySQL storage;
+                MySqlStorageService storage;
                 CServerMySQLConfig config;
                 config.m_fEnable = true;
                 std::string cp1251Prefix = BuildRawCp1251Prefix();

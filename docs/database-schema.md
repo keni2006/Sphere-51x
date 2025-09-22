@@ -3,7 +3,7 @@
 This project relies on a small number of MySQL tables that back account
 management and optional world state persistence. The following summary reflects
 schema version 3 as created by the migrations in
-`GraySvr/CWorldStorageMySQL.cpp`.
+`GraySvr/MySqlStorageService.cpp`.
 
 ## `schema_version`
 Stores the current schema revision as well as the flag that indicates whether

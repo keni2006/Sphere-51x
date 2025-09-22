@@ -424,7 +424,7 @@ void CObjBase::MarkDirty( StorageDirtyType type )
 	if ( g_Serv.IsLoading())
 		return;
 
-	CWorldStorageMySQL * pStorage = g_World.Storage();
+	MySqlStorageService * pStorage = g_World.Storage();
 	if ( pStorage == NULL || ! pStorage->IsEnabled())
 		return;
 
@@ -1386,7 +1386,7 @@ void CObjBase::Delete()
 	DeletePrepare();
 	MarkDirty( StorageDirtyType_Delete );
 
-	CWorldStorageMySQL * pStorage = g_World.Storage();
+	MySqlStorageService * pStorage = g_World.Storage();
 	if ( pStorage && pStorage->IsEnabled())
 	{
 		if ( ! pStorage->DeleteObject( this ))

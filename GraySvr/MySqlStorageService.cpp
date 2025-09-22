@@ -3,7 +3,8 @@
 #else
 #include "../tests/stubs/graysvr.h"
 #endif
-#include "CWorldStorageMySQL.h"
+#include "MySqlStorageService.h"
+#include "Storage/MySql/MySqlLogging.h"
 
 #ifdef max
 #undef max
@@ -162,16 +163,6 @@ std::string BuildSetNamesCommand( const std::string & charset, const std::string
         return command;
 }
 
-WORD GetMySQLErrorLogMask( LOGL_TYPE level )
-{
-        WORD wMask = static_cast<WORD>( level );
-        if ( g_Serv.IsLoading())
-        {
-                wMask |= LOGM_INIT;
-        }
-        return wMask;
-}
-
         std::string FormatByteString( const std::string & value )
         {
                 if ( value.empty())
@@ -190,11 +181,6 @@ WORD GetMySQLErrorLogMask( LOGL_TYPE level )
                         stream << "0x" << std::setw( 2 ) << static_cast<int>( static_cast<unsigned char>( value[i] ));
                 }
                 return stream.str();
-        }
-
-        void LogDatabaseError( const Storage::DatabaseError & ex, LOGL_TYPE level )
-        {
-                g_Log.Event( GetMySQLErrorLogMask( level ), "MySQL %s error (%u): %s\n", ex.GetContext().c_str(), ex.GetCode(), ex.what());
         }
 
         void AppendUtf8( std::string & output, uint32_t codepoint )
@@ -404,7 +390,7 @@ WORD GetMySQLErrorLogMask( LOGL_TYPE level )
 
 #if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
 
-CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool fAutoBegin ) :
+MySqlStorageService::Transaction::Transaction( MySqlStorageService & storage, bool fAutoBegin ) :
         m_Storage( storage ),
         m_fActive( false ),
         m_fCommitted( false )
@@ -415,7 +401,7 @@ CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool
         }
 }
 
-CWorldStorageMySQL::Transaction::~Transaction()
+MySqlStorageService::Transaction::~Transaction()
 {
         if ( m_fActive && ! m_fCommitted )
         {
@@ -423,7 +409,7 @@ CWorldStorageMySQL::Transaction::~Transaction()
         }
 }
 
-bool CWorldStorageMySQL::Transaction::Begin()
+bool MySqlStorageService::Transaction::Begin()
 {
         if ( m_fActive )
         {
@@ -433,7 +419,7 @@ bool CWorldStorageMySQL::Transaction::Begin()
         return m_fActive;
 }
 
-bool CWorldStorageMySQL::Transaction::Commit()
+bool MySqlStorageService::Transaction::Commit()
 {
         if ( ! m_fActive )
         {
@@ -448,7 +434,7 @@ bool CWorldStorageMySQL::Transaction::Commit()
         return true;
 }
 
-void CWorldStorageMySQL::Transaction::Rollback()
+void MySqlStorageService::Transaction::Rollback()
 {
         if ( m_fActive )
         {
@@ -458,33 +444,33 @@ void CWorldStorageMySQL::Transaction::Rollback()
         m_fCommitted = false;
 }
 
-CWorldStorageMySQL::UniversalRecord::UniversalRecord( CWorldStorageMySQL & storage ) :
+MySqlStorageService::UniversalRecord::UniversalRecord( MySqlStorageService & storage ) :
         m_Storage( storage )
 {
 }
 
-CWorldStorageMySQL::UniversalRecord::UniversalRecord( CWorldStorageMySQL & storage, const CGString & table ) :
+MySqlStorageService::UniversalRecord::UniversalRecord( MySqlStorageService & storage, const CGString & table ) :
         m_Storage( storage ),
         m_sTable( table )
 {
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetTable( const CGString & table )
+void MySqlStorageService::UniversalRecord::SetTable( const CGString & table )
 {
         m_sTable = table;
 }
 
-void CWorldStorageMySQL::UniversalRecord::Clear()
+void MySqlStorageService::UniversalRecord::Clear()
 {
         m_Fields.clear();
 }
 
-bool CWorldStorageMySQL::UniversalRecord::Empty() const
+bool MySqlStorageService::UniversalRecord::Empty() const
 {
         return m_Fields.empty();
 }
 
-CWorldStorageMySQL::UniversalRecord::FieldEntry * CWorldStorageMySQL::UniversalRecord::FindField( const char * field )
+MySqlStorageService::UniversalRecord::FieldEntry * MySqlStorageService::UniversalRecord::FindField( const char * field )
 {
         if ( field == NULL )
         {
@@ -500,7 +486,7 @@ CWorldStorageMySQL::UniversalRecord::FieldEntry * CWorldStorageMySQL::UniversalR
         return NULL;
 }
 
-const CWorldStorageMySQL::UniversalRecord::FieldEntry * CWorldStorageMySQL::UniversalRecord::FindField( const char * field ) const
+const MySqlStorageService::UniversalRecord::FieldEntry * MySqlStorageService::UniversalRecord::FindField( const char * field ) const
 {
         if ( field == NULL )
         {
@@ -516,7 +502,7 @@ const CWorldStorageMySQL::UniversalRecord::FieldEntry * CWorldStorageMySQL::Univ
         return NULL;
 }
 
-void CWorldStorageMySQL::UniversalRecord::AddOrReplaceField( const char * field, const CGString & value )
+void MySqlStorageService::UniversalRecord::AddOrReplaceField( const char * field, const CGString & value )
 {
         if ( field == NULL )
         {
@@ -535,37 +521,37 @@ void CWorldStorageMySQL::UniversalRecord::AddOrReplaceField( const char * field,
         m_Fields.push_back( entry );
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetRaw( const char * field, const CGString & expression )
+void MySqlStorageService::UniversalRecord::SetRaw( const char * field, const CGString & expression )
 {
         AddOrReplaceField( field, expression );
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetNull( const char * field )
+void MySqlStorageService::UniversalRecord::SetNull( const char * field )
 {
         AddOrReplaceField( field, CGString( "NULL" ));
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetString( const char * field, const CGString & value )
+void MySqlStorageService::UniversalRecord::SetString( const char * field, const CGString & value )
 {
         AddOrReplaceField( field, m_Storage.FormatStringValue( value ));
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetOptionalString( const char * field, const CGString & value )
+void MySqlStorageService::UniversalRecord::SetOptionalString( const char * field, const CGString & value )
 {
         AddOrReplaceField( field, m_Storage.FormatOptionalStringValue( value ));
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetDateTime( const char * field, const CGString & value )
+void MySqlStorageService::UniversalRecord::SetDateTime( const char * field, const CGString & value )
 {
         AddOrReplaceField( field, m_Storage.FormatDateTimeValue( value ));
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetDateTime( const char * field, const CRealTime & value )
+void MySqlStorageService::UniversalRecord::SetDateTime( const char * field, const CRealTime & value )
 {
         AddOrReplaceField( field, m_Storage.FormatDateTimeValue( value ));
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetInt( const char * field, long long value )
+void MySqlStorageService::UniversalRecord::SetInt( const char * field, long long value )
 {
         CGString sValue;
 #ifdef _WIN32
@@ -576,7 +562,7 @@ void CWorldStorageMySQL::UniversalRecord::SetInt( const char * field, long long 
         AddOrReplaceField( field, sValue );
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetUInt( const char * field, unsigned long long value )
+void MySqlStorageService::UniversalRecord::SetUInt( const char * field, unsigned long long value )
 {
         CGString sValue;
 #ifdef _WIN32
@@ -587,12 +573,12 @@ void CWorldStorageMySQL::UniversalRecord::SetUInt( const char * field, unsigned 
         AddOrReplaceField( field, sValue );
 }
 
-void CWorldStorageMySQL::UniversalRecord::SetBool( const char * field, bool value )
+void MySqlStorageService::UniversalRecord::SetBool( const char * field, bool value )
 {
         AddOrReplaceField( field, CGString( value ? "1" : "0" ));
 }
 
-CGString CWorldStorageMySQL::UniversalRecord::BuildInsert( bool fReplace, bool fUpdateOnDuplicate ) const
+CGString MySqlStorageService::UniversalRecord::BuildInsert( bool fReplace, bool fUpdateOnDuplicate ) const
 {
         CGString sQuery;
         if ( m_sTable.IsEmpty() || m_Fields.empty())
@@ -637,7 +623,7 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildInsert( bool fReplace, bool f
         return sQuery;
 }
 
-CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & whereClause ) const
+CGString MySqlStorageService::UniversalRecord::BuildUpdate( const CGString & whereClause ) const
 {
         CGString sQuery;
         if ( m_sTable.IsEmpty() || m_Fields.empty())
@@ -669,34 +655,25 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & wher
 
 #endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
-CWorldStorageMySQL::CWorldStorageMySQL()
+MySqlStorageService::MySqlStorageService() :
+        m_tLastAccountSync( 0 )
 {
-        m_ConnectionPool.reset();
-        m_DatabaseConfig = Storage::DatabaseConfig();
-        m_fAutoReconnect = false;
-        m_iReconnectTries = 0;
-        m_iReconnectDelay = 0;
-        m_sDatabaseName.Empty();
         m_sTablePrefix.Empty();
+        m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
-        m_fConnected = false;
-        m_tLastAccountSync = 0;
-        m_iTransactionDepth = 0;
-        m_fDirtyThreadStop = false;
-        m_fDirtyThreadRunning = false;
 }
 
-CWorldStorageMySQL::~CWorldStorageMySQL()
+MySqlStorageService::~MySqlStorageService()
 {
-	Disconnect();
+        Stop();
 }
 
-bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
+bool MySqlStorageService::Start( const CServerMySQLConfig & config )
 {
-        Disconnect();
+        Stop();
 
-        if ( ! config.m_fEnable )
+        if ( !config.m_fEnable )
         {
                 return false;
         }
@@ -713,241 +690,78 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 const char * reason = ( prefixNormalization.m_pszReason != NULL ) ? prefixNormalization.m_pszReason : "Normalized MySQL table prefix";
                 std::string normalizedLogValue = prefixNormalization.m_sNormalized.empty() ? std::string( "(empty)" ) : prefixNormalization.m_sNormalized;
                 g_Log.Event( LOGM_INIT|LOGL_WARN,
-                        "Normalized MySQL table prefix bytes (%s) to \"%s\" (%s).",
+                        "Normalized MySQL table prefix bytes (%s) to "%s" (%s).",
                         FormatByteString( rawTablePrefix ).c_str(),
                         normalizedLogValue.c_str(),
                         reason );
         }
 
         m_sTablePrefix = prefixNormalization.m_sNormalized.c_str();
-        m_fAutoReconnect = config.m_fAutoReconnect;
-        m_iReconnectTries = config.m_iReconnectTries;
-        m_iReconnectDelay = config.m_iReconnectDelay;
         m_sDatabaseName = config.m_sDatabase;
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
         m_tLastAccountSync = 0;
-        m_iTransactionDepth = 0;
 
-        const char * whitespace = " \t\n\r\f\v";
-
-        auto trimWhitespace = [whitespace]( std::string & value )
+        Storage::MySql::ConnectionManager::ConnectionDetails connectionDetails;
+        if ( !m_ConnectionManager.Connect( config, connectionDetails ))
         {
-                size_t begin = value.find_first_not_of( whitespace );
-                if ( begin == std::string::npos )
-                {
-                        value.clear();
-                        return;
-                }
-                size_t endPos = value.find_last_not_of( whitespace );
-                value = value.substr( begin, endPos - begin + 1 );
-        };
-
-        std::string requestedCharset;
-        std::string requestedCollation;
-        if ( !config.m_sCharset.IsEmpty())
-        {
-                requestedCharset = (const char *) config.m_sCharset;
-                trimWhitespace( requestedCharset );
-                size_t separator = requestedCharset.find_first_of( whitespace );
-                if ( separator != std::string::npos )
-                {
-                        requestedCollation = requestedCharset.substr( separator + 1 );
-                        requestedCharset.erase( separator );
-                        trimWhitespace( requestedCollation );
-                }
-                trimWhitespace( requestedCharset );
+                return false;
         }
 
-        std::string sessionCharset = requestedCharset;
-        std::string sessionCollation = requestedCollation;
-
-        auto toLowerAscii = []( std::string & value )
+        if ( !connectionDetails.m_TableCharset.empty())
         {
-                std::transform( value.begin(), value.end(), value.begin(), []( unsigned char ch ) -> char
-                {
-                        return static_cast<char>( std::tolower( ch ));
-                });
-        };
-
-        toLowerAscii( sessionCharset );
-        toLowerAscii( sessionCollation );
-
-        std::string derivedCharset;
-        if ( !sessionCollation.empty())
+                m_sTableCharset = connectionDetails.m_TableCharset.c_str();
+        }
+        else
         {
-                size_t underscore = sessionCollation.find( '_' );
-                if ( underscore != std::string::npos )
-                {
-                        derivedCharset = sessionCollation.substr( 0, underscore );
-                }
+                m_sTableCharset.Empty();
         }
 
-        if ( sessionCharset.empty() && !derivedCharset.empty())
+        if ( !connectionDetails.m_TableCollation.empty())
         {
-                sessionCharset = derivedCharset;
+                m_sTableCollation = connectionDetails.m_TableCollation.c_str();
         }
-        else if ( !sessionCharset.empty() && !derivedCharset.empty() && sessionCharset != derivedCharset )
+        else
         {
-                g_Log.Event( LOGM_INIT|LOGL_WARN,
-                        "Requested charset '%s' does not match collation '%s'; using charset '%s'.",
-                        requestedCharset.empty() ? "(auto)" : requestedCharset.c_str(),
-                        requestedCollation.empty() ? "(none)" : requestedCollation.c_str(),
-                        derivedCharset.c_str());
-                sessionCharset = derivedCharset;
+                m_sTableCollation.Empty();
         }
 
-        if ( sessionCharset.empty())
+        if ( !EnsureSchema())
         {
-                sessionCharset = "utf8mb4";
+                Stop();
+                return false;
         }
 
-        if ( !sessionCharset.empty() && !IsSafeMariaDbIdentifierToken( sessionCharset ))
-        {
-                std::string invalidCharset = sessionCharset;
-                sessionCharset = "utf8mb4";
-                g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid charset token '%s'; forcing 'utf8mb4'.", invalidCharset.c_str());
-        }
-
-        if ( !sessionCollation.empty() && !IsSafeMariaDbIdentifierToken( sessionCollation ))
-        {
-                std::string invalidCollation = sessionCollation;
-                sessionCollation.clear();
-                g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid collation token '%s'; ignoring requested value.", invalidCollation.c_str());
-        }
-
-        const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
-        const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
-        const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
-        const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
-        unsigned int uiPort = config.m_iPort > 0 ? static_cast<unsigned int>( config.m_iPort ) : 0;
-
-        Storage::DatabaseConfig dbConfig;
-        dbConfig.m_Enable = true;
-        dbConfig.m_Host = ( pszHost != NULL ) ? pszHost : std::string();
-        dbConfig.m_Port = uiPort;
-        dbConfig.m_Database = ( pszDatabase != NULL ) ? pszDatabase : std::string();
-        dbConfig.m_Username = ( pszUser != NULL ) ? pszUser : std::string();
-        dbConfig.m_Password = ( pszPassword != NULL ) ? pszPassword : std::string();
-        dbConfig.m_Charset = sessionCharset;
-        dbConfig.m_Collation = sessionCollation;
-        dbConfig.m_AutoReconnect = m_fAutoReconnect;
-        dbConfig.m_ReconnectTries = ( m_iReconnectTries > 0 ) ? static_cast<unsigned int>( m_iReconnectTries ) : 1;
-        dbConfig.m_ReconnectDelaySeconds = ( m_iReconnectDelay > 0 ) ? static_cast<unsigned int>( m_iReconnectDelay ) : 1;
-
-        const int attempts = std::max( m_fAutoReconnect ? m_iReconnectTries : 1, 1 );
-
-        for ( int attempt = 0; attempt < attempts; ++attempt )
-        {
-                try
-                {
-                        std::unique_ptr<Storage::MySql::MySqlConnection> connection( new Storage::MySql::MySqlConnection() );
-                        connection->Open( dbConfig );
-
-                        Storage::DatabaseCharacterSetInfo activeInfo = connection->GetCharacterSetInfo();
-                        if ( !sessionCharset.empty())
-                        {
-                                m_sTableCharset = sessionCharset.c_str();
-                        }
-                        else if ( !activeInfo.m_sCharset.empty())
-                        {
-                                m_sTableCharset = activeInfo.m_sCharset.c_str();
-                        }
-                        else
-                        {
-                                m_sTableCharset.Empty();
-                        }
-
-                        if ( !sessionCollation.empty())
-                        {
-                                m_sTableCollation = sessionCollation.c_str();
-                        }
-                        else if ( !activeInfo.m_sCollation.empty())
-                        {
-                                m_sTableCollation = activeInfo.m_sCollation.c_str();
-                        }
-                        else
-                        {
-                                m_sTableCollation.Empty();
-                        }
-
-                        const char * pszActiveCharset = m_sTableCharset.IsEmpty() ? "unknown" : (const char *) m_sTableCharset;
-                        CGString sCollationSuffix;
-                        if ( !m_sTableCollation.IsEmpty())
-                        {
-                                sCollationSuffix.Format( ", collation '%s'", (const char *) m_sTableCollation );
-                        }
-
-                        if ( !m_ConnectionPool )
-                        {
-                                m_ConnectionPool.reset( new Storage::MySql::MySqlConnectionPool( dbConfig, 1 ));
-                        }
-                        else
-                        {
-                                m_ConnectionPool->Configure( dbConfig, 1 );
-                        }
-                        m_ConnectionPool->AddConnection( std::move( connection ));
-                        m_DatabaseConfig = dbConfig;
-                        m_fConnected = true;
-
-                        g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'%s.",
-                                ( pszHost != NULL && pszHost[0] != '\0' ) ? pszHost : "localhost",
-                                uiPort,
-                                pszActiveCharset,
-                                (const char *) sCollationSuffix );
 #ifndef UNIT_TEST
-                        StartDirtyWorker();
+        m_DirtyQueue.Start( [this]( unsigned long long uid, StorageDirtyType type ) -> bool
+        {
+                bool fResult = ProcessDirtyObject( uid, type );
+                if ( !fResult )
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.
+", uid );
+                }
+                return fResult;
+        });
 #endif
-                        return true;
-                }
-                catch ( const Storage::DatabaseError & ex )
-                {
-                        LogDatabaseError( ex, LOGL_ERROR );
-                        if ( ( attempt + 1 ) < attempts )
-                        {
-                                int delay = std::max( m_iReconnectDelay, 1 );
-                                g_Log.Event( LOGM_INIT|LOGL_WARN, "Retrying MySQL connection in %d second(s).", delay );
-                                std::this_thread::sleep_for( std::chrono::seconds( delay ));
-                        }
-                }
-                catch ( const std::bad_alloc & )
-                {
-                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Out of memory while preparing MySQL connection." );
-                        break;
-                }
-        }
 
-        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unable to connect to MySQL server after %d attempt(s).", std::max( attempts, 1 ) );
-        return false;
+        return true;
 }
 
-void CWorldStorageMySQL::Disconnect()
+void MySqlStorageService::Stop()
 {
 #ifndef UNIT_TEST
-        StopDirtyWorker();
+        m_DirtyQueue.Stop();
 #endif
-        m_TransactionGuard.reset();
-        m_TransactionConnection.Reset();
-        if ( m_ConnectionPool )
-        {
-                m_ConnectionPool->Shutdown();
-                m_ConnectionPool.reset();
-        }
-        m_fConnected = false;
-        m_DatabaseConfig = Storage::DatabaseConfig();
-
+        m_ConnectionManager.Disconnect();
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
-        m_fAutoReconnect = false;
-        m_iReconnectTries = 0;
-        m_iReconnectDelay = 0;
         m_tLastAccountSync = 0;
-        m_iTransactionDepth = 0;
 }
 
-CGString CWorldStorageMySQL::BuildSchemaVersionCreateQuery() const
+CGString MySqlStorageService::BuildSchemaVersionCreateQuery() const
 {
         CGString sTableName;
         sTableName.Format( "%s%s", (const char *) m_sTablePrefix, "schema_version" );
@@ -973,17 +787,13 @@ CGString CWorldStorageMySQL::BuildSchemaVersionCreateQuery() const
 }
 
 #ifdef UNIT_TEST
-bool CWorldStorageMySQL::DebugExecuteQuery( const CGString & query )
+bool MySqlStorageService::DebugExecuteQuery( const CGString & query )
 {
-        if ( !m_ConnectionPool )
-        {
-                return false;
-        }
-
         try
         {
-                auto connection = m_ConnectionPool->Acquire();
-                if ( !connection.IsValid())
+                Storage::MySql::MySqlConnectionPool::ScopedConnection scoped;
+                Storage::MySql::MySqlConnection * connection = GetActiveConnection( scoped );
+                if ( connection == NULL )
                 {
                         return false;
                 }
@@ -998,7 +808,7 @@ bool CWorldStorageMySQL::DebugExecuteQuery( const CGString & query )
 }
 #endif
 
-CGString CWorldStorageMySQL::EscapeString( const TCHAR * pszInput ) const
+CGString MySqlStorageService::EscapeString( const TCHAR * pszInput ) const
 {
         CGString sResult;
         if ( pszInput == NULL )
@@ -1038,7 +848,7 @@ CGString CWorldStorageMySQL::EscapeString( const TCHAR * pszInput ) const
         return sResult;
 }
 
-CGString CWorldStorageMySQL::FormatStringValue( const CGString & value ) const
+CGString MySqlStorageService::FormatStringValue( const CGString & value ) const
 {
         CGString sEscaped = EscapeString( (const TCHAR *) value );
         CGString sResult;
@@ -1046,7 +856,7 @@ CGString CWorldStorageMySQL::FormatStringValue( const CGString & value ) const
         return sResult;
 }
 
-CGString CWorldStorageMySQL::FormatOptionalStringValue( const CGString & value ) const
+CGString MySqlStorageService::FormatOptionalStringValue( const CGString & value ) const
 {
         if ( value.IsEmpty())
         {
@@ -1055,7 +865,7 @@ CGString CWorldStorageMySQL::FormatOptionalStringValue( const CGString & value )
         return FormatStringValue( value );
 }
 
-CGString CWorldStorageMySQL::FormatDateTimeValue( const CGString & value ) const
+CGString MySqlStorageService::FormatDateTimeValue( const CGString & value ) const
 {
         if ( value.IsEmpty())
         {
@@ -1064,7 +874,7 @@ CGString CWorldStorageMySQL::FormatDateTimeValue( const CGString & value ) const
         return FormatStringValue( value );
 }
 
-CGString CWorldStorageMySQL::FormatDateTimeValue( const CRealTime & value ) const
+CGString MySqlStorageService::FormatDateTimeValue( const CRealTime & value ) const
 {
         if ( ! value.IsValid())
         {
@@ -1078,7 +888,7 @@ CGString CWorldStorageMySQL::FormatDateTimeValue( const CRealTime & value ) cons
         return FormatStringValue( sTemp );
 }
 
-CGString CWorldStorageMySQL::FormatIPAddressValue( const CGString & value ) const
+CGString MySqlStorageService::FormatIPAddressValue( const CGString & value ) const
 {
         if ( value.IsEmpty())
         {
@@ -1087,7 +897,7 @@ CGString CWorldStorageMySQL::FormatIPAddressValue( const CGString & value ) cons
         return FormatStringValue( value );
 }
 
-CGString CWorldStorageMySQL::FormatIPAddressValue( const struct in_addr & value ) const
+CGString MySqlStorageService::FormatIPAddressValue( const struct in_addr & value ) const
 {
         if ( value.s_addr == 0 )
         {
@@ -1103,24 +913,24 @@ CGString CWorldStorageMySQL::FormatIPAddressValue( const struct in_addr & value 
 
 #if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
 
-bool CWorldStorageMySQL::IsConnected() const
+bool MySqlStorageService::IsConnected() const
 {
-        return m_fConnected;
+        return m_ConnectionManager.IsConnected();
 }
 
-bool CWorldStorageMySQL::IsEnabled() const
+bool MySqlStorageService::IsEnabled() const
 {
-        return m_fConnected;
+        return m_ConnectionManager.IsConnected();
 }
 
-CGString CWorldStorageMySQL::GetPrefixedTableName( const char * name ) const
+CGString MySqlStorageService::GetPrefixedTableName( const char * name ) const
 {
         CGString sName;
         sName.Format( "%s%s", (const char *) m_sTablePrefix, name );
         return sName;
 }
 
-const char * CWorldStorageMySQL::GetDefaultTableCharset() const
+const char * MySqlStorageService::GetDefaultTableCharset() const
 {
         if ( ! m_sTableCharset.IsEmpty())
         {
@@ -1129,7 +939,7 @@ const char * CWorldStorageMySQL::GetDefaultTableCharset() const
         return "utf8mb4";
 }
 
-const char * CWorldStorageMySQL::GetDefaultTableCollation() const
+const char * MySqlStorageService::GetDefaultTableCollation() const
 {
         if ( ! m_sTableCollation.IsEmpty())
         {
@@ -1138,7 +948,7 @@ const char * CWorldStorageMySQL::GetDefaultTableCollation() const
         return NULL;
 }
 
-CGString CWorldStorageMySQL::GetDefaultTableCollationSuffix() const
+CGString MySqlStorageService::GetDefaultTableCollationSuffix() const
 {
         CGString sSuffix;
         const char * pszCollation = GetDefaultTableCollation();
@@ -1149,28 +959,12 @@ CGString CWorldStorageMySQL::GetDefaultTableCollationSuffix() const
         return sSuffix;
 }
 
-Storage::MySql::MySqlConnection * CWorldStorageMySQL::GetActiveConnection( Storage::MySql::MySqlConnectionPool::ScopedConnection & scoped ) const
+Storage::MySql::MySqlConnection * MySqlStorageService::GetActiveConnection( Storage::MySql::MySqlConnectionPool::ScopedConnection & scoped ) const
 {
-        if ( m_TransactionConnection && m_TransactionConnection->IsValid())
-        {
-                return &m_TransactionConnection->Get();
-        }
-
-        if ( !m_ConnectionPool )
-        {
-                return NULL;
-        }
-
-        scoped = m_ConnectionPool->Acquire();
-        if ( !scoped.IsValid())
-        {
-                return NULL;
-        }
-
-        return &scoped.Get();
+        return m_ConnectionManager.GetActiveConnection( scoped );
 }
 
-bool CWorldStorageMySQL::Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult )
+bool MySqlStorageService::Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult )
 {
         if ( ! IsConnected())
         {
@@ -1210,12 +1004,12 @@ bool CWorldStorageMySQL::Query( const CGString & query, std::unique_ptr<Storage:
         return false;
 }
 
-bool CWorldStorageMySQL::ExecuteQuery( const CGString & query )
+bool MySqlStorageService::ExecuteQuery( const CGString & query )
 {
         return Query( query, NULL );
 }
 
-bool CWorldStorageMySQL::ExecuteRecordsInsert( const std::vector<UniversalRecord> & records )
+bool MySqlStorageService::ExecuteRecordsInsert( const std::vector<UniversalRecord> & records )
 {
         if ( records.empty())
         {
@@ -1238,7 +1032,7 @@ bool CWorldStorageMySQL::ExecuteRecordsInsert( const std::vector<UniversalRecord
         return true;
 }
 
-bool CWorldStorageMySQL::ClearTable( const CGString & table )
+bool MySqlStorageService::ClearTable( const CGString & table )
 {
         if ( table.IsEmpty())
         {
@@ -1250,119 +1044,22 @@ bool CWorldStorageMySQL::ClearTable( const CGString & table )
         return ExecuteQuery( sQuery );
 }
 
-bool CWorldStorageMySQL::BeginTransaction()
+bool MySqlStorageService::BeginTransaction()
 {
-        if ( ! IsConnected())
-        {
-                return false;
-        }
-
-        if ( m_iTransactionDepth == 0 )
-        {
-                try
-                {
-                        if ( !m_ConnectionPool )
-                        {
-                                return false;
-                        }
-
-                        m_TransactionConnection.Reset();
-                        m_TransactionConnection = m_ConnectionPool->Acquire();
-                        if ( !m_TransactionConnection.IsValid())
-                        {
-                                return false;
-                        }
-                        m_TransactionGuard = m_TransactionConnection->BeginTransaction();
-                }
-                catch ( const Storage::DatabaseError & ex )
-                {
-                        LogDatabaseError( ex, LOGL_ERROR );
-                        m_TransactionConnection.Reset();
-                        m_TransactionGuard.reset();
-                        return false;
-                }
-                catch ( ... )
-                {
-                        m_TransactionConnection.Reset();
-                        m_TransactionGuard.reset();
-                        throw;
-                }
-        }
-
-        ++m_iTransactionDepth;
-        return true;
+        return m_ConnectionManager.BeginTransaction();
 }
 
-bool CWorldStorageMySQL::CommitTransaction()
+bool MySqlStorageService::CommitTransaction()
 {
-        if ( ! IsConnected())
-        {
-                return false;
-        }
-        if ( m_iTransactionDepth <= 0 )
-        {
-                return false;
-        }
-
-        --m_iTransactionDepth;
-        if ( m_iTransactionDepth == 0 )
-        {
-                try
-                {
-                        if ( m_TransactionGuard )
-                        {
-                                m_TransactionGuard->Commit();
-                        }
-                }
-                catch ( const Storage::DatabaseError & ex )
-                {
-                        LogDatabaseError( ex, LOGL_ERROR );
-                        m_iTransactionDepth = 0;
-                        m_TransactionGuard.reset();
-                        m_TransactionConnection.Reset();
-                        return false;
-                }
-
-                m_TransactionGuard.reset();
-                m_TransactionConnection.Reset();
-        }
-        return true;
+        return m_ConnectionManager.CommitTransaction();
 }
 
-bool CWorldStorageMySQL::RollbackTransaction()
+bool MySqlStorageService::RollbackTransaction()
 {
-        if ( ! IsConnected())
-        {
-                return false;
-        }
-        if ( m_iTransactionDepth <= 0 )
-        {
-                return true;
-        }
-
-        try
-        {
-                if ( m_TransactionGuard )
-                {
-                        m_TransactionGuard->Rollback();
-                }
-        }
-        catch ( const Storage::DatabaseError & ex )
-        {
-                LogDatabaseError( ex, LOGL_ERROR );
-                m_iTransactionDepth = 0;
-                m_TransactionGuard.reset();
-                m_TransactionConnection.Reset();
-                return false;
-        }
-
-        m_iTransactionDepth = 0;
-        m_TransactionGuard.reset();
-        m_TransactionConnection.Reset();
-        return true;
+        return m_ConnectionManager.RollbackTransaction();
 }
 
-bool CWorldStorageMySQL::WithTransaction( const std::function<bool()> & callback )
+bool MySqlStorageService::WithTransaction( const std::function<bool()> & callback )
 {
         if ( ! callback )
         {
@@ -1403,664 +1100,11 @@ bool CWorldStorageMySQL::WithTransaction( const std::function<bool()> & callback
         return false;
 }
 
-bool CWorldStorageMySQL::EnsureSchemaVersionTable()
-{
-        const CGString sTableName = GetPrefixedTableName( "schema_version" );
-
-        CGString sQuery = BuildSchemaVersionCreateQuery();
-        if ( ! ExecuteQuery( sQuery ))
-        {
-                return false;
-        }
-
-	sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
-		(const char *) sTableName, SCHEMA_VERSION_ROW );
-	if ( ! ExecuteQuery( sQuery ))
-	{
-		return false;
-	}
-
-	sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
-		(const char *) sTableName, SCHEMA_IMPORT_ROW );
-	if ( ! ExecuteQuery( sQuery ))
-	{
-		return false;
-	}
-
-        return true;
-}
-
 #endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
 #ifndef UNIT_TEST
 
-int CWorldStorageMySQL::GetSchemaVersion()
-{
-        const CGString sTableName = GetPrefixedTableName( "schema_version" );
-
-	CGString sQuery;
-	sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;",
-		(const char *) sTableName, SCHEMA_VERSION_ROW );
-
-        std::unique_ptr<Storage::IDatabaseResult> result;
-        if ( ! Query( sQuery, &result ))
-        {
-                return -1;
-        }
-
-        int iVersion = 0;
-        if ( result && result->IsValid())
-        {
-                Storage::IDatabaseResult::Row pRow = result->FetchRow();
-                if ( pRow != NULL && pRow[0] != NULL )
-                {
-                        iVersion = atoi( pRow[0] );
-                }
-        }
-
-	return iVersion;
-}
-
-bool CWorldStorageMySQL::SetSchemaVersion( int version )
-{
-	const CGString sTableName = GetPrefixedTableName( "schema_version" );
-
-	CGString sQuery;
-	sQuery.Format( "UPDATE `%s` SET `version` = %d WHERE `id` = %d;",
-		(const char *) sTableName, version, SCHEMA_VERSION_ROW );
-	return ExecuteQuery( sQuery );
-}
-
-bool CWorldStorageMySQL::ApplyMigration_0_1()
-{
-        const CGString sAccounts = GetPrefixedTableName( "accounts" );
-        const CGString sAccountEmails = GetPrefixedTableName( "account_emails" );
-        const CGString sCharacters = GetPrefixedTableName( "characters" );
-	const CGString sItems = GetPrefixedTableName( "items" );
-	const CGString sItemProps = GetPrefixedTableName( "item_props" );
-	const CGString sSectors = GetPrefixedTableName( "sectors" );
-	const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
-	const CGString sServers = GetPrefixedTableName( "servers" );
-	const CGString sTimers = GetPrefixedTableName( "timers" );
-
-	std::vector<CGString> vQueries;
-	CGString sQuery;
-	CGString sCollationSuffix = GetDefaultTableCollationSuffix();
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-                "`name` VARCHAR(32) NOT NULL,"
-                "`password` VARCHAR(64) NOT NULL,"
-                "`plevel` INT NOT NULL DEFAULT 0,"
-                "`priv_flags` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`comment` TEXT NULL,"
-                "`email` VARCHAR(128) NULL,"
-                "`chat_name` VARCHAR(64) NULL,"
-                "`language` CHAR(3) NULL,"
-                "`total_connect_time` INT NOT NULL DEFAULT 0,"
-                "`last_connect_time` INT NOT NULL DEFAULT 0,"
-                "`last_ip` VARCHAR(45) NULL,"
-                "`last_login` DATETIME NULL,"
-                "`first_ip` VARCHAR(45) NULL,"
-                "`first_login` DATETIME NULL,"
-                "`last_char_uid` BIGINT UNSIGNED NULL,"
-                "`email_failures` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-                "PRIMARY KEY (`id`),"
-                "UNIQUE KEY `ux_accounts_name` (`name`)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sAccounts,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`account_id` INT UNSIGNED NOT NULL,"
-                "`sequence` SMALLINT UNSIGNED NOT NULL,"
-                "`message_id` SMALLINT UNSIGNED NOT NULL,"
-                "PRIMARY KEY (`account_id`, `sequence`),"
-                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`uid` BIGINT UNSIGNED NOT NULL,"
-                "`account_id` INT UNSIGNED NULL,"
-                "`name` VARCHAR(64) NULL,"
-                "`body_id` INT NULL,"
-                "`position_x` INT NULL,"
-                "`position_y` INT NULL,"
-                "`position_z` INT NULL,"
-                "`map_plane` INT NULL,"
-                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                "PRIMARY KEY (`uid`),"
-                "KEY `ix_characters_account` (`account_id`),"
-                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sCharacters, (const char *) sAccounts, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-	vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`uid` BIGINT UNSIGNED NOT NULL,"
-                "`container_uid` BIGINT UNSIGNED NULL,"
-                "`owner_uid` BIGINT UNSIGNED NULL,"
-                "`type` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`amount` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`color` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`position_x` INT NULL,"
-                "`position_y` INT NULL,"
-                "`position_z` INT NULL,"
-                "`map_plane` INT NULL,"
-                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                "PRIMARY KEY (`uid`),"
-                "KEY `ix_items_container` (`container_uid`),"
-                "KEY `ix_items_owner` (`owner_uid`),"
-                "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
-                "FOREIGN KEY (`owner_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sItems, (const char *) sItems, (const char *) sCharacters, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-	vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`item_uid` BIGINT UNSIGNED NOT NULL,"
-                "`prop` VARCHAR(64) NOT NULL,"
-                "`value` TEXT NULL,"
-                "PRIMARY KEY (`item_uid`, `prop`),"
-                "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sItemProps, (const char *) sItems, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-	vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-                "`map_plane` INT NOT NULL,"
-                "`x1` INT NOT NULL,"
-                "`y1` INT NOT NULL,"
-                "`x2` INT NOT NULL,"
-                "`y2` INT NOT NULL,"
-                "`last_update` DATETIME NULL,"
-                "PRIMARY KEY (`id`),"
-                "UNIQUE KEY `ux_sectors_bounds` (`map_plane`, `x1`, `y1`, `x2`, `y2`)",
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sSectors, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-	vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-                "`account_id` INT UNSIGNED NULL,"
-                "`character_uid` BIGINT UNSIGNED NULL,"
-                "`reason` TEXT NULL,"
-                "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                "PRIMARY KEY (`id`),"
-                "KEY `ix_gm_pages_account` (`account_id`),"
-                "KEY `ix_gm_pages_character` (`character_uid`),"
-                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,"
-                "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sGMPages, (const char *) sAccounts, (const char *) sCharacters, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-	vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`id` INT UNSIGNED NOT NULL AUTO_INCREMENT,"
-                "`name` VARCHAR(64) NOT NULL,"
-                "`address` VARCHAR(128) NULL,"
-                "`port` INT NULL,"
-                "`status` INT UNSIGNED NOT NULL DEFAULT 0,"
-                "`last_seen` DATETIME NULL,"
-                "PRIMARY KEY (`id`),"
-                "UNIQUE KEY `ux_servers_name` (`name`)"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sServers, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` ("
-                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
-                "`character_uid` BIGINT UNSIGNED NULL,"
-                "`item_uid` BIGINT UNSIGNED NULL,"
-                "`expires_at` BIGINT NOT NULL,"
-                "`type` INT UNSIGNED NOT NULL,"
-                "`data` TEXT NULL,"
-                "PRIMARY KEY (`id`),"
-                "KEY `ix_timers_character` (`character_uid`),"
-                "KEY `ix_timers_item` (`item_uid`),"
-                "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,"
-                "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sTimers, (const char *) sCharacters, (const char *) sItems, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-	vQueries.push_back( sQuery );
-
-	for ( size_t i = 0; i < vQueries.size(); ++i )
-	{
-		if ( ! ExecuteQuery( vQueries[i] ))
-		{
-			return false;
-		}
-        }
-
-        return true;
-}
-
-bool CWorldStorageMySQL::ApplyMigration_1_2()
-{
-        const CGString sAccounts = GetPrefixedTableName( "accounts" );
-        const CGString sAccountEmails = GetPrefixedTableName( "account_emails" );
-        const CGString sTableName = GetPrefixedTableName( "schema_version" );
-
-        if ( ! EnsureColumnExists( sAccounts, "priv_flags", "`priv_flags` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `plevel`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "comment", "`comment` TEXT NULL AFTER `status`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "chat_name", "`chat_name` VARCHAR(64) NULL AFTER `email`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "language", "`language` CHAR(3) NULL AFTER `chat_name`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "total_connect_time", "`total_connect_time` INT NOT NULL DEFAULT 0 AFTER `language`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "last_connect_time", "`last_connect_time` INT NOT NULL DEFAULT 0 AFTER `total_connect_time`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "first_ip", "`first_ip` VARCHAR(45) NULL AFTER `last_ip`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "first_login", "`first_login` DATETIME NULL AFTER `first_ip`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "last_char_uid", "`last_char_uid` BIGINT UNSIGNED NULL AFTER `first_login`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "email_failures", "`email_failures` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `last_char_uid`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sAccounts, "updated_at", "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`" ))
-        {
-                return false;
-        }
-
-        CGString sQuery;
-        CGString sCollationSuffix = GetDefaultTableCollationSuffix();
-        sQuery.Format(
-"CREATE TABLE IF NOT EXISTS `%s` ("
-"`account_id` INT UNSIGNED NOT NULL,"
-"`sequence` SMALLINT UNSIGNED NOT NULL,"
-"`message_id` SMALLINT UNSIGNED NOT NULL,"
-"PRIMARY KEY (`account_id`, `sequence`),"
-"FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE CASCADE"
-") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-(const char *) sAccountEmails, (const char *) sAccounts, GetDefaultTableCharset(), (const char *) sCollationSuffix);
-        if ( ! ExecuteQuery( sQuery ))
-        {
-                return false;
-        }
-
-        sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
-                (const char *) sTableName, SCHEMA_WORLD_SAVECOUNT_ROW );
-        if ( ! ExecuteQuery( sQuery ))
-        {
-                return false;
-        }
-
-        sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
-                (const char *) sTableName, SCHEMA_WORLD_SAVEFLAG_ROW );
-        if ( ! ExecuteQuery( sQuery ))
-        {
-                return false;
-        }
-
-        return true;
-}
-
-bool CWorldStorageMySQL::ApplyMigration_2_3()
-{
-        const CGString sAccounts = GetPrefixedTableName( "accounts" );
-        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
-        const CGString sWorldObjectData = GetPrefixedTableName( "world_object_data" );
-        const CGString sWorldObjectComponents = GetPrefixedTableName( "world_object_components" );
-        const CGString sWorldObjectRelations = GetPrefixedTableName( "world_object_relations" );
-        const CGString sWorldSavepoints = GetPrefixedTableName( "world_savepoints" );
-        const CGString sWorldObjectAudit = GetPrefixedTableName( "world_object_audit" );
-
-        std::vector<CGString> vQueries;
-        CGString sQuery;
-        CGString sCollationSuffix = GetDefaultTableCollationSuffix();
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` (\n"
-                "`uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`object_type` VARCHAR(32) NOT NULL,\n"
-                "`object_subtype` VARCHAR(64) NULL,\n"
-                "`name` VARCHAR(128) NULL,\n"
-                "`account_id` INT UNSIGNED NULL,\n"
-                "`container_uid` BIGINT UNSIGNED NULL,\n"
-                "`top_level_uid` BIGINT UNSIGNED NULL,\n"
-                "`position_x` INT NULL,\n"
-                "`position_y` INT NULL,\n"
-                "`position_z` INT NULL,\n"
-                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-                "`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n"
-                "PRIMARY KEY (`uid`),\n"
-                "KEY `ix_world_objects_type` (`object_type`),\n"
-                "KEY `ix_world_objects_account` (`account_id`),\n"
-                "KEY `ix_world_objects_container` (`container_uid`),\n"
-                "KEY `ix_world_objects_top` (`top_level_uid`),\n"
-                "FOREIGN KEY (`account_id`) REFERENCES `%s`(`id`) ON DELETE SET NULL,\n"
-                "FOREIGN KEY (`container_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL,\n"
-                "FOREIGN KEY (`top_level_uid`) REFERENCES `%s`(`uid`) ON DELETE SET NULL\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sWorldObjects,
-                (const char *) sAccounts,
-                (const char *) sWorldObjects,
-                (const char *) sWorldObjects,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` (\n"
-                "`object_uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`data` LONGTEXT NOT NULL,\n"
-                "`checksum` VARCHAR(64) NULL,\n"
-                "PRIMARY KEY (`object_uid`),\n"
-                "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sWorldObjectData,
-                (const char *) sWorldObjects,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` (\n"
-                "`object_uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`component` VARCHAR(32) NOT NULL,\n"
-                "`name` VARCHAR(128) NOT NULL,\n"
-                "`sequence` INT NOT NULL DEFAULT 0,\n"
-                "`value` LONGTEXT NULL,\n"
-                "PRIMARY KEY (`object_uid`,`component`,`name`,`sequence`),\n"
-                "KEY `ix_world_components_component` (`component`),\n"
-                "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sWorldObjectComponents,
-                (const char *) sWorldObjects,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` (\n"
-                "`parent_uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`child_uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`relation` VARCHAR(32) NOT NULL,\n"
-                "`sequence` INT NOT NULL DEFAULT 0,\n"
-                "PRIMARY KEY (`parent_uid`,`child_uid`,`relation`,`sequence`),\n"
-                "KEY `ix_world_relations_child` (`child_uid`),\n"
-                "FOREIGN KEY (`parent_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,\n"
-                "FOREIGN KEY (`child_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sWorldObjectRelations,
-                (const char *) sWorldObjects,
-                (const char *) sWorldObjects,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` (\n"
-                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
-                "`label` VARCHAR(64) NULL,\n"
-                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-                "`objects_count` INT NOT NULL DEFAULT 0,\n"
-                "`checksum` VARCHAR(64) NULL,\n"
-                "PRIMARY KEY (`id`)\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sWorldSavepoints,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        sQuery.Format(
-                "CREATE TABLE IF NOT EXISTS `%s` (\n"
-                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
-                "`object_uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`changed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
-                "`change_type` VARCHAR(32) NOT NULL,\n"
-                "`data_before` LONGTEXT NULL,\n"
-                "`data_after` LONGTEXT NULL,\n"
-                "PRIMARY KEY (`id`),\n"
-                "KEY `ix_world_audit_object` (`object_uid`),\n"
-                "FOREIGN KEY (`object_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
-                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-                (const char *) sWorldObjectAudit,
-                (const char *) sWorldObjects,
-                GetDefaultTableCharset(),
-                (const char *) sCollationSuffix);
-        vQueries.push_back( sQuery );
-
-        for ( size_t i = 0; i < vQueries.size(); ++i )
-        {
-                if ( ! ExecuteQuery( vQueries[i] ))
-                {
-                        return false;
-                }
-        }
-
-        return true;
-}
-
-bool CWorldStorageMySQL::ColumnExists( const CGString & table, const char * column ) const
-{
-        if ( ! IsConnected())
-        {
-                return false;
-        }
-        if ( m_sDatabaseName.IsEmpty())
-        {
-                return false;
-        }
-
-        CGString sEscDatabase = EscapeString( (const TCHAR *) m_sDatabaseName );
-        CGString sEscTable = EscapeString( (const TCHAR *) table );
-        CGString sEscColumn = EscapeString( column );
-
-        CGString sQuery;
-        sQuery.Format(
-                "SELECT COUNT(*) FROM information_schema.columns "
-                "WHERE table_schema = '%s' AND table_name = '%s' AND column_name = '%s';",
-                (const char *) sEscDatabase, (const char *) sEscTable, (const char *) sEscColumn );
-
-        std::unique_ptr<Storage::IDatabaseResult> result;
-        if ( ! const_cast<CWorldStorageMySQL*>(this)->Query( sQuery, &result ))
-        {
-                return false;
-        }
-
-        bool fExists = false;
-        if ( result && result->IsValid())
-        {
-                Storage::IDatabaseResult::Row pRow = result->FetchRow();
-                if ( pRow != NULL && pRow[0] != NULL )
-                {
-                        fExists = ( atoi( pRow[0] ) > 0 );
-                }
-        }
-
-        return fExists;
-}
-
-bool CWorldStorageMySQL::EnsureColumnExists( const CGString & table, const char * column, const char * definition )
-{
-        if ( ColumnExists( table, column ))
-        {
-                return true;
-        }
-
-        CGString sQuery;
-        sQuery.Format( "ALTER TABLE `%s` ADD COLUMN %s;", (const char *) table, definition );
-        return ExecuteQuery( sQuery );
-}
-
-bool CWorldStorageMySQL::EnsureSectorColumns()
-{
-        static bool s_fEnsured = false;
-        if ( s_fEnsured )
-        {
-                return true;
-        }
-
-        const CGString sSectors = GetPrefixedTableName( "sectors" );
-        if ( ! EnsureColumnExists( sSectors, "has_light_override", "`has_light_override` TINYINT(1) NOT NULL DEFAULT 0 AFTER `last_update`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sSectors, "local_light", "`local_light` INT NULL AFTER `has_light_override`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sSectors, "has_rain_override", "`has_rain_override` TINYINT(1) NOT NULL DEFAULT 0 AFTER `local_light`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sSectors, "rain_chance", "`rain_chance` INT NULL AFTER `has_rain_override`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sSectors, "has_cold_override", "`has_cold_override` TINYINT(1) NOT NULL DEFAULT 0 AFTER `rain_chance`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sSectors, "cold_chance", "`cold_chance` INT NULL AFTER `has_cold_override`" ))
-        {
-                return false;
-        }
-
-        s_fEnsured = true;
-        return true;
-}
-
-bool CWorldStorageMySQL::EnsureGMPageColumns()
-{
-        static bool s_fEnsured = false;
-        if ( s_fEnsured )
-        {
-                return true;
-        }
-
-        const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
-        if ( ! EnsureColumnExists( sGMPages, "account_name", "`account_name` VARCHAR(32) NULL AFTER `account_id`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sGMPages, "page_time", "`page_time` BIGINT NULL AFTER `status`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sGMPages, "pos_x", "`pos_x` INT NULL AFTER `page_time`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sGMPages, "pos_y", "`pos_y` INT NULL AFTER `pos_x`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sGMPages, "pos_z", "`pos_z` INT NULL AFTER `pos_y`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sGMPages, "map_plane", "`map_plane` INT NULL AFTER `pos_z`" ))
-        {
-                return false;
-        }
-
-        s_fEnsured = true;
-        return true;
-}
-
-bool CWorldStorageMySQL::EnsureServerColumns()
-{
-        static bool s_fEnsured = false;
-        if ( s_fEnsured )
-        {
-                return true;
-        }
-
-        const CGString sServers = GetPrefixedTableName( "servers" );
-        if ( ! EnsureColumnExists( sServers, "time_zone", "`time_zone` INT NOT NULL DEFAULT 0 AFTER `status`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "clients_avg", "`clients_avg` INT NOT NULL DEFAULT 0 AFTER `time_zone`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "url", "`url` VARCHAR(255) NULL AFTER `clients_avg`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "email", "`email` VARCHAR(128) NULL AFTER `url`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "register_password", "`register_password` VARCHAR(64) NULL AFTER `email`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "notes", "`notes` TEXT NULL AFTER `register_password`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "language", "`language` VARCHAR(16) NULL AFTER `notes`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "version", "`version` VARCHAR(64) NULL AFTER `language`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "acc_app", "`acc_app` INT NOT NULL DEFAULT 0 AFTER `version`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "last_valid_seconds", "`last_valid_seconds` INT NULL AFTER `acc_app`" ))
-        {
-                return false;
-        }
-        if ( ! EnsureColumnExists( sServers, "age_hours", "`age_hours` INT NULL AFTER `last_valid_seconds`" ))
-        {
-                return false;
-        }
-
-        s_fEnsured = true;
-        return true;
-}
-
-CGString CWorldStorageMySQL::ComputeSerializedChecksum( const CGString & serialized ) const
+CGString MySqlStorageService::ComputeSerializedChecksum( const CGString & serialized ) const
 {
         const char * pData = (const char *) serialized;
         size_t len = (size_t) serialized.GetLength();
@@ -2081,7 +1125,7 @@ CGString CWorldStorageMySQL::ComputeSerializedChecksum( const CGString & seriali
         return sHash;
 }
 
-void CWorldStorageMySQL::AppendVarDefComponents( const CGString & table, unsigned long long uid, const CVarDefMap * pMap, const TCHAR * pszComp, std::vector<UniversalRecord> & outRecords )
+void MySqlStorageService::AppendVarDefComponents( const CGString & table, unsigned long long uid, const CVarDefMap * pMap, const TCHAR * pszComp, std::vector<UniversalRecord> & outRecords )
 {
         if ( table.IsEmpty() || pMap == NULL || pszComp == NULL || pszComp[0] == '\0' )
         {
@@ -2118,7 +1162,7 @@ void CWorldStorageMySQL::AppendVarDefComponents( const CGString & table, unsigne
         }
 }
 
-unsigned int CWorldStorageMySQL::GetAccountId( const CGString & name )
+unsigned int MySqlStorageService::GetAccountId( const CGString & name )
 {
         if ( ! IsConnected())
         {
@@ -2149,7 +1193,7 @@ unsigned int CWorldStorageMySQL::GetAccountId( const CGString & name )
         return uiId;
 }
 
-bool CWorldStorageMySQL::FetchAccounts( std::vector<AccountData> & accounts, const CGString & whereClause )
+bool MySqlStorageService::FetchAccounts( std::vector<AccountData> & accounts, const CGString & whereClause )
 {
         accounts.clear();
 
@@ -2219,7 +1263,7 @@ bool CWorldStorageMySQL::FetchAccounts( std::vector<AccountData> & accounts, con
         return true;
 }
 
-void CWorldStorageMySQL::LoadAccountEmailSchedule( std::vector<AccountData> & accounts )
+void MySqlStorageService::LoadAccountEmailSchedule( std::vector<AccountData> & accounts )
 {
         if ( accounts.empty())
         {
@@ -2264,88 +1308,7 @@ void CWorldStorageMySQL::LoadAccountEmailSchedule( std::vector<AccountData> & ac
 
 }
 
-bool CWorldStorageMySQL::InsertOrUpdateSchemaValue( int id, int value )
-{
-        const CGString sTableName = GetPrefixedTableName( "schema_version" );
-
-        CGString sQuery;
-        sQuery.Format(
-                "INSERT INTO `%s` (`id`, `version`) VALUES (%d, %d) ON DUPLICATE KEY UPDATE `version` = VALUES(`version`);",
-                (const char *) sTableName, id, value );
-        return ExecuteQuery( sQuery );
-}
-
-bool CWorldStorageMySQL::QuerySchemaValue( int id, int & value )
-{
-        value = 0;
-        const CGString sTableName = GetPrefixedTableName( "schema_version" );
-
-        CGString sQuery;
-        sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;",
-                (const char *) sTableName, id );
-
-        std::unique_ptr<Storage::IDatabaseResult> result;
-        if ( ! Query( sQuery, &result ))
-        {
-                return false;
-        }
-
-        if ( result && result->IsValid())
-        {
-                Storage::IDatabaseResult::Row pRow = result->FetchRow();
-                if ( pRow != NULL && pRow[0] != NULL )
-                {
-                        value = atoi( pRow[0] );
-                }
-        }
-
-        return true;
-}
-
-bool CWorldStorageMySQL::SetWorldSaveCount( int saveCount )
-{
-        return InsertOrUpdateSchemaValue( SCHEMA_WORLD_SAVECOUNT_ROW, saveCount );
-}
-
-bool CWorldStorageMySQL::GetWorldSaveCount( int & saveCount )
-{
-        if ( ! QuerySchemaValue( SCHEMA_WORLD_SAVECOUNT_ROW, saveCount ))
-        {
-                return false;
-        }
-        return true;
-}
-
-bool CWorldStorageMySQL::SetWorldSaveCompleted( bool fCompleted )
-{
-        return InsertOrUpdateSchemaValue( SCHEMA_WORLD_SAVEFLAG_ROW, fCompleted ? 1 : 0 );
-}
-
-bool CWorldStorageMySQL::GetWorldSaveCompleted( bool & fCompleted )
-{
-        int iValue = 0;
-        if ( ! QuerySchemaValue( SCHEMA_WORLD_SAVEFLAG_ROW, iValue ))
-        {
-                return false;
-        }
-        fCompleted = ( iValue != 0 );
-        return true;
-}
-
-bool CWorldStorageMySQL::LoadWorldMetadata( int & saveCount, bool & fCompleted )
-{
-        if ( ! GetWorldSaveCount( saveCount ))
-        {
-                return false;
-        }
-        if ( ! GetWorldSaveCompleted( fCompleted ))
-        {
-                return false;
-        }
-        return true;
-}
-
-void CWorldStorageMySQL::UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts )
+void MySqlStorageService::UpdateAccountSyncTimestamp( const std::vector<AccountData> & accounts )
 {
         time_t tMax = ( m_tLastAccountSync > 0 ) ? ( m_tLastAccountSync - 1 ) : 0;
         bool fUpdated = false;
@@ -2369,7 +1332,7 @@ void CWorldStorageMySQL::UpdateAccountSyncTimestamp( const std::vector<AccountDa
         }
 }
 
-bool CWorldStorageMySQL::LoadAllAccounts( std::vector<AccountData> & accounts )
+bool MySqlStorageService::LoadAllAccounts( std::vector<AccountData> & accounts )
 {
         if ( ! FetchAccounts( accounts, CGString()))
         {
@@ -2380,7 +1343,7 @@ bool CWorldStorageMySQL::LoadAllAccounts( std::vector<AccountData> & accounts )
         return true;
 }
 
-bool CWorldStorageMySQL::LoadChangedAccounts( std::vector<AccountData> & accounts )
+bool MySqlStorageService::LoadChangedAccounts( std::vector<AccountData> & accounts )
 {
         if ( m_tLastAccountSync == 0 )
         {
@@ -2398,7 +1361,7 @@ bool CWorldStorageMySQL::LoadChangedAccounts( std::vector<AccountData> & account
         return true;
 }
 
-bool CWorldStorageMySQL::UpsertAccount( const CAccount & account )
+bool MySqlStorageService::UpsertAccount( const CAccount & account )
 {
         if ( ! IsConnected())
         {
@@ -2514,7 +1477,7 @@ bool CWorldStorageMySQL::UpsertAccount( const CAccount & account )
         return true;
 }
 
-bool CWorldStorageMySQL::DeleteAccount( const TCHAR * pszAccountName )
+bool MySqlStorageService::DeleteAccount( const TCHAR * pszAccountName )
 {
         if ( ! IsConnected() || pszAccountName == NULL || pszAccountName[0] == '\0' )
         {
@@ -2529,7 +1492,7 @@ bool CWorldStorageMySQL::DeleteAccount( const TCHAR * pszAccountName )
         return ExecuteQuery( sQuery );
 }
 
-bool CWorldStorageMySQL::SaveWorldObject( CObjBase * pObject )
+bool MySqlStorageService::SaveWorldObject( CObjBase * pObject )
 {
         if ( ! IsConnected() || pObject == NULL )
         {
@@ -2542,7 +1505,7 @@ bool CWorldStorageMySQL::SaveWorldObject( CObjBase * pObject )
         });
 }
 
-bool CWorldStorageMySQL::SaveWorldObjects( const std::vector<CObjBase*> & objects )
+bool MySqlStorageService::SaveWorldObjects( const std::vector<CObjBase*> & objects )
 {
         if ( ! IsConnected())
         {
@@ -2571,7 +1534,7 @@ bool CWorldStorageMySQL::SaveWorldObjects( const std::vector<CObjBase*> & object
         });
 }
 
-bool CWorldStorageMySQL::DeleteWorldObject( const CObjBase * pObject )
+bool MySqlStorageService::DeleteWorldObject( const CObjBase * pObject )
 {
         if ( ! IsConnected() || pObject == NULL )
         {
@@ -2593,112 +1556,21 @@ bool CWorldStorageMySQL::DeleteWorldObject( const CObjBase * pObject )
         });
 }
 
-bool CWorldStorageMySQL::DeleteObject( const CObjBase * pObject )
+bool MySqlStorageService::DeleteObject( const CObjBase * pObject )
 {
         return DeleteWorldObject( pObject );
 }
 
-void CWorldStorageMySQL::MarkObjectDirty( const CObjBase & object, StorageDirtyType type )
+void MySqlStorageService::MarkObjectDirty( const CObjBase & object, StorageDirtyType type )
 {
         if ( ! IsEnabled())
                 return;
 
         const unsigned long long uid = (unsigned long long) (UINT) object.GetUID();
-
-        std::unique_lock<std::mutex> lock( m_DirtyMutex );
-
-        if ( type == StorageDirtyType_Delete )
-        {
-                m_DirtyObjects.erase( uid );
-                return;
-        }
-
-        auto it = m_DirtyObjects.find( uid );
-        if ( it == m_DirtyObjects.end())
-        {
-                m_DirtyObjects.emplace( uid, StorageDirtyType_Save );
-                m_DirtyQueue.push_back( uid );
-                lock.unlock();
-                m_DirtyCondition.notify_one();
-                return;
-        }
-
-        if ( it->second != StorageDirtyType_Delete )
-        {
-                it->second = StorageDirtyType_Save;
-        }
+        m_DirtyQueue.Enqueue( uid, type );
 }
 
-void CWorldStorageMySQL::StartDirtyWorker()
-{
-        std::lock_guard<std::mutex> lock( m_DirtyMutex );
-        if ( m_fDirtyThreadRunning )
-                return;
-        m_fDirtyThreadStop = false;
-        m_DirtyThread = std::thread( &CWorldStorageMySQL::DirtyWorkerLoop, this );
-        m_fDirtyThreadRunning = true;
-}
-
-void CWorldStorageMySQL::StopDirtyWorker()
-{
-        {
-                std::lock_guard<std::mutex> lock( m_DirtyMutex );
-                if ( ! m_fDirtyThreadRunning )
-                        return;
-                m_fDirtyThreadStop = true;
-        }
-        m_DirtyCondition.notify_all();
-        if ( m_DirtyThread.joinable())
-        {
-                m_DirtyThread.join();
-        }
-        {
-                std::lock_guard<std::mutex> lock( m_DirtyMutex );
-                m_fDirtyThreadRunning = false;
-                m_fDirtyThreadStop = false;
-                m_DirtyQueue.clear();
-                m_DirtyObjects.clear();
-        }
-}
-
-void CWorldStorageMySQL::DirtyWorkerLoop()
-{
-        std::unique_lock<std::mutex> lock( m_DirtyMutex );
-        while ( true )
-        {
-                m_DirtyCondition.wait( lock, [this]()
-                {
-                        return m_fDirtyThreadStop || ! m_DirtyQueue.empty();
-                });
-
-                if ( m_fDirtyThreadStop && m_DirtyQueue.empty())
-                        break;
-
-                std::vector<std::pair<unsigned long long, StorageDirtyType>> batch;
-                while ( ! m_DirtyQueue.empty())
-                {
-                        unsigned long long uid = m_DirtyQueue.front();
-                        m_DirtyQueue.pop_front();
-                        auto it = m_DirtyObjects.find( uid );
-                        if ( it == m_DirtyObjects.end())
-                                continue;
-                        batch.emplace_back( uid, it->second );
-                        m_DirtyObjects.erase( it );
-                }
-
-                lock.unlock();
-                for ( const auto & entry : batch )
-                {
-                        if ( ! ProcessDirtyObject( entry.first, entry.second ))
-                        {
-                                g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.\n", entry.first );
-                        }
-                }
-                lock.lock();
-        }
-}
-
-bool CWorldStorageMySQL::ProcessDirtyObject( unsigned long long uid, StorageDirtyType type )
+bool MySqlStorageService::ProcessDirtyObject( unsigned long long uid, StorageDirtyType type )
 {
         if ( type != StorageDirtyType_Save )
                 return true;
@@ -2723,7 +1595,7 @@ bool CWorldStorageMySQL::ProcessDirtyObject( unsigned long long uid, StorageDirt
         return false;
 }
 
-bool CWorldStorageMySQL::SaveSector( const CSector & sector )
+bool MySqlStorageService::SaveSector( const CSector & sector )
 {
         if ( ! IsConnected())
         {
@@ -2781,17 +1653,17 @@ bool CWorldStorageMySQL::SaveSector( const CSector & sector )
         return ExecuteQuery( record.BuildInsert( false, true ));
 }
 
-bool CWorldStorageMySQL::SaveChar( CChar & character )
+bool MySqlStorageService::SaveChar( CChar & character )
 {
         return SaveWorldObject( &character );
 }
 
-bool CWorldStorageMySQL::SaveItem( CItem & item )
+bool MySqlStorageService::SaveItem( CItem & item )
 {
         return SaveWorldObject( &item );
 }
 
-bool CWorldStorageMySQL::SaveGMPage( const CGMPage & page )
+bool MySqlStorageService::SaveGMPage( const CGMPage & page )
 {
         if ( ! IsConnected())
         {
@@ -2835,7 +1707,7 @@ bool CWorldStorageMySQL::SaveGMPage( const CGMPage & page )
         return ExecuteQuery( record.BuildInsert( false, true ));
 }
 
-bool CWorldStorageMySQL::SaveServer( const CServRef & server )
+bool MySqlStorageService::SaveServer( const CServRef & server )
 {
         if ( ! IsConnected())
         {
@@ -2875,7 +1747,7 @@ bool CWorldStorageMySQL::SaveServer( const CServRef & server )
         return ExecuteQuery( record.BuildInsert( false, true ));
 }
 
-bool CWorldStorageMySQL::ClearGMPages()
+bool MySqlStorageService::ClearGMPages()
 {
         if ( ! IsConnected())
         {
@@ -2885,7 +1757,7 @@ bool CWorldStorageMySQL::ClearGMPages()
         return ClearTable( sGMPages );
 }
 
-bool CWorldStorageMySQL::ClearServers()
+bool MySqlStorageService::ClearServers()
 {
         if ( ! IsConnected())
         {
@@ -2895,7 +1767,7 @@ bool CWorldStorageMySQL::ClearServers()
         return ClearTable( sServers );
 }
 
-bool CWorldStorageMySQL::ClearWorldData()
+bool MySqlStorageService::ClearWorldData()
 {
         if ( ! IsConnected())
         {
@@ -2939,7 +1811,7 @@ bool CWorldStorageMySQL::ClearWorldData()
         });
 }
 
-bool CWorldStorageMySQL::LoadSectors( std::vector<SectorData> & sectors )
+bool MySqlStorageService::LoadSectors( std::vector<SectorData> & sectors )
 {
         sectors.clear();
         if ( ! IsConnected())
@@ -2988,7 +1860,7 @@ bool CWorldStorageMySQL::LoadSectors( std::vector<SectorData> & sectors )
         return true;
 }
 
-bool CWorldStorageMySQL::LoadWorldObjects( std::vector<WorldObjectRecord> & objects )
+bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & objects )
 {
         objects.clear();
         if ( ! IsConnected())
@@ -3035,7 +1907,7 @@ bool CWorldStorageMySQL::LoadWorldObjects( std::vector<WorldObjectRecord> & obje
         return true;
 }
 
-bool CWorldStorageMySQL::LoadGMPages( std::vector<GMPageRecord> & pages )
+bool MySqlStorageService::LoadGMPages( std::vector<GMPageRecord> & pages )
 {
         pages.clear();
         if ( ! IsConnected())
@@ -3088,7 +1960,7 @@ bool CWorldStorageMySQL::LoadGMPages( std::vector<GMPageRecord> & pages )
         return true;
 }
 
-bool CWorldStorageMySQL::LoadServers( std::vector<ServerRecord> & servers )
+bool MySqlStorageService::LoadServers( std::vector<ServerRecord> & servers )
 {
         servers.clear();
         if ( ! IsConnected())
@@ -3140,7 +2012,7 @@ bool CWorldStorageMySQL::LoadServers( std::vector<ServerRecord> & servers )
         return true;
 }
 
-CGString CWorldStorageMySQL::GetAccountNameById( unsigned int accountId )
+CGString MySqlStorageService::GetAccountNameById( unsigned int accountId )
 {
         if ( accountId == 0 )
         {
@@ -3170,7 +2042,7 @@ CGString CWorldStorageMySQL::GetAccountNameById( unsigned int accountId )
         return sName;
 }
 
-bool CWorldStorageMySQL::SaveWorldObjectInternal( CObjBase * pObject )
+bool MySqlStorageService::SaveWorldObjectInternal( CObjBase * pObject )
 {
         if ( pObject == NULL )
         {
@@ -3203,7 +2075,7 @@ bool CWorldStorageMySQL::SaveWorldObjectInternal( CObjBase * pObject )
         return true;
 }
 
-bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const
+bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const
 {
         if ( pObject == NULL )
         {
@@ -3247,7 +2119,7 @@ bool CWorldStorageMySQL::SerializeWorldObject( CObjBase * pObject, CGString & ou
         return true;
 }
 
-bool CWorldStorageMySQL::ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const
+bool MySqlStorageService::ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const
 {
         std::string sTempPath;
         if ( ! GenerateTempScriptPath( sTempPath ))
@@ -3286,7 +2158,7 @@ bool CWorldStorageMySQL::ApplyWorldObjectData( CObjBase & object, const CGString
         return fResult;
 }
 
-bool CWorldStorageMySQL::UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized )
+bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized )
 {
         (void) serialized;
 
@@ -3398,7 +2270,7 @@ bool CWorldStorageMySQL::UpsertWorldObjectMeta( CObjBase * pObject, const CGStri
         return ExecuteQuery( record.BuildInsert( false, true ));
 }
 
-bool CWorldStorageMySQL::UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized )
+bool MySqlStorageService::UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized )
 {
         if ( pObject == NULL )
         {
@@ -3425,7 +2297,7 @@ bool CWorldStorageMySQL::UpsertWorldObjectData( const CObjBase * pObject, const 
         return ExecuteQuery( record.BuildInsert( true, false ));
 }
 
-bool CWorldStorageMySQL::RefreshWorldObjectComponents( const CObjBase * pObject )
+bool MySqlStorageService::RefreshWorldObjectComponents( const CObjBase * pObject )
 {
         if ( pObject == NULL )
         {
@@ -3458,7 +2330,7 @@ bool CWorldStorageMySQL::RefreshWorldObjectComponents( const CObjBase * pObject 
         return ExecuteRecordsInsert( records );
 }
 
-bool CWorldStorageMySQL::RefreshWorldObjectRelations( const CObjBase * pObject )
+bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject )
 {
         if ( pObject == NULL )
         {
@@ -3507,121 +2379,115 @@ bool CWorldStorageMySQL::RefreshWorldObjectRelations( const CObjBase * pObject )
         return ExecuteRecordsInsert( records );
 }
 
-bool CWorldStorageMySQL::IsLegacyImportCompleted()
-{
-        const CGString sTable = GetPrefixedTableName( "schema_version" );
-
-        CGString sQuery;
-        sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;", (const char *) sTable, SCHEMA_IMPORT_ROW );
-
-        std::unique_ptr<Storage::IDatabaseResult> result;
-        if ( ! Query( sQuery, &result ))
-        {
-                return false;
-        }
-
-        bool fCompleted = false;
-        if ( result && result->IsValid())
-        {
-                Storage::IDatabaseResult::Row pRow = result->FetchRow();
-                if ( pRow != NULL && pRow[0] != NULL )
-                {
-                        fCompleted = ( atoi( pRow[0] ) != 0 );
-                }
-        }
-        return fCompleted;
-}
-
-bool CWorldStorageMySQL::SetLegacyImportCompleted()
-{
-        const CGString sTable = GetPrefixedTableName( "schema_version" );
-
-        CGString sQuery;
-        sQuery.Format( "UPDATE `%s` SET `version` = 1 WHERE `id` = %d;", (const char *) sTable, SCHEMA_IMPORT_ROW );
-        return ExecuteQuery( sQuery );
-}
-
-bool CWorldStorageMySQL::ApplyMigration( int fromVersion )
-{
-        switch ( fromVersion )
-        {
-        case 0:
-                if ( ! ApplyMigration_0_1())
-                {
-                        return false;
-                }
-                if ( ! SetSchemaVersion( 1 ))
-                {
-                        return false;
-                }
-                break;
-
-        case 1:
-                if ( ! ApplyMigration_1_2())
-                {
-                        return false;
-                }
-                if ( ! SetSchemaVersion( 2 ))
-                {
-                        return false;
-                }
-                break;
-
-        case 2:
-                if ( ! ApplyMigration_2_3())
-                {
-                        return false;
-                }
-                if ( ! SetSchemaVersion( 3 ))
-                {
-                        return false;
-                }
-                break;
-
-        default:
-                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Unknown MySQL schema migration from version %d.\n", fromVersion );
-                return false;
-        }
-
-	return true;
-}
-
-bool CWorldStorageMySQL::EnsureSchema()
-{
-        if ( ! IsConnected())
-        {
-                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Cannot ensure schema without an active MySQL connection.\n" );
-                return false;
-        }
-
-        if ( ! EnsureSchemaVersionTable())
-        {
-                return false;
-        }
-
-        int iVersion = GetSchemaVersion();
-        if ( iVersion < 0 )
-        {
-                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to read MySQL schema version.\n" );
-                return false;
-        }
-
-        while ( iVersion < CURRENT_SCHEMA_VERSION )
-        {
-                if ( ! ApplyMigration( iVersion ))
-                {
-                        return false;
-                }
-                iVersion = GetSchemaVersion();
-                if ( iVersion < 0 )
-                {
-                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to read MySQL schema version after migration.\n" );
-                        return false;
-                }
-        }
-
-        return true;
-}
-
 #endif // UNIT_TEST
+
+bool MySqlStorageService::EnsureSchemaVersionTable()
+{
+        return m_SchemaManager.EnsureSchemaVersionTable(*this);
+}
+
+int MySqlStorageService::GetSchemaVersion()
+{
+        return m_SchemaManager.GetSchemaVersion(*this);
+}
+
+bool MySqlStorageService::SetSchemaVersion(int version)
+{
+        return m_SchemaManager.SetSchemaVersion(*this, version);
+}
+
+bool MySqlStorageService::ApplyMigration_0_1()
+{
+        return m_SchemaManager.ApplyMigration_0_1(*this);
+}
+
+bool MySqlStorageService::ApplyMigration_1_2()
+{
+        return m_SchemaManager.ApplyMigration_1_2(*this);
+}
+
+bool MySqlStorageService::ApplyMigration_2_3()
+{
+        return m_SchemaManager.ApplyMigration_2_3(*this);
+}
+
+bool MySqlStorageService::EnsureColumnExists(const CGString & table, const char * column, const char * definition)
+{
+        return m_SchemaManager.EnsureColumnExists(*this, table, column, definition);
+}
+
+bool MySqlStorageService::ColumnExists(const CGString & table, const char * column) const
+{
+        return m_SchemaManager.ColumnExists(*this, table, column);
+}
+
+bool MySqlStorageService::InsertOrUpdateSchemaValue(int id, int value)
+{
+        return m_SchemaManager.InsertOrUpdateSchemaValue(*this, id, value);
+}
+
+bool MySqlStorageService::QuerySchemaValue(int id, int & value)
+{
+        return m_SchemaManager.QuerySchemaValue(*this, id, value);
+}
+
+bool MySqlStorageService::EnsureSectorColumns()
+{
+        return m_SchemaManager.EnsureSectorColumns(*this);
+}
+
+bool MySqlStorageService::EnsureGMPageColumns()
+{
+        return m_SchemaManager.EnsureGMPageColumns(*this);
+}
+
+bool MySqlStorageService::EnsureServerColumns()
+{
+        return m_SchemaManager.EnsureServerColumns(*this);
+}
+
+bool MySqlStorageService::ApplyMigration(int fromVersion)
+{
+        return m_SchemaManager.ApplyMigration(*this, fromVersion);
+}
+
+bool MySqlStorageService::EnsureSchema()
+{
+        return m_SchemaManager.EnsureSchema(*this);
+}
+
+bool MySqlStorageService::IsLegacyImportCompleted()
+{
+        return m_SchemaManager.IsLegacyImportCompleted(*this);
+}
+
+bool MySqlStorageService::SetLegacyImportCompleted()
+{
+        return m_SchemaManager.SetLegacyImportCompleted(*this);
+}
+
+bool MySqlStorageService::SetWorldSaveCount(int saveCount)
+{
+        return m_SchemaManager.SetWorldSaveCount(*this, saveCount);
+}
+
+bool MySqlStorageService::GetWorldSaveCount(int & saveCount)
+{
+        return m_SchemaManager.GetWorldSaveCount(*this, saveCount);
+}
+
+bool MySqlStorageService::SetWorldSaveCompleted(bool fCompleted)
+{
+        return m_SchemaManager.SetWorldSaveCompleted(*this, fCompleted);
+}
+
+bool MySqlStorageService::GetWorldSaveCompleted(bool & fCompleted)
+{
+        return m_SchemaManager.GetWorldSaveCompleted(*this, fCompleted);
+}
+
+bool MySqlStorageService::LoadWorldMetadata(int & saveCount, bool & fCompleted)
+{
+        return m_SchemaManager.LoadWorldMetadata(*this, saveCount, fCompleted);
+}
 

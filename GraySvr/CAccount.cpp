@@ -13,7 +13,7 @@ void globalstartsymbol()	// put this here as just the starting offset.
 
 bool CWorld::LoadAccounts( bool fChanges, bool fClearChanges )
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage && pStorage->IsConnected())
         {
                 return LoadAccountsMySQL( fChanges, fClearChanges );
@@ -94,7 +94,7 @@ bool CWorld::LoadAccountsFromScripts( bool fChanges, bool fClearChanges )
 
 bool CWorld::LoadAccountsMySQL( bool fChanges, bool fClearChanges )
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage == NULL || ! pStorage->IsConnected())
         {
                 return false;
@@ -113,7 +113,7 @@ bool CWorld::LoadAccountsMySQL( bool fChanges, bool fClearChanges )
                 }
         }
 
-        std::vector<CWorldStorageMySQL::AccountData> accounts;
+        std::vector<MySqlStorageService::AccountData> accounts;
         bool fResult = fChanges ? pStorage->LoadChangedAccounts( accounts ) : pStorage->LoadAllAccounts( accounts );
         if ( ! fResult )
         {
@@ -122,7 +122,7 @@ bool CWorld::LoadAccountsMySQL( bool fChanges, bool fClearChanges )
 
         for ( size_t i = 0; i < accounts.size(); ++i )
         {
-                const CWorldStorageMySQL::AccountData & data = accounts[i];
+                const MySqlStorageService::AccountData & data = accounts[i];
                 CAccount * pAccount = AccountFind( (const TCHAR *) data.m_sName, true );
                 ASSERT( pAccount );
                 ApplyAccountData( *pAccount, data );
@@ -133,7 +133,7 @@ bool CWorld::LoadAccountsMySQL( bool fChanges, bool fClearChanges )
 
 bool CWorld::ImportLegacyAccountsToMySQL()
 {
-	CWorldStorageMySQL * pStorage = Storage();
+	MySqlStorageService * pStorage = Storage();
 	if ( pStorage == NULL || ! pStorage->IsConnected())
 	{
 		return false;
@@ -144,7 +144,7 @@ bool CWorld::ImportLegacyAccountsToMySQL()
 		return true;
 	}
 
-	std::vector<CWorldStorageMySQL::AccountData> existing;
+	std::vector<MySqlStorageService::AccountData> existing;
 	if ( ! pStorage->LoadAllAccounts( existing ))
 	{
 		return false;
@@ -194,7 +194,7 @@ bool CWorld::ImportLegacyAccountsToMySQL()
 }
 
 
-void CWorld::ApplyAccountData( CAccount & account, const CWorldStorageMySQL::AccountData & data )
+void CWorld::ApplyAccountData( CAccount & account, const MySqlStorageService::AccountData & data )
 {
         account.SetPassword( data.m_sPassword );
 
@@ -292,7 +292,7 @@ void CWorld::ApplyAccountData( CAccount & account, const CWorldStorageMySQL::Acc
 
 bool CWorld::SaveAccounts()
 {
-        CWorldStorageMySQL * pStorage = Storage();
+        MySqlStorageService * pStorage = Storage();
         if ( pStorage && pStorage->IsConnected())
         {
                 bool fSuccess = true;
@@ -771,7 +771,7 @@ void CAccount::RequestStorageUpdate()
 {
 	if ( g_Serv.IsLoading())
 		return;
-	CWorldStorageMySQL * pStorage = g_World.Storage();
+	MySqlStorageService * pStorage = g_World.Storage();
 	if ( pStorage == NULL || ! pStorage->IsEnabled())
 		return;
 	if ( ! pStorage->UpsertAccount( *this ))
@@ -906,7 +906,7 @@ bool CAccount::r_Load( CScript & s )
 {
         bool fRes = CScriptObj::r_Load( s );
 
-        CWorldStorageMySQL * pStorage = g_World.Storage();
+        MySqlStorageService * pStorage = g_World.Storage();
         if ( pStorage && pStorage->IsConnected())
         {
                 if ( ! pStorage->UpsertAccount( *this ))
@@ -1116,7 +1116,7 @@ plevel:
 
 void CAccount::r_Write( CScript & s )
 {
-        CWorldStorageMySQL * pStorage = g_World.Storage();
+        MySqlStorageService * pStorage = g_World.Storage();
         if ( pStorage && pStorage->IsConnected())
         {
                 if ( ! pStorage->UpsertAccount( *this ))
@@ -1241,7 +1241,7 @@ bool CAccount::r_Verb( CScript &s, CTextConsole * pSrc )
 			if ( pClient->GetAccount() == this ) // deleting myself at this point is bad.
 				return( false );
 		}
-		CWorldStorageMySQL * pStorage = g_World.Storage();
+		MySqlStorageService * pStorage = g_World.Storage();
 		if ( pStorage && pStorage->IsConnected())
 		{
 			if ( ! pStorage->DeleteAccount( GetName()))

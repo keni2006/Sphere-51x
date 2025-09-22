@@ -67,7 +67,7 @@ Additional tuning knobs such as automatic reconnect behaviour live in the
 1. Configure the keys above and make sure the MySQL user can create tables in
    the target schema.
 2. Start the server. During the first boot the migrations defined in
-   `GraySvr/CWorldStorageMySQL.cpp` will create all tables (see also
+   `GraySvr/MySqlStorageService.cpp` will create all tables (see also
    `docs/mysql-schema.sql`).
 3. Account data is imported automatically the first time the server connects to
    MySQL while the legacy `sphereaccu.scp` file is still present. Existing
