@@ -69,6 +69,10 @@ lives across `GraySvr/MySqlStorageService.cpp`,
 4. Trigger a world save (`SAVE 0`) or wait for the background saver to run. The
    repository layer writes `world_objects`, `world_object_data` and related tables
    using prepared statements.
+   - Existing installations that previously used the `type` column on
+     `<prefix>world_object_relations` are automatically migrated. The schema
+     manager renames the legacy column to `relation` so existing relationship
+     data continues to load before the first save touches the table.
 5. Inspect the migration status:
 
    ```sql
