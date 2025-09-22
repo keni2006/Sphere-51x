@@ -189,6 +189,20 @@ public:
         {
                 return Start( config );
         }
+        /**
+        * \brief Gracefully closes any active connections and background workers.
+        *
+        * The legacy storage code in the world loader still expects a Disconnect()
+        * method.  The modern implementation relies on Stop(), therefore we
+        * provide a small forwarding helper so both names remain valid.
+        */
+        void Disconnect()
+        {
+                Stop();
+        }
+        /**
+        * \brief Stops the storage subsystem and closes every active resource.
+        */
         void Stop();
         bool IsConnected() const;
         bool IsEnabled() const;
