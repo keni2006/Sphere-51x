@@ -4,6 +4,8 @@
 #include <mysql/mysql.h>
 #include <cstring>
 #include <cstdlib>
+#include <string>
+#include <vector>
 
 CLog g_Log;
 CServer g_Serv;
@@ -15,6 +17,7 @@ namespace
         char g_error_message[256] = "stub";
         unsigned long g_escape_written = 0;
         bool g_query_called = false;
+        std::vector<std::string> g_executed_queries;
 }
 
 bool WasMysqlQueryCalled()
@@ -25,6 +28,12 @@ bool WasMysqlQueryCalled()
 void ResetMysqlQueryFlag()
 {
         g_query_called = false;
+        g_executed_queries.clear();
+}
+
+const std::vector<std::string> & GetExecutedMysqlQueries()
+{
+        return g_executed_queries;
 }
 
 void Assert_CheckFail( const char *, const char *, unsigned )
@@ -102,9 +111,13 @@ extern "C"
                 return g_error_message;
         }
 
-        int mysql_query( MYSQL *, const char * )
+        int mysql_query( MYSQL *, const char * query )
         {
                 g_query_called = true;
+                if ( query != nullptr )
+                {
+                        g_executed_queries.emplace_back( query );
+                }
                 return 0;
         }
 

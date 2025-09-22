@@ -20,7 +20,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <arpa/inet.h>
 #include <fstream>
+#include <iomanip>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -182,6 +184,230 @@ WORD GetMySQLErrorLogMask( LOGL_TYPE level )
         }
         return wMask;
 }
+
+        std::string FormatByteString( const std::string & value )
+        {
+                if ( value.empty())
+                {
+                        return "(empty)";
+                }
+
+                std::ostringstream stream;
+                stream << std::uppercase << std::hex << std::setfill( '0' );
+                for ( size_t i = 0; i < value.size(); ++i )
+                {
+                        if ( i > 0 )
+                        {
+                                stream << ' ';
+                        }
+                        stream << "0x" << std::setw( 2 ) << static_cast<int>( static_cast<unsigned char>( value[i] ));
+                }
+                return stream.str();
+        }
+
+        void AppendUtf8( std::string & output, uint32_t codepoint )
+        {
+                if ( codepoint <= 0x7Fu )
+                {
+                        output.push_back( static_cast<char>( codepoint ));
+                }
+                else if ( codepoint <= 0x7FFu )
+                {
+                        output.push_back( static_cast<char>( 0xC0u | (( codepoint >> 6 ) & 0x1Fu )));
+                        output.push_back( static_cast<char>( 0x80u | ( codepoint & 0x3Fu )));
+                }
+                else if ( codepoint <= 0xFFFFu )
+                {
+                        output.push_back( static_cast<char>( 0xE0u | (( codepoint >> 12 ) & 0x0Fu )));
+                        output.push_back( static_cast<char>( 0x80u | (( codepoint >> 6 ) & 0x3Fu )));
+                        output.push_back( static_cast<char>( 0x80u | ( codepoint & 0x3Fu )));
+                }
+                else if ( codepoint <= 0x10FFFFu )
+                {
+                        output.push_back( static_cast<char>( 0xF0u | (( codepoint >> 18 ) & 0x07u )));
+                        output.push_back( static_cast<char>( 0x80u | (( codepoint >> 12 ) & 0x3Fu )));
+                        output.push_back( static_cast<char>( 0x80u | (( codepoint >> 6 ) & 0x3Fu )));
+                        output.push_back( static_cast<char>( 0x80u | ( codepoint & 0x3Fu )));
+                }
+        }
+
+        bool IsValidUtf8( const std::string & value )
+        {
+                size_t i = 0;
+                const size_t length = value.size();
+                while ( i < length )
+                {
+                        unsigned char ch = static_cast<unsigned char>( value[i] );
+                        if ( ch <= 0x7Fu )
+                        {
+                                ++i;
+                                continue;
+                        }
+
+                        size_t remaining = 0;
+                        uint32_t codepoint = 0;
+                        if (( ch & 0xE0u ) == 0xC0u )
+                        {
+                                remaining = 1;
+                                codepoint = ch & 0x1Fu;
+                        }
+                        else if (( ch & 0xF0u ) == 0xE0u )
+                        {
+                                remaining = 2;
+                                codepoint = ch & 0x0Fu;
+                        }
+                        else if (( ch & 0xF8u ) == 0xF0u )
+                        {
+                                remaining = 3;
+                                codepoint = ch & 0x07u;
+                        }
+                        else
+                        {
+                                return false;
+                        }
+
+                        if ( i + remaining >= length )
+                        {
+                                return false;
+                        }
+
+                        for ( size_t j = 0; j < remaining; ++j )
+                        {
+                                unsigned char continuation = static_cast<unsigned char>( value[i + j + 1] );
+                                if (( continuation & 0xC0u ) != 0x80u )
+                                {
+                                        return false;
+                                }
+                                codepoint = static_cast<uint32_t>(( codepoint << 6 ) | ( continuation & 0x3Fu ));
+                        }
+
+                        switch ( remaining )
+                        {
+                        case 1:
+                                if ( codepoint < 0x80u )
+                                {
+                                        return false;
+                                }
+                                break;
+                        case 2:
+                                if ( codepoint < 0x800u )
+                                {
+                                        return false;
+                                }
+                                break;
+                        case 3:
+                                if ( codepoint < 0x10000u )
+                                {
+                                        return false;
+                                }
+                                break;
+                        default:
+                                return false;
+                        }
+
+                        if ( codepoint > 0x10FFFFu )
+                        {
+                                return false;
+                        }
+                        if ( codepoint >= 0xD800u && codepoint <= 0xDFFFu )
+                        {
+                                return false;
+                        }
+
+                        i += remaining + 1;
+                }
+
+                return true;
+        }
+
+        std::string ConvertWindows1251ToUtf8( const std::string & value )
+        {
+                static const uint16_t WINDOWS1251_TABLE[128] =
+                {
+                        0x0402u, 0x0403u, 0x201Au, 0x0453u, 0x201Eu, 0x2026u, 0x2020u, 0x2021u,
+                        0x20ACu, 0x2030u, 0x0409u, 0x2039u, 0x040Au, 0x040Cu, 0x040Bu, 0x040Fu,
+                        0x0452u, 0x2018u, 0x2019u, 0x201Cu, 0x201Du, 0x2022u, 0x2013u, 0x2014u,
+                        0x0098u, 0x2122u, 0x0459u, 0x203Au, 0x045Au, 0x045Cu, 0x045Bu, 0x045Fu,
+                        0x00A0u, 0x040Eu, 0x045Eu, 0x0408u, 0x00A4u, 0x0490u, 0x00A6u, 0x00A7u,
+                        0x0401u, 0x00A9u, 0x0404u, 0x00ABu, 0x00ACu, 0x00ADu, 0x00AEu, 0x0407u,
+                        0x00B0u, 0x00B1u, 0x0406u, 0x0456u, 0x0491u, 0x00B5u, 0x00B6u, 0x00B7u,
+                        0x0451u, 0x2116u, 0x0454u, 0x00BBu, 0x0458u, 0x0405u, 0x0455u, 0x0457u,
+                        0x0410u, 0x0411u, 0x0412u, 0x0413u, 0x0414u, 0x0415u, 0x0416u, 0x0417u,
+                        0x0418u, 0x0419u, 0x041Au, 0x041Bu, 0x041Cu, 0x041Du, 0x041Eu, 0x041Fu,
+                        0x0420u, 0x0421u, 0x0422u, 0x0423u, 0x0424u, 0x0425u, 0x0426u, 0x0427u,
+                        0x0428u, 0x0429u, 0x042Au, 0x042Bu, 0x042Cu, 0x042Du, 0x042Eu, 0x042Fu,
+                        0x0430u, 0x0431u, 0x0432u, 0x0433u, 0x0434u, 0x0435u, 0x0436u, 0x0437u,
+                        0x0438u, 0x0439u, 0x043Au, 0x043Bu, 0x043Cu, 0x043Du, 0x043Eu, 0x043Fu,
+                        0x0440u, 0x0441u, 0x0442u, 0x0443u, 0x0444u, 0x0445u, 0x0446u, 0x0447u,
+                        0x0448u, 0x0449u, 0x044Au, 0x044Bu, 0x044Cu, 0x044Du, 0x044Eu, 0x044Fu
+                };
+
+                std::string output;
+                output.reserve( value.size() * 2 );
+                for ( unsigned char ch : value )
+                {
+                        if ( ch < 0x80u )
+                        {
+                                output.push_back( static_cast<char>( ch ));
+                        }
+                        else
+                        {
+                                uint32_t codepoint = WINDOWS1251_TABLE[ch - 0x80u];
+                                AppendUtf8( output, codepoint );
+                        }
+                }
+                return output;
+        }
+
+        std::string SanitizeIdentifierToken( const std::string & value )
+        {
+                std::string sanitized;
+                sanitized.reserve( value.size());
+                for ( unsigned char ch : value )
+                {
+                        if ( ch == '_' || std::isalnum( ch ))
+                        {
+                                sanitized.push_back( static_cast<char>( ch ));
+                        }
+                }
+                return sanitized;
+        }
+
+        struct TablePrefixNormalizationResult
+        {
+                std::string m_sNormalized;
+                bool m_fChanged;
+                const char * m_pszReason;
+        };
+
+        TablePrefixNormalizationResult NormalizeMySqlTablePrefix( const std::string & rawPrefix )
+        {
+                TablePrefixNormalizationResult result{ rawPrefix, false, NULL };
+                if ( rawPrefix.empty())
+                {
+                        return result;
+                }
+
+                if ( IsValidUtf8( rawPrefix ))
+                {
+                        return result;
+                }
+
+                std::string converted = ConvertWindows1251ToUtf8( rawPrefix );
+                if ( IsValidUtf8( converted ))
+                {
+                        result.m_sNormalized = std::move( converted );
+                        result.m_fChanged = ( result.m_sNormalized != rawPrefix );
+                        result.m_pszReason = "Converted Windows-1251 bytes to UTF-8";
+                        return result;
+                }
+
+                std::string sanitized = SanitizeIdentifierToken( rawPrefix );
+                result.m_fChanged = ( sanitized != rawPrefix );
+                result.m_sNormalized = std::move( sanitized );
+                result.m_pszReason = "Removed unsupported characters from table prefix";
+                return result;
+        }
 }
 
 class MariaDbException : public std::runtime_error
@@ -559,7 +785,7 @@ void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
         g_Log.Event( GetMySQLErrorLogMask( level ), "MySQL %s error (%u): %s\n", ex.GetContext().c_str(), ex.GetCode(), ex.what());
 }
 
-#ifndef UNIT_TEST
+#if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
 
 CWorldStorageMySQL::Transaction::Transaction( CWorldStorageMySQL & storage, bool fAutoBegin ) :
         m_Storage( storage ),
@@ -824,7 +1050,7 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & wher
         return sQuery;
 }
 
-#endif // UNIT_TEST
+#endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
 CWorldStorageMySQL::CWorldStorageMySQL()
 {
@@ -856,7 +1082,25 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 return false;
         }
 
-        m_sTablePrefix = config.m_sTablePrefix;
+        std::string rawTablePrefix;
+        if ( !config.m_sTablePrefix.IsEmpty())
+        {
+                rawTablePrefix.assign( static_cast<const char *>( config.m_sTablePrefix ));
+        }
+
+        TablePrefixNormalizationResult prefixNormalization = NormalizeMySqlTablePrefix( rawTablePrefix );
+        if ( prefixNormalization.m_fChanged )
+        {
+                const char * reason = ( prefixNormalization.m_pszReason != NULL ) ? prefixNormalization.m_pszReason : "Normalized MySQL table prefix";
+                std::string normalizedLogValue = prefixNormalization.m_sNormalized.empty() ? std::string( "(empty)" ) : prefixNormalization.m_sNormalized;
+                g_Log.Event( LOGM_INIT|LOGL_WARN,
+                        "Normalized MySQL table prefix bytes (%s) to \"%s\" (%s).",
+                        FormatByteString( rawTablePrefix ).c_str(),
+                        normalizedLogValue.c_str(),
+                        reason );
+        }
+
+        m_sTablePrefix = prefixNormalization.m_sNormalized.c_str();
         m_fAutoReconnect = config.m_fAutoReconnect;
         m_iReconnectTries = config.m_iReconnectTries;
         m_iReconnectDelay = config.m_iReconnectDelay;
@@ -1082,7 +1326,141 @@ void CWorldStorageMySQL::Disconnect()
         m_iTransactionDepth = 0;
 }
 
-#ifndef UNIT_TEST
+CGString CWorldStorageMySQL::BuildSchemaVersionCreateQuery() const
+{
+        CGString sTableName;
+        sTableName.Format( "%s%s", (const char *) m_sTablePrefix, "schema_version" );
+
+        const char * pszCharset = m_sTableCharset.IsEmpty() ? "utf8mb4" : (const char *) m_sTableCharset;
+        CGString sCollationSuffix;
+        if ( !m_sTableCollation.IsEmpty())
+        {
+                sCollationSuffix.Format( " COLLATE=%s", (const char *) m_sTableCollation );
+        }
+
+        CGString sQuery;
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` ("
+                "`id` INT NOT NULL,"
+                "`version` INT NOT NULL,"
+                "PRIMARY KEY (`id`)"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sTableName,
+                pszCharset,
+                (const char *) sCollationSuffix );
+        return sQuery;
+}
+
+#ifdef UNIT_TEST
+bool CWorldStorageMySQL::DebugExecuteQuery( const CGString & query )
+{
+        if ( !m_pConnection )
+        {
+                return false;
+        }
+
+        try
+        {
+                m_pConnection->Execute( query );
+                return true;
+        }
+        catch ( const MariaDbException & ex )
+        {
+                LogMariaDbException( ex, LOGL_ERROR );
+        }
+        return false;
+}
+#endif
+
+CGString CWorldStorageMySQL::EscapeString( const TCHAR * pszInput ) const
+{
+        CGString sResult;
+        if ( pszInput == NULL )
+        {
+                return sResult;
+        }
+
+        size_t uiLength = strlen( pszInput );
+        if ( uiLength == 0 )
+        {
+                return sResult;
+        }
+
+        if ( ! IsConnected())
+        {
+                sResult = pszInput;
+                return sResult;
+        }
+
+        std::string escaped = m_pConnection->EscapeString( pszInput, uiLength );
+        sResult = escaped.c_str();
+        return sResult;
+}
+
+CGString CWorldStorageMySQL::FormatStringValue( const CGString & value ) const
+{
+        CGString sEscaped = EscapeString( (const TCHAR *) value );
+        CGString sResult;
+        sResult.Format( "'%s'", (const char *) sEscaped );
+        return sResult;
+}
+
+CGString CWorldStorageMySQL::FormatOptionalStringValue( const CGString & value ) const
+{
+        if ( value.IsEmpty())
+        {
+                return CGString( "NULL" );
+        }
+        return FormatStringValue( value );
+}
+
+CGString CWorldStorageMySQL::FormatDateTimeValue( const CGString & value ) const
+{
+        if ( value.IsEmpty())
+        {
+                return CGString( "NULL" );
+        }
+        return FormatStringValue( value );
+}
+
+CGString CWorldStorageMySQL::FormatDateTimeValue( const CRealTime & value ) const
+{
+        if ( ! value.IsValid())
+        {
+                return CGString( "NULL" );
+        }
+
+        CGString sTemp;
+        sTemp.Format( "%04d-%02d-%02d %02d:%02d:%02d",
+                1900 + value.m_Year, value.m_Month + 1, value.m_Day,
+                value.m_Hour, value.m_Min, value.m_Sec );
+        return FormatStringValue( sTemp );
+}
+
+CGString CWorldStorageMySQL::FormatIPAddressValue( const CGString & value ) const
+{
+        if ( value.IsEmpty())
+        {
+                return CGString( "NULL" );
+        }
+        return FormatStringValue( value );
+}
+
+CGString CWorldStorageMySQL::FormatIPAddressValue( const struct in_addr & value ) const
+{
+        if ( value.s_addr == 0 )
+        {
+                return CGString( "NULL" );
+        }
+        const char * pszIP = inet_ntoa( value );
+        if ( pszIP == NULL )
+        {
+                return CGString( "NULL" );
+        }
+        return FormatStringValue( CGString( pszIP ));
+}
+
+#if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
 
 bool CWorldStorageMySQL::IsConnected() const
 {
@@ -1321,21 +1699,11 @@ bool CWorldStorageMySQL::EnsureSchemaVersionTable()
 {
         const CGString sTableName = GetPrefixedTableName( "schema_version" );
 
-        CGString sQuery;
-        CGString sCollationSuffix = GetDefaultTableCollationSuffix();
-        sQuery.Format(
-"CREATE TABLE IF NOT EXISTS `%s` ("
-"`id` INT NOT NULL,"
-"`version` INT NOT NULL,"
-"PRIMARY KEY (`id`)"
-") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
-(const char *) sTableName,
-GetDefaultTableCharset(),
-(const char *) sCollationSuffix);
-	if ( ! ExecuteQuery( sQuery ))
-	{
-		return false;
-	}
+        CGString sQuery = BuildSchemaVersionCreateQuery();
+        if ( ! ExecuteQuery( sQuery ))
+        {
+                return false;
+        }
 
 	sQuery.Format( "INSERT IGNORE INTO `%s` (`id`, `version`) VALUES (%d, 0);",
 		(const char *) sTableName, SCHEMA_VERSION_ROW );
@@ -1351,12 +1719,16 @@ GetDefaultTableCharset(),
 		return false;
 	}
 
-	return true;
+        return true;
 }
+
+#endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
+
+#ifndef UNIT_TEST
 
 int CWorldStorageMySQL::GetSchemaVersion()
 {
-	const CGString sTableName = GetPrefixedTableName( "schema_version" );
+        const CGString sTableName = GetPrefixedTableName( "schema_version" );
 
 	CGString sQuery;
 	sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;",
@@ -1978,94 +2350,6 @@ bool CWorldStorageMySQL::EnsureServerColumns()
 
         s_fEnsured = true;
         return true;
-}
-
-CGString CWorldStorageMySQL::EscapeString( const TCHAR * pszInput ) const
-{
-        CGString sResult;
-        if ( pszInput == NULL )
-        {
-                return sResult;
-        }
-
-        size_t uiLength = strlen( pszInput );
-        if ( uiLength == 0 )
-        {
-                return sResult;
-        }
-
-        if ( ! IsConnected())
-        {
-                sResult = pszInput;
-                return sResult;
-        }
-
-        std::string escaped = m_pConnection->EscapeString( pszInput, uiLength );
-        sResult = escaped.c_str();
-        return sResult;
-}
-
-CGString CWorldStorageMySQL::FormatStringValue( const CGString & value ) const
-{
-        CGString sEscaped = EscapeString( (const TCHAR *) value );
-        CGString sResult;
-        sResult.Format( "'%s'", (const char *) sEscaped );
-        return sResult;
-}
-
-CGString CWorldStorageMySQL::FormatOptionalStringValue( const CGString & value ) const
-{
-        if ( value.IsEmpty())
-        {
-                return CGString( "NULL" );
-        }
-        return FormatStringValue( value );
-}
-
-CGString CWorldStorageMySQL::FormatDateTimeValue( const CGString & value ) const
-{
-        if ( value.IsEmpty())
-        {
-                return CGString( "NULL" );
-        }
-        return FormatStringValue( value );
-}
-
-CGString CWorldStorageMySQL::FormatDateTimeValue( const CRealTime & value ) const
-{
-        if ( ! value.IsValid())
-        {
-                return CGString( "NULL" );
-        }
-
-        CGString sTemp;
-        sTemp.Format( "%04d-%02d-%02d %02d:%02d:%02d",
-                1900 + value.m_Year, value.m_Month + 1, value.m_Day,
-                value.m_Hour, value.m_Min, value.m_Sec );
-        return FormatStringValue( sTemp );
-}
-
-CGString CWorldStorageMySQL::FormatIPAddressValue( const CGString & value ) const
-{
-        if ( value.IsEmpty())
-        {
-                return CGString( "NULL" );
-        }
-        return FormatStringValue( value );
-}
-
-CGString CWorldStorageMySQL::FormatIPAddressValue( const struct in_addr & value ) const
-{
-        if ( value.s_addr == 0 )
-        {
-                return CGString( "NULL" );
-        }
-        const char * pszIP = inet_ntoa( value );
-        if ( pszIP == NULL )
-        {
-                return CGString( "NULL" );
-        }
-        return FormatStringValue( CGString( pszIP ));
 }
 
 CGString CWorldStorageMySQL::ComputeSerializedChecksum( const CGString & serialized ) const
