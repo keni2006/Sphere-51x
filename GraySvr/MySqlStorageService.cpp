@@ -4,6 +4,7 @@
 #include "../tests/stubs/graysvr.h"
 #endif
 #include "MySqlStorageService.h"
+#include "Storage/DirtyQueue.h"
 #include "Storage/MySql/MySqlLogging.h"
 
 #ifdef max
@@ -391,6 +392,107 @@ TablePrefixNormalizationResult NormalizeMySqlTablePrefix( const std::string & ra
 
 namespace Storage
 {
+        class DirtyQueueProcessor
+        {
+        public:
+                explicit DirtyQueueProcessor( MySqlStorageService & storage );
+                ~DirtyQueueProcessor();
+
+                DirtyQueueProcessor( const DirtyQueueProcessor & ) = delete;
+                DirtyQueueProcessor & operator=( const DirtyQueueProcessor & ) = delete;
+
+                void Schedule( MySqlStorageService::ObjectHandle handle, StorageDirtyType type );
+
+        private:
+                void Run( std::stop_token stopToken );
+                void ProcessBatch( const DirtyQueue::Batch & batch );
+
+                MySqlStorageService & m_Storage;
+                DirtyQueue m_Queue;
+                std::jthread m_Worker;
+        };
+
+        DirtyQueueProcessor::DirtyQueueProcessor( MySqlStorageService & storage ) :
+                m_Storage( storage ),
+                m_Worker( [this]( std::stop_token stopToken )
+                {
+                        Run( stopToken );
+                })
+        {
+        }
+
+        DirtyQueueProcessor::~DirtyQueueProcessor()
+        {
+        }
+
+        void DirtyQueueProcessor::Schedule( MySqlStorageService::ObjectHandle handle, StorageDirtyType type )
+        {
+                m_Queue.Enqueue( handle, type );
+        }
+
+        void DirtyQueueProcessor::Run( std::stop_token stopToken )
+        {
+                DirtyQueue::Batch batch;
+                while ( m_Queue.WaitForBatch( batch, stopToken ))
+                {
+                        ProcessBatch( batch );
+                }
+        }
+
+        void DirtyQueueProcessor::ProcessBatch( const DirtyQueue::Batch & batch )
+        {
+                if ( batch.empty())
+                {
+                        return;
+                }
+
+                if ( !m_Storage.IsEnabled())
+                {
+                        return;
+                }
+
+                std::vector<CObjBase*> objects;
+                objects.reserve( batch.size());
+
+                for ( const auto & entry : batch )
+                {
+                        if ( entry.second != StorageDirtyType_Save )
+                        {
+                                continue;
+                        }
+
+                        CObjUID objUid( (UINT) entry.first );
+                        CObjBase * pObject = objUid.ObjFind();
+                        if ( pObject == NULL )
+                        {
+                                continue;
+                        }
+
+                        objects.push_back( pObject );
+                }
+
+                if ( objects.empty())
+                {
+                        return;
+                }
+
+                if ( m_Storage.SaveWorldObjects( objects ))
+                {
+                        return;
+                }
+
+                for ( const CObjBase * pObject : objects )
+                {
+                        if ( pObject == NULL )
+                        {
+                                continue;
+                        }
+
+                        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.", uid );
+                }
+        }
+
 namespace Repository
 {
         class PreparedStatementRepository
@@ -1083,15 +1185,7 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
         }
 
 #ifndef UNIT_TEST
-        m_DirtyQueue.Start( [this]( unsigned long long uid, StorageDirtyType type ) -> bool
-        {
-                bool fResult = ProcessDirtyObject( uid, type );
-                if ( !fResult )
-                {
-                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.", uid );
-                }
-                return fResult;
-        });
+        m_DirtyProcessor = std::make_unique<Storage::DirtyQueueProcessor>( *this );
 #endif
 
         return true;
@@ -1099,9 +1193,7 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
 
 void MySqlStorageService::Stop()
 {
-#ifndef UNIT_TEST
-        m_DirtyQueue.Stop();
-#endif
+        m_DirtyProcessor.reset();
         m_ConnectionManager.Disconnect();
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
@@ -1869,38 +1961,22 @@ bool MySqlStorageService::DeleteObject( const CObjBase * pObject )
         return DeleteWorldObject( pObject );
 }
 
-void MySqlStorageService::MarkObjectDirty( const CObjBase & object, StorageDirtyType type )
+void MySqlStorageService::ScheduleSave( ObjectHandle handle, StorageDirtyType type )
 {
-        if ( ! IsEnabled())
+        if ( type == StorageDirtyType_None )
+        {
                 return;
+        }
 
-        const unsigned long long uid = (unsigned long long) (UINT) object.GetUID();
-        m_DirtyQueue.Enqueue( uid, type );
-}
-
-bool MySqlStorageService::ProcessDirtyObject( unsigned long long uid, StorageDirtyType type )
-{
-        if ( type != StorageDirtyType_Save )
-                return true;
         if ( ! IsEnabled())
-                return false;
-
-        CObjUID objUid( (UINT) uid );
-        CObjBase * pObject = objUid.ObjFind();
-        if ( pObject == NULL )
-                return true;
-
-        if ( pObject->IsChar())
         {
-                CChar * pChar = dynamic_cast<CChar*>( pObject );
-                return ( pChar != NULL ) && SaveChar( *pChar );
+                return;
         }
-        if ( pObject->IsItem())
+
+        if ( m_DirtyProcessor )
         {
-                CItem * pItem = dynamic_cast<CItem*>( pObject );
-                return ( pItem != NULL ) && SaveItem( *pItem );
+                m_DirtyProcessor->Schedule( handle, type );
         }
-        return false;
 }
 
 bool MySqlStorageService::SaveSector( const CSector & sector )
