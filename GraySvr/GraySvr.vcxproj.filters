@@ -165,7 +165,19 @@
     <ClCompile Include="Storage\Database.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Storage\DirtyQueue.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Storage\MySql\ConnectionManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Storage\MySql\MySqlConnection.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Storage\MySql\MySqlLogging.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Storage\Schema\SchemaManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ntservice.cpp">
@@ -227,7 +239,19 @@
     <ClInclude Include="Storage\Database.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Storage\DirtyQueue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Storage\MySql\ConnectionManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Storage\MySql\MySqlConnection.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Storage\MySql\MySqlLogging.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Storage\Schema\SchemaManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CVarDefMap.h">
