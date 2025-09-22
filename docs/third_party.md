@@ -10,7 +10,10 @@ packages on demand:
   Windows MSI and Ubuntu tarball, extracts them into `third_party/` and keeps the
   directories out of Git via `.gitignore`. Run it whenever you need to refresh
   the vendor drop. PowerShell 5+, `msiexec` and the `tar` utility available on
-  modern Windows installations are required.
+  modern Windows installations are required. If you prefer to keep a copy of the
+  headers and libraries under version control, drop them into
+  `MariaDBConnector/`; the Visual Studio project now looks there in addition to
+  `third_party/`.
 * **MySQL Connector/C 6.1.11** (GPLv2 + FOSS License Exception) remains checked
   in under `third_party/mysql-connector-c-6.1.11-win32` for projects that still
   rely on the older headers/import libraries.

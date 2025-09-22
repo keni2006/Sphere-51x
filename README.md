@@ -39,7 +39,9 @@ relational database instead of flat `.scp` files.
   the official Windows and Linux connector archives into `third_party/`. The
   legacy Oracle MySQL Connector/C **6.1.11** headers remain available under
   `third_party/mysql-connector-c-6.1.11-win32` for projects that still rely on
-  them. You can still override the include/library directories with the
+  them. Visual Studio builds also probe `MariaDBConnector/` at the repository
+  root so you can keep a copy of the connector tree under source control if you
+  prefer. You can still override the include/library directories with the
   `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR` environment variables if you would
   rather target a system-wide installation.
 - When building with Visual Studio you can keep the defaults that point at the

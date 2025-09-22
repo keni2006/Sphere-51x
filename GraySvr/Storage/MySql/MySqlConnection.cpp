@@ -1,4 +1,4 @@
-#include "Storage/MySql/MySqlConnection.h"
+#include "MySqlConnection.h"
 
 #include <algorithm>
 #include <cctype>

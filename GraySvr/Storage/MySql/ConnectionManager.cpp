@@ -1,6 +1,6 @@
-#include "Storage/MySql/ConnectionManager.h"
+#include "ConnectionManager.h"
 
-#include "Storage/MySql/MySqlLogging.h"
+#include "MySqlLogging.h"
 #if defined(UNIT_TEST)
 #include "../../../tests/stubs/graysvr.h"
 #else
