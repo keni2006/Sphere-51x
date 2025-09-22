@@ -198,6 +198,8 @@
     <ClCompile Include="cworldimport.cpp" />
     <ClCompile Include="cworldmap.cpp" />
     <ClCompile Include="graysvr.cpp" />
+    <ClCompile Include="Storage\Database.cpp" />
+    <ClCompile Include="Storage\MySql\MySqlConnection.cpp" />
     <ClCompile Include="ntservice.cpp" />
     <ClCompile Include="ntwindow.cpp" />
   </ItemGroup>

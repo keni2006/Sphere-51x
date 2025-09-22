@@ -34,6 +34,8 @@ PIPE = -pipe
 
 # Source files
 SRC := $(wildcard *.cpp)
+SRC += $(wildcard Storage/*.cpp)
+SRC += $(wildcard Storage/MySql/*.cpp)
 
 # Exe file
 # INCLUDE = -Ih -I/usr/ea/h
