@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <functional>
 #include <vector>
 #include <memory>
 #include <sstream>
@@ -358,7 +359,7 @@ std::string BuildSetNamesCommand( const std::string & charset, const std::string
                 const char * m_pszReason;
         };
 
-        TablePrefixNormalizationResult NormalizeMySqlTablePrefix( const std::string & rawPrefix )
+TablePrefixNormalizationResult NormalizeMySqlTablePrefix( const std::string & rawPrefix )
         {
                 TablePrefixNormalizationResult result{ rawPrefix, false, NULL };
                 if ( rawPrefix.empty())
@@ -386,6 +387,351 @@ std::string BuildSetNamesCommand( const std::string & charset, const std::string
                 result.m_pszReason = "Removed unsupported characters from table prefix";
                 return result;
         }
+}
+
+namespace Storage
+{
+namespace Repository
+{
+        class PreparedStatementRepository
+        {
+        public:
+                explicit PreparedStatementRepository( MySqlStorageService & storage ) :
+                        m_Storage( storage )
+                {
+                }
+
+                PreparedStatementRepository( const PreparedStatementRepository & ) = delete;
+                PreparedStatementRepository & operator=( const PreparedStatementRepository & ) = delete;
+
+        protected:
+                bool ExecuteBatch( const std::string & query, size_t count,
+                        const std::function<void(Storage::IDatabaseStatement &, size_t)> & binder ) const
+                {
+                        if ( count == 0 )
+                        {
+                                return true;
+                        }
+
+                        try
+                        {
+                                Storage::MySql::MySqlConnectionPool::ScopedConnection scoped;
+                                Storage::MySql::MySqlConnection * connection = m_Storage.GetActiveConnection( scoped );
+                                if ( connection == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "MySQL prepared statement attempted without an active connection." );
+                                        return false;
+                                }
+
+                                std::unique_ptr<Storage::IDatabaseStatement> statement = connection->Prepare( query );
+                                for ( size_t i = 0; i < count; ++i )
+                                {
+                                        statement->Reset();
+                                        binder( *statement, i );
+                                        statement->Execute();
+                                }
+
+                                return true;
+                        }
+                        catch ( const Storage::DatabaseError & ex )
+                        {
+                                LogDatabaseError( ex, LOGL_ERROR );
+                        }
+                        catch ( const std::bad_alloc & )
+                        {
+                                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                        "Out of memory while preparing MySQL statement." );
+                        }
+                        return false;
+                }
+
+                MySqlStorageService & m_Storage;
+        };
+
+        struct WorldObjectMetaRecord
+        {
+                unsigned long long m_Uid = 0;
+                std::string m_ObjectType;
+                std::string m_ObjectSubtype;
+                bool m_HasName = false;
+                std::string m_Name;
+                bool m_HasAccountId = false;
+                unsigned int m_AccountId = 0;
+                bool m_HasContainerUid = false;
+                unsigned long long m_ContainerUid = 0;
+                bool m_HasTopLevelUid = false;
+                unsigned long long m_TopLevelUid = 0;
+                bool m_HasPosX = false;
+                bool m_HasPosY = false;
+                bool m_HasPosZ = false;
+                int m_PosX = 0;
+                int m_PosY = 0;
+                int m_PosZ = 0;
+        };
+
+        class WorldObjectMetaRepository : public PreparedStatementRepository
+        {
+        public:
+                WorldObjectMetaRepository( MySqlStorageService & storage, const CGString & table ) :
+                        PreparedStatementRepository( storage ),
+                        m_Table( static_cast<const char *>( table ))
+                {
+                        const std::string quoted = "`" + m_Table + "`";
+                        m_UpsertQuery =
+                                "INSERT INTO " + quoted +
+                                " (`uid`,`object_type`,`object_subtype`,`name`,`account_id`,`container_uid`,`top_level_uid`,`position_x`,`position_y`,`position_z`)";
+                        m_UpsertQuery += " VALUES (?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE ";
+                        m_UpsertQuery += "`object_type`=VALUES(`object_type`),";
+                        m_UpsertQuery += "`object_subtype`=VALUES(`object_subtype`),";
+                        m_UpsertQuery += "`name`=VALUES(`name`),";
+                        m_UpsertQuery += "`account_id`=VALUES(`account_id`),";
+                        m_UpsertQuery += "`container_uid`=VALUES(`container_uid`),";
+                        m_UpsertQuery += "`top_level_uid`=VALUES(`top_level_uid`),";
+                        m_UpsertQuery += "`position_x`=VALUES(`position_x`),";
+                        m_UpsertQuery += "`position_y`=VALUES(`position_y`),";
+                        m_UpsertQuery += "`position_z`=VALUES(`position_z`);";
+
+                        m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `uid` = ?;";
+                }
+
+                bool Upsert( const WorldObjectMetaRecord & record )
+                {
+                        return ExecuteBatch( m_UpsertQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, record.m_Uid );
+                                statement.BindString( 1, record.m_ObjectType );
+                                statement.BindString( 2, record.m_ObjectSubtype );
+
+                                if ( record.m_HasName )
+                                {
+                                        statement.BindString( 3, record.m_Name );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 3 );
+                                }
+
+                                if ( record.m_HasAccountId )
+                                {
+                                        statement.BindUInt64( 4, static_cast<unsigned long long>( record.m_AccountId ));
+                                }
+                                else
+                                {
+                                        statement.BindNull( 4 );
+                                }
+
+                                if ( record.m_HasContainerUid )
+                                {
+                                        statement.BindUInt64( 5, record.m_ContainerUid );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 5 );
+                                }
+
+                                if ( record.m_HasTopLevelUid )
+                                {
+                                        statement.BindUInt64( 6, record.m_TopLevelUid );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 6 );
+                                }
+
+                                if ( record.m_HasPosX )
+                                {
+                                        statement.BindInt64( 7, record.m_PosX );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 7 );
+                                }
+
+                                if ( record.m_HasPosY )
+                                {
+                                        statement.BindInt64( 8, record.m_PosY );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 8 );
+                                }
+
+                                if ( record.m_HasPosZ )
+                                {
+                                        statement.BindInt64( 9, record.m_PosZ );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 9 );
+                                }
+                        });
+                }
+
+                bool Delete( unsigned long long uid )
+                {
+                        return ExecuteBatch( m_DeleteQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, uid );
+                        });
+                }
+
+        private:
+                std::string m_Table;
+                std::string m_UpsertQuery;
+                std::string m_DeleteQuery;
+        };
+
+        struct WorldObjectDataRecord
+        {
+                unsigned long long m_ObjectUid = 0;
+                std::string m_Data;
+                bool m_HasChecksum = false;
+                std::string m_Checksum;
+        };
+
+        class WorldObjectDataRepository : public PreparedStatementRepository
+        {
+        public:
+                WorldObjectDataRepository( MySqlStorageService & storage, const CGString & table ) :
+                        PreparedStatementRepository( storage ),
+                        m_Table( static_cast<const char *>( table ))
+                {
+                        const std::string quoted = "`" + m_Table + "`";
+                        m_UpsertQuery = "REPLACE INTO " + quoted + " (`object_uid`,`data`,`checksum`) VALUES (?,?,?);";
+                }
+
+                bool Upsert( const WorldObjectDataRecord & record )
+                {
+                        return ExecuteBatch( m_UpsertQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, record.m_ObjectUid );
+                                statement.BindString( 1, record.m_Data );
+
+                                if ( record.m_HasChecksum )
+                                {
+                                        statement.BindString( 2, record.m_Checksum );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 2 );
+                                }
+                        });
+                }
+
+        private:
+                std::string m_Table;
+                std::string m_UpsertQuery;
+        };
+
+        struct WorldObjectComponentRecord
+        {
+                unsigned long long m_ObjectUid = 0;
+                std::string m_Component;
+                std::string m_Name;
+                int m_Sequence = 0;
+                bool m_HasValue = false;
+                std::string m_Value;
+        };
+
+        class WorldObjectComponentRepository : public PreparedStatementRepository
+        {
+        public:
+                WorldObjectComponentRepository( MySqlStorageService & storage, const CGString & table ) :
+                        PreparedStatementRepository( storage ),
+                        m_Table( static_cast<const char *>( table ))
+                {
+                        const std::string quoted = "`" + m_Table + "`";
+                        m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `object_uid` = ?;";
+                        m_InsertQuery =
+                                "INSERT INTO " + quoted + " (`object_uid`,`component`,`name`,`sequence`,`value`) VALUES (?,?,?,?,?);";
+                }
+
+                bool DeleteForObject( unsigned long long uid )
+                {
+                        return ExecuteBatch( m_DeleteQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, uid );
+                        });
+                }
+
+                bool InsertMany( const std::vector<WorldObjectComponentRecord> & records )
+                {
+                        return ExecuteBatch( m_InsertQuery, records.size(),
+                                [&]( Storage::IDatabaseStatement & statement, size_t index )
+                        {
+                                const WorldObjectComponentRecord & record = records[index];
+                                statement.BindUInt64( 0, record.m_ObjectUid );
+                                statement.BindString( 1, record.m_Component );
+                                statement.BindString( 2, record.m_Name );
+                                statement.BindInt64( 3, record.m_Sequence );
+
+                                if ( record.m_HasValue )
+                                {
+                                        statement.BindString( 4, record.m_Value );
+                                }
+                                else
+                                {
+                                        statement.BindNull( 4 );
+                                }
+                        });
+                }
+
+        private:
+                std::string m_Table;
+                std::string m_DeleteQuery;
+                std::string m_InsertQuery;
+        };
+
+        struct WorldObjectRelationRecord
+        {
+                unsigned long long m_ParentUid = 0;
+                unsigned long long m_ChildUid = 0;
+                std::string m_Relation;
+                int m_Sequence = 0;
+        };
+
+        class WorldObjectRelationRepository : public PreparedStatementRepository
+        {
+        public:
+                WorldObjectRelationRepository( MySqlStorageService & storage, const CGString & table ) :
+                        PreparedStatementRepository( storage ),
+                        m_Table( static_cast<const char *>( table ))
+                {
+                        const std::string quoted = "`" + m_Table + "`";
+                        m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `parent_uid` = ? OR `child_uid` = ?;";
+                        m_InsertQuery =
+                                "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?);";
+                }
+
+                bool DeleteForObject( unsigned long long uid )
+                {
+                        return ExecuteBatch( m_DeleteQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, uid );
+                                statement.BindUInt64( 1, uid );
+                        });
+                }
+
+                bool InsertMany( const std::vector<WorldObjectRelationRecord> & records )
+                {
+                        return ExecuteBatch( m_InsertQuery, records.size(),
+                                [&]( Storage::IDatabaseStatement & statement, size_t index )
+                        {
+                                const WorldObjectRelationRecord & record = records[index];
+                                statement.BindUInt64( 0, record.m_ParentUid );
+                                statement.BindUInt64( 1, record.m_ChildUid );
+                                statement.BindString( 2, record.m_Relation );
+                                statement.BindInt64( 3, record.m_Sequence );
+                        });
+                }
+
+        private:
+                std::string m_Table;
+                std::string m_DeleteQuery;
+                std::string m_InsertQuery;
+        };
+}
 }
 
 #if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
@@ -690,7 +1036,7 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
                 const char * reason = ( prefixNormalization.m_pszReason != NULL ) ? prefixNormalization.m_pszReason : "Normalized MySQL table prefix";
                 std::string normalizedLogValue = prefixNormalization.m_sNormalized.empty() ? std::string( "(empty)" ) : prefixNormalization.m_sNormalized;
                 g_Log.Event( LOGM_INIT|LOGL_WARN,
-                        "Normalized MySQL table prefix bytes (%s) to "%s" (%s).",
+                        "Normalized MySQL table prefix bytes (%s) to '%s' (%s).",
                         FormatByteString( rawTablePrefix ).c_str(),
                         normalizedLogValue.c_str(),
                         reason );
@@ -726,7 +1072,11 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
                 m_sTableCollation.Empty();
         }
 
+#if defined(UNIT_TEST)
+        if ( !EnsureSchemaVersionTable())
+#else
         if ( !EnsureSchema())
+#endif
         {
                 Stop();
                 return false;
@@ -738,8 +1088,7 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
                 bool fResult = ProcessDirtyObject( uid, type );
                 if ( !fResult )
                 {
-                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.
-", uid );
+                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.", uid );
                 }
                 return fResult;
         });
@@ -797,7 +1146,8 @@ bool MySqlStorageService::DebugExecuteQuery( const CGString & query )
                 {
                         return false;
                 }
-                connection->Execute( query );
+                std::string sql( (const char *) query );
+                connection->Execute( sql );
                 return true;
         }
         catch ( const Storage::DatabaseError & ex )
@@ -1123,43 +1473,6 @@ CGString MySqlStorageService::ComputeSerializedChecksum( const CGString & serial
         sHash.Format( "%016llx", hash );
 #endif
         return sHash;
-}
-
-void MySqlStorageService::AppendVarDefComponents( const CGString & table, unsigned long long uid, const CVarDefMap * pMap, const TCHAR * pszComp, std::vector<UniversalRecord> & outRecords )
-{
-        if ( table.IsEmpty() || pMap == NULL || pszComp == NULL || pszComp[0] == '\0' )
-        {
-                return;
-        }
-
-        const CGString sComponent = CGString( pszComp );
-        const size_t count = pMap->GetCount();
-        for ( size_t i = 0; i < count; ++i )
-        {
-                const CVarDefCont * pVar = pMap->GetAt( i );
-                if ( pVar == NULL )
-                {
-                        continue;
-                }
-
-                UniversalRecord record( *this, table );
-                record.SetUInt( "object_uid", uid );
-                record.SetString( "component", sComponent );
-                record.SetString( "name", CGString( pVar->GetKey()));
-                record.SetInt( "sequence", (int) i );
-
-                const TCHAR * pszVal = pVar->GetValStr();
-                if ( pszVal != NULL && pszVal[0] != '\0' )
-                {
-                        record.SetString( "value", CGString( pszVal ));
-                }
-                else
-                {
-                        record.SetNull( "value" );
-                }
-
-                outRecords.push_back( record );
-        }
 }
 
 unsigned int MySqlStorageService::GetAccountId( const CGString & name )
@@ -1546,13 +1859,8 @@ bool MySqlStorageService::DeleteWorldObject( const CObjBase * pObject )
 
         return WithTransaction( [this, uid, sWorldObjects]() -> bool
         {
-                CGString sQuery;
-#ifdef _WIN32
-                sQuery.Format( "DELETE FROM `%s` WHERE `uid` = %I64u;", (const char *) sWorldObjects, uid );
-#else
-                sQuery.Format( "DELETE FROM `%s` WHERE `uid` = %llu;", (const char *) sWorldObjects, uid );
-#endif
-                return ExecuteQuery( sQuery );
+                Storage::Repository::WorldObjectMetaRepository repository( *this, sWorldObjects );
+                return repository.Delete( uid );
         });
 }
 
@@ -2167,36 +2475,22 @@ bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGStr
                 return false;
         }
 
-        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
-        UniversalRecord record( *this, sWorldObjects );
-
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
-        record.SetUInt( "uid", uid );
-
-        if ( pObject->IsChar())
-        {
-                record.SetString( "object_type", CGString( "char" ));
-        }
-        else
-        {
-                record.SetString( "object_type", CGString( "item" ));
-        }
+        Storage::Repository::WorldObjectMetaRecord record;
+        record.m_Uid = uid;
+        record.m_ObjectType = pObject->IsChar() ? "char" : "item";
 
         CGString sSubtype;
         sSubtype.Format( "0x%x", (unsigned int) pObject->GetBaseID());
-        record.SetString( "object_subtype", sSubtype );
+        record.m_ObjectSubtype = (const char *) sSubtype;
 
         const TCHAR * pszName = pObject->GetName();
-        if ( pszName != NULL )
+        if ( pszName != NULL && pszName[0] != '\0' )
         {
-                record.SetOptionalString( "name", CGString( pszName ));
-        }
-        else
-        {
-                record.SetNull( "name" );
+                record.m_HasName = true;
+                record.m_Name = pszName;
         }
 
-        record.SetNull( "account_id" );
         if ( pObject->IsChar())
         {
                 CChar * pChar = dynamic_cast<CChar*>( pObject );
@@ -2211,14 +2505,14 @@ bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGStr
                                         unsigned int accountId = GetAccountId( sAccountName );
                                         if ( accountId > 0 )
                                         {
-                                                record.SetUInt( "account_id", accountId );
+                                                record.m_HasAccountId = true;
+                                                record.m_AccountId = accountId;
                                         }
                                 }
                         }
                 }
         }
 
-        record.SetNull( "container_uid" );
         if ( pObject->IsItem())
         {
                 const CItem * pItem = dynamic_cast<const CItem*>( pObject );
@@ -2227,33 +2521,32 @@ bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGStr
                         const CObjBase * pContainer = pItem->GetContainer();
                         if ( pContainer != NULL )
                         {
-                                const unsigned long long containerUid = (unsigned long long) (UINT) pContainer->GetUID();
-                                record.SetUInt( "container_uid", containerUid );
+                                record.m_HasContainerUid = true;
+                                record.m_ContainerUid = (unsigned long long) (UINT) pContainer->GetUID();
                         }
                 }
         }
 
-        record.SetNull( "top_level_uid" );
         CObjBaseTemplate * pTop = pObject->GetTopLevelObj();
         if ( pTop != NULL )
         {
                 CObjBase * pTopObj = dynamic_cast<CObjBase*>( pTop );
                 if ( pTopObj != NULL )
                 {
-                        const unsigned long long topUid = (unsigned long long) (UINT) pTopObj->GetUID();
-                        record.SetUInt( "top_level_uid", topUid );
+                        record.m_HasTopLevelUid = true;
+                        record.m_TopLevelUid = (unsigned long long) (UINT) pTopObj->GetUID();
                 }
         }
 
-        record.SetNull( "position_x" );
-        record.SetNull( "position_y" );
-        record.SetNull( "position_z" );
         if ( pObject->IsTopLevel())
         {
                 const CPointMap & pt = pObject->GetTopPoint();
-                record.SetInt( "position_x", pt.m_x );
-                record.SetInt( "position_y", pt.m_y );
-                record.SetInt( "position_z", pt.m_z );
+                record.m_HasPosX = true;
+                record.m_HasPosY = true;
+                record.m_HasPosZ = true;
+                record.m_PosX = pt.m_x;
+                record.m_PosY = pt.m_y;
+                record.m_PosZ = pt.m_z;
         }
         else if ( pObject->IsItem() && pObject->IsInContainer())
         {
@@ -2261,13 +2554,18 @@ bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGStr
                 if ( pItem != NULL )
                 {
                         const CPointMap & pt = pItem->GetContainedPoint();
-                        record.SetInt( "position_x", pt.m_x );
-                        record.SetInt( "position_y", pt.m_y );
-                        record.SetInt( "position_z", pt.m_z );
+                        record.m_HasPosX = true;
+                        record.m_HasPosY = true;
+                        record.m_HasPosZ = true;
+                        record.m_PosX = pt.m_x;
+                        record.m_PosY = pt.m_y;
+                        record.m_PosZ = pt.m_z;
                 }
         }
 
-        return ExecuteQuery( record.BuildInsert( false, true ));
+        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
+        Storage::Repository::WorldObjectMetaRepository repository( *this, sWorldObjects );
+        return repository.Upsert( record );
 }
 
 bool MySqlStorageService::UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized )
@@ -2277,24 +2575,21 @@ bool MySqlStorageService::UpsertWorldObjectData( const CObjBase * pObject, const
                 return false;
         }
 
-        const CGString sWorldObjectData = GetPrefixedTableName( "world_object_data" );
-        UniversalRecord record( *this, sWorldObjectData );
-
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
-        record.SetUInt( "object_uid", uid );
-        record.SetString( "data", serialized );
+        Storage::Repository::WorldObjectDataRecord record;
+        record.m_ObjectUid = uid;
+        record.m_Data = (const char *) serialized;
 
         CGString sChecksum = ComputeSerializedChecksum( serialized );
         if ( ! sChecksum.IsEmpty())
         {
-                record.SetString( "checksum", sChecksum );
-        }
-        else
-        {
-                record.SetNull( "checksum" );
+                record.m_HasChecksum = true;
+                record.m_Checksum = (const char *) sChecksum;
         }
 
-        return ExecuteQuery( record.BuildInsert( true, false ));
+        const CGString sWorldObjectData = GetPrefixedTableName( "world_object_data" );
+        Storage::Repository::WorldObjectDataRepository repository( *this, sWorldObjectData );
+        return repository.Upsert( record );
 }
 
 bool MySqlStorageService::RefreshWorldObjectComponents( const CObjBase * pObject )
@@ -2307,27 +2602,71 @@ bool MySqlStorageService::RefreshWorldObjectComponents( const CObjBase * pObject
         const CGString sComponents = GetPrefixedTableName( "world_object_components" );
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
 
-        CGString sDelete;
-#ifdef _WIN32
-        sDelete.Format( "DELETE FROM `%s` WHERE `object_uid` = %I64u;", (const char *) sComponents, uid );
-#else
-        sDelete.Format( "DELETE FROM `%s` WHERE `object_uid` = %llu;", (const char *) sComponents, uid );
-#endif
-        if ( ! ExecuteQuery( sDelete ))
+        Storage::Repository::WorldObjectComponentRepository repository( *this, sComponents );
+        if ( !repository.DeleteForObject( uid ))
         {
                 return false;
         }
 
-        std::vector<UniversalRecord> records;
-        AppendVarDefComponents( sComponents, uid, pObject->GetTagDefs(), "TAG", records );
-        AppendVarDefComponents( sComponents, uid, pObject->GetBaseDefs(), "VAR", records );
+        const CVarDefMap * pTagMap = pObject->GetTagDefs();
+        const CVarDefMap * pVarMap = pObject->GetBaseDefs();
+
+        std::vector<Storage::Repository::WorldObjectComponentRecord> records;
+        records.reserve( ( pTagMap ? pTagMap->GetCount() : 0 ) +
+                ( pVarMap ? pVarMap->GetCount() : 0 ));
+
+        auto appendMap = [&]( const CVarDefMap * pMap, const char * component )
+        {
+                if ( pMap == NULL || component == NULL || component[0] == '\0' )
+                {
+                        return;
+                }
+
+                const size_t count = pMap->GetCount();
+                for ( size_t i = 0; i < count; ++i )
+                {
+                        const CVarDefCont * pVar = pMap->GetAt( i );
+                        if ( pVar == NULL )
+                        {
+                                continue;
+                        }
+
+                        Storage::Repository::WorldObjectComponentRecord record;
+                        record.m_ObjectUid = uid;
+                        record.m_Component = component;
+
+                        const TCHAR * pszKey = pVar->GetKey();
+                        if ( pszKey != NULL )
+                        {
+                                record.m_Name = pszKey;
+                        }
+                        else
+                        {
+                                record.m_Name.clear();
+                        }
+
+                        record.m_Sequence = static_cast<int>( i );
+
+                        const TCHAR * pszVal = pVar->GetValStr();
+                        if ( pszVal != NULL && pszVal[0] != '\0' )
+                        {
+                                record.m_HasValue = true;
+                                record.m_Value = pszVal;
+                        }
+
+                        records.push_back( std::move( record ));
+                }
+        };
+
+        appendMap( pTagMap, "TAG" );
+        appendMap( pVarMap, "VAR" );
 
         if ( records.empty())
         {
                 return true;
         }
 
-        return ExecuteRecordsInsert( records );
+        return repository.InsertMany( records );
 }
 
 bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject )
@@ -2340,18 +2679,13 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
         const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
 
-        CGString sDelete;
-#ifdef _WIN32
-        sDelete.Format( "DELETE FROM `%s` WHERE `parent_uid` = %I64u OR `child_uid` = %I64u;", (const char *) sRelations, uid, uid );
-#else
-        sDelete.Format( "DELETE FROM `%s` WHERE `parent_uid` = %llu OR `child_uid` = %llu;", (const char *) sRelations, uid, uid );
-#endif
-        if ( ! ExecuteQuery( sDelete ))
+        Storage::Repository::WorldObjectRelationRepository repository( *this, sRelations );
+        if ( !repository.DeleteForObject( uid ))
         {
                 return false;
         }
 
-        std::vector<UniversalRecord> records;
+        std::vector<Storage::Repository::WorldObjectRelationRecord> records;
 
         if ( pObject->IsItem())
         {
@@ -2361,12 +2695,12 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
                         const CObjBase * pContainer = pItem->GetContainer();
                         if ( pContainer != NULL )
                         {
-                                UniversalRecord record( *this, sRelations );
-                                record.SetUInt( "parent_uid", (unsigned long long) (UINT) pContainer->GetUID());
-                                record.SetUInt( "child_uid", uid );
-                                record.SetString( "relation", CGString( pItem->IsEquipped() ? "equipped" : "container" ));
-                                record.SetInt( "sequence", 0 );
-                                records.push_back( record );
+                                Storage::Repository::WorldObjectRelationRecord record;
+                                record.m_ParentUid = (unsigned long long) (UINT) pContainer->GetUID();
+                                record.m_ChildUid = uid;
+                                record.m_Relation = pItem->IsEquipped() ? "equipped" : "container";
+                                record.m_Sequence = 0;
+                                records.push_back( std::move( record ));
                         }
                 }
         }
@@ -2376,7 +2710,7 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
                 return true;
         }
 
-        return ExecuteRecordsInsert( records );
+        return repository.InsertMany( records );
 }
 
 #endif // UNIT_TEST
@@ -2418,7 +2752,7 @@ bool MySqlStorageService::EnsureColumnExists(const CGString & table, const char 
 
 bool MySqlStorageService::ColumnExists(const CGString & table, const char * column) const
 {
-        return m_SchemaManager.ColumnExists(*this, table, column);
+        return m_SchemaManager.ColumnExists( const_cast<MySqlStorageService &>(*this), table, column );
 }
 
 bool MySqlStorageService::InsertOrUpdateSchemaValue(int id, int value)

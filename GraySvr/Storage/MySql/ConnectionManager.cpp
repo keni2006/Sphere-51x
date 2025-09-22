@@ -1,7 +1,11 @@
 #include "Storage/MySql/ConnectionManager.h"
 
 #include "Storage/MySql/MySqlLogging.h"
+#if defined(UNIT_TEST)
+#include "../../../tests/stubs/graysvr.h"
+#else
 #include "../../graysvr.h"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -194,7 +198,7 @@ namespace MySql
                 }
                 else
                 {
-                        outDetails.m_TableCharset = activeInfo.m_sCharset;
+                        outDetails.m_TableCharset = activeInfo.m_Charset;
                 }
 
                 if ( !dbConfig.m_Collation.empty())
@@ -203,7 +207,7 @@ namespace MySql
                 }
                 else
                 {
-                        outDetails.m_TableCollation = activeInfo.m_sCollation;
+                        outDetails.m_TableCollation = activeInfo.m_Collation;
                 }
 
                 if ( !m_ConnectionPool )
@@ -243,9 +247,9 @@ namespace MySql
 
         MySqlConnection * ConnectionManager::GetActiveConnection( MySqlConnectionPool::ScopedConnection & scoped ) const
         {
-                if ( m_TransactionConnection && m_TransactionConnection->IsValid())
+                if ( m_TransactionConnection.IsValid())
                 {
-                        return &m_TransactionConnection->Get();
+                        return &m_TransactionConnection.Get();
                 }
 
                 if ( !m_ConnectionPool )

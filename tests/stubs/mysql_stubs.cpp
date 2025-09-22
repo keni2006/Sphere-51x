@@ -18,6 +18,12 @@ namespace
         unsigned long g_escape_written = 0;
         bool g_query_called = false;
         std::vector<std::string> g_executed_queries;
+
+        struct StatementData
+        {
+                std::string query;
+                unsigned int last_error = 0;
+        };
 }
 
 bool WasMysqlQueryCalled()
@@ -133,6 +139,108 @@ extern "C"
 
         void mysql_close( MYSQL * )
         {
+        }
+
+        MYSQL_STMT * mysql_stmt_init( MYSQL * )
+        {
+                MYSQL_STMT * stmt = new MYSQL_STMT();
+                stmt->internal = new StatementData();
+                return stmt;
+        }
+
+        int mysql_stmt_prepare( MYSQL_STMT * stmt, const char * query, unsigned long length )
+        {
+                if ( stmt == nullptr )
+                {
+                        return 1;
+                }
+
+                StatementData * data = static_cast<StatementData*>( stmt->internal );
+                if ( data == nullptr )
+                {
+                        return 1;
+                }
+
+                if ( query != nullptr )
+                {
+                        if ( length > 0 )
+                        {
+                                data->query.assign( query, length );
+                        }
+                        else
+                        {
+                                data->query.assign( query );
+                        }
+                }
+                else
+                {
+                        data->query.clear();
+                }
+                data->last_error = 0;
+                return 0;
+        }
+
+        unsigned long mysql_stmt_param_count( MYSQL_STMT * )
+        {
+                return 0;
+        }
+
+        int mysql_stmt_bind_param( MYSQL_STMT *, MYSQL_BIND * )
+        {
+                        return 0;
+        }
+
+        int mysql_stmt_execute( MYSQL_STMT * stmt )
+        {
+                g_query_called = true;
+                if ( stmt != nullptr )
+                {
+                        StatementData * data = static_cast<StatementData*>( stmt->internal );
+                        if ( data != nullptr )
+                        {
+                                g_executed_queries.emplace_back( data->query );
+                        }
+                }
+                return 0;
+        }
+
+        int mysql_stmt_reset( MYSQL_STMT * stmt )
+        {
+                if ( stmt != nullptr )
+                {
+                        StatementData * data = static_cast<StatementData*>( stmt->internal );
+                        if ( data != nullptr )
+                        {
+                                data->last_error = 0;
+                        }
+                }
+                return 0;
+        }
+
+        int mysql_stmt_close( MYSQL_STMT * stmt )
+        {
+                if ( stmt != nullptr )
+                {
+                        StatementData * data = static_cast<StatementData*>( stmt->internal );
+                        delete data;
+                        delete stmt;
+                }
+                return 0;
+        }
+
+        unsigned int mysql_stmt_errno( MYSQL_STMT * stmt )
+        {
+                if ( stmt == nullptr )
+                {
+                        return 0;
+                }
+                StatementData * data = static_cast<StatementData*>( stmt->internal );
+                return ( data != nullptr ) ? data->last_error : 0;
+        }
+
+        const char * mysql_stmt_error( MYSQL_STMT * )
+        {
+                return g_error_message;
         }
 }
 
