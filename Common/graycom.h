@@ -87,7 +87,10 @@ typedef int socklen_t;
 #define HANDLE			DWORD
 #define _cdecl
 #define LONGLONG		DWORD	// This should be 64 bit ???
-#define	TCHAR			char			// a text char.
+#ifndef _TCHAR_DEFINED
+typedef char				TCHAR;				// a text char.
+#define _TCHAR_DEFINED
+#endif
 #define FAR
 #define E_FAIL			0x80004005
 #define BOOL			unsigned short

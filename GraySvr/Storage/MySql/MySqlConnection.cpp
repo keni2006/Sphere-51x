@@ -204,6 +204,11 @@ namespace MySql
                 }
         }
 
+        MySqlStatement::BindNullFlag * MySqlStatement::GetNullFlagPointer( size_t index ) noexcept
+        {
+                return reinterpret_cast<BindNullFlag *>( &m_IsNull[index] );
+        }
+
         void MySqlStatement::BindRawData( size_t index, enum enum_field_types type, const void * data, size_t length, bool isUnsigned )
         {
                 EnsureStorage( index );
@@ -212,7 +217,7 @@ namespace MySql
                 std::memset( &bind, 0, sizeof( MYSQL_BIND ));
                 bind.buffer_type = type;
                 bind.is_unsigned = isUnsigned ? 1 : 0;
-                bind.is_null = &m_IsNull[index];
+                bind.is_null = GetNullFlagPointer( index );
                 bind.length = &m_Lengths[index];
 
                 if ( data != NULL && length > 0 )
@@ -242,7 +247,7 @@ namespace MySql
                 std::memset( &bind, 0, sizeof( MYSQL_BIND ));
                 bind.buffer_type = MYSQL_TYPE_LONGLONG;
                 bind.is_unsigned = isUnsigned ? 1 : 0;
-                bind.is_null = &m_IsNull[index];
+                bind.is_null = GetNullFlagPointer( index );
                 bind.length = &m_Lengths[index];
 
                 m_Buffers[index].resize( sizeof( long long ));
@@ -284,7 +289,7 @@ namespace MySql
                 bind.buffer = NULL;
                 bind.buffer_length = 0;
                 bind.is_unsigned = 0;
-                bind.is_null = &m_IsNull[index];
+                bind.is_null = GetNullFlagPointer( index );
                 bind.length = &m_Lengths[index];
                 m_IsNull[index] = 1;
                 m_Lengths[index] = 0;
