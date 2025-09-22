@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Storage/Database.h"
-#include "Storage/MySql/MySqlConnection.h"
+#include "../Database.h"
+#include "MySqlConnection.h"
 
 #include <memory>
 #include <string>

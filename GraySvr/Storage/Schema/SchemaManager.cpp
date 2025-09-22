@@ -3,7 +3,7 @@
 #else
 #include "../../../tests/stubs/graysvr.h"
 #endif
-#include "Storage/Schema/SchemaManager.h"
+#include "SchemaManager.h"
 
 #include "../../MySqlStorageService.h"
 

@@ -3,7 +3,7 @@
 #else
 #include "../../graysvr.h"
 #endif
-#include "Storage/MySql/MySqlLogging.h"
+#include "MySqlLogging.h"
 
 WORD GetMySQLErrorLogMask( LOGL_TYPE level )
 {

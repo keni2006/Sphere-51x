@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Storage/Database.h"
+#include "../Database.h"
 
 #include <condition_variable>
 #include <memory>

@@ -5,7 +5,7 @@
 #else
 #include "../../../Common/common.h"
 #endif
-#include "Storage/Database.h"
+#include "../Database.h"
 
 WORD GetMySQLErrorLogMask( LOGL_TYPE level );
 void LogDatabaseError( const Storage::DatabaseError & ex, LOGL_TYPE level );
