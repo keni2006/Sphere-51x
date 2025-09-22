@@ -8,6 +8,7 @@
 #include <strings.h>
 #include <string>
 #include <vector>
+#include <netinet/in.h>
 
 #ifndef _WIN32
 inline char * my_strupr( char * value )
@@ -70,6 +71,21 @@ public:
 
 private:
         std::vector<LogEventEntry> m_events;
+};
+
+struct CRealTime
+{
+        int m_Year;
+        int m_Month;
+        int m_Day;
+        int m_Hour;
+        int m_Min;
+        int m_Sec;
+
+        bool IsValid() const
+        {
+                return true;
+        }
 };
 
 class CServer

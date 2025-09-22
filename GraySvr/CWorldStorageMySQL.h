@@ -228,6 +228,15 @@ public:
                 return m_sTablePrefix;
         }
 
+#ifdef UNIT_TEST
+        CGString DebugBuildSchemaVersionCreateQuery() const
+        {
+                return BuildSchemaVersionCreateQuery();
+        }
+
+        bool DebugExecuteQuery( const CGString & query );
+#endif
+
 private:
         friend class Transaction;
         friend class UniversalRecord;
@@ -267,6 +276,7 @@ private:
         const char * GetDefaultTableCharset() const;
         const char * GetDefaultTableCollation() const;
         CGString GetDefaultTableCollationSuffix() const;
+        CGString BuildSchemaVersionCreateQuery() const;
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
         bool SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
