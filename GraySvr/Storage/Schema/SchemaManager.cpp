@@ -433,8 +433,10 @@ bool SchemaManager::ApplyMigration_2_3( MySqlStorageService & storage )
                 "CREATE TABLE IF NOT EXISTS `%s` (\n"
                 "`parent_uid` BIGINT UNSIGNED NOT NULL,\n"
                 "`child_uid` BIGINT UNSIGNED NOT NULL,\n"
-                "`relation_type` VARCHAR(32) NOT NULL,\n"
-                "PRIMARY KEY (`parent_uid`, `child_uid`, `relation_type`),\n"
+                "`relation` VARCHAR(32) NOT NULL,\n"
+                "`sequence` INT NOT NULL DEFAULT 0,\n"
+                "PRIMARY KEY (`parent_uid`, `child_uid`, `relation`, `sequence`),\n"
+                "KEY `ix_world_relations_child` (`child_uid`),\n"
                 "FOREIGN KEY (`parent_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE,\n"
                 "FOREIGN KEY (`child_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE\n"
                 ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
