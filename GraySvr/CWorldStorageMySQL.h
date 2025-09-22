@@ -2,6 +2,8 @@
 #define _CWORLD_STORAGE_MYSQL_H_
 
 #include "../Common/cstring.h"
+#include "Storage/Database.h"
+#include "Storage/MySql/MySqlConnection.h"
 #include <functional>
 #include <memory>
 #include <vector>
@@ -25,8 +27,13 @@ struct in_addr;
 struct CServerMySQLConfig;
 enum StorageDirtyType : int;
 
-class MariaDbConnection;
-class MariaDbResult;
+namespace Storage
+{
+        namespace MySql
+        {
+                class MySqlConnectionPool;
+        }
+}
 
 class CWorldStorageMySQL
 {
@@ -246,7 +253,7 @@ private:
         void DirtyWorkerLoop();
         bool ProcessDirtyObject( unsigned long long uid, StorageDirtyType type );
 
-        bool Query( const CGString & query, MariaDbResult * pResult = NULL );
+        bool Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult = NULL );
         bool ExecuteQuery( const CGString & query );
         bool EnsureSchemaVersionTable();
         bool SetSchemaVersion( int version );
@@ -263,6 +270,7 @@ private:
         bool EnsureSectorColumns();
         bool EnsureGMPageColumns();
         bool EnsureServerColumns();
+        Storage::MySql::MySqlConnection * GetActiveConnection( Storage::MySql::MySqlConnectionPool::ScopedConnection & scoped ) const;
         CGString EscapeString( const TCHAR * pszInput ) const;
         CGString FormatStringValue( const CGString & value ) const;
         CGString FormatOptionalStringValue( const CGString & value ) const;
@@ -290,11 +298,15 @@ private:
         bool ClearTable( const CGString & table );
         CGString GetAccountNameById( unsigned int accountId );
 
-        std::unique_ptr<MariaDbConnection> m_pConnection;
+        mutable std::unique_ptr<Storage::MySql::MySqlConnectionPool> m_ConnectionPool;
+        Storage::DatabaseConfig m_DatabaseConfig;
+        mutable Storage::MySql::MySqlConnectionPool::ScopedConnection m_TransactionConnection;
+        std::unique_ptr<Storage::IDatabaseTransaction> m_TransactionGuard;
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
         CGString m_sTableCharset;
         CGString m_sTableCollation;
+        bool m_fConnected;
         bool m_fAutoReconnect;
         int m_iReconnectTries;
         int m_iReconnectDelay;

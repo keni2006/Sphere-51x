@@ -162,6 +162,12 @@
     <ClCompile Include="graysvr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Storage\Database.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Storage\MySql\MySqlConnection.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ntservice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -216,6 +222,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CWorldStorageMySQL.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Storage\Database.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Storage\MySql\MySqlConnection.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CVarDefMap.h">

@@ -38,19 +38,7 @@
 #include <unistd.h>
 #endif
 
-#ifdef _WIN32
-#include <errmsg.h>
-#include <mysqld_error.h>
-#include <mysql.h>
-#else
-#include <mysql/errmsg.h>
-#include <mysql/mysqld_error.h>
-#include <mysql/mysql.h>
-#endif
-
-#ifndef MYSQL_OPT_SET_CHARSET_NAME
-#define MYSQL_OPT_SET_CHARSET_NAME MYSQL_SET_CHARSET_NAME
-#endif
+#include "Storage/MySql/MySqlConnection.h"
 
 namespace
 {
@@ -202,6 +190,11 @@ WORD GetMySQLErrorLogMask( LOGL_TYPE level )
                         stream << "0x" << std::setw( 2 ) << static_cast<int>( static_cast<unsigned char>( value[i] ));
                 }
                 return stream.str();
+        }
+
+        void LogDatabaseError( const Storage::DatabaseError & ex, LOGL_TYPE level )
+        {
+                g_Log.Event( GetMySQLErrorLogMask( level ), "MySQL %s error (%u): %s\n", ex.GetContext().c_str(), ex.GetCode(), ex.what());
         }
 
         void AppendUtf8( std::string & output, uint32_t codepoint )
@@ -407,427 +400,6 @@ WORD GetMySQLErrorLogMask( LOGL_TYPE level )
                 result.m_pszReason = "Removed unsupported characters from table prefix";
                 return result;
         }
-}
-
-class MariaDbException : public std::runtime_error
-{
-public:
-        MariaDbException( std::string context, unsigned int code, std::string message ) :
-                std::runtime_error( message.empty() ? "Unknown MariaDB client error" : message ),
-                m_Context( std::move( context )),
-                m_Code( code )
-        {
-        }
-
-        const std::string & GetContext() const noexcept
-        {
-                return m_Context;
-        }
-
-        unsigned int GetCode() const noexcept
-        {
-                return m_Code;
-        }
-
-        static MariaDbException FromHandle( const char * context, MYSQL * handle )
-        {
-                unsigned int code = 0;
-                std::string message;
-
-                if ( handle != NULL )
-                {
-                        code = mysql_errno( handle );
-                        const char * pszError = mysql_error( handle );
-                        if ( pszError != NULL && pszError[0] != '\0' )
-                        {
-                                message = pszError;
-                        }
-                }
-
-                if ( message.empty())
-                {
-                        message = ( handle == NULL ) ? "No active MariaDB connection" : "Unknown MariaDB client error";
-                }
-
-                return MariaDbException( context != NULL ? context : "mysql", code, message );
-        }
-
-private:
-        std::string m_Context;
-        unsigned int m_Code;
-};
-
-class MariaDbResult
-{
-public:
-        using Row = MYSQL_ROW;
-
-        MariaDbResult() noexcept = default;
-
-        explicit MariaDbResult( MYSQL_RES * result ) noexcept :
-                m_Handle( result )
-        {
-        }
-
-        MariaDbResult( const MariaDbResult & ) = delete;
-        MariaDbResult & operator=( const MariaDbResult & ) = delete;
-
-        MariaDbResult( MariaDbResult && other ) noexcept = default;
-        MariaDbResult & operator=( MariaDbResult && other ) noexcept = default;
-
-        ~MariaDbResult()
-        {
-                Reset();
-        }
-
-        void Reset( MYSQL_RES * result = NULL ) noexcept
-        {
-                m_Handle.reset( result );
-        }
-
-        bool IsValid() const noexcept
-        {
-                return m_Handle.get() != NULL;
-        }
-
-        unsigned int NumFields() const noexcept
-        {
-                MYSQL_RES * handle = m_Handle.get();
-                return ( handle != NULL ) ? mysql_num_fields( handle ) : 0;
-        }
-
-        Row FetchRow()
-        {
-                MYSQL_RES * handle = m_Handle.get();
-                if ( handle == NULL )
-                {
-                        return NULL;
-                }
-                return mysql_fetch_row( handle );
-        }
-
-private:
-        struct MysqlResultDeleter
-        {
-                void operator()( MYSQL_RES * result ) const noexcept
-                {
-                        if ( result != NULL )
-                        {
-                                mysql_free_result( result );
-                        }
-                }
-        };
-
-        std::unique_ptr<MYSQL_RES, MysqlResultDeleter> m_Handle;
-};
-
-class MariaDbConnection
-{
-public:
-        MariaDbConnection() noexcept = default;
-
-        ~MariaDbConnection()
-        {
-                Close();
-        }
-
-        MariaDbConnection( const MariaDbConnection & ) = delete;
-        MariaDbConnection & operator=( const MariaDbConnection & ) = delete;
-
-        MariaDbConnection( MariaDbConnection && other ) noexcept = default;
-        MariaDbConnection & operator=( MariaDbConnection && other ) noexcept = default;
-
-        void Close() noexcept
-        {
-                m_StringOptions.clear();
-                m_Handle.reset();
-        }
-
-        bool IsOpen() const noexcept
-        {
-                return m_Handle != NULL;
-        }
-
-        void Initialize()
-        {
-                Close();
-                MYSQL * handle = mysql_init( NULL );
-                if ( handle == NULL )
-                {
-                        throw MariaDbException( "mysql_init", CR_OUT_OF_MEMORY, "mysql_init failed" );
-                }
-                m_Handle.reset( handle );
-        }
-
-        MYSQL * GetHandle() const noexcept
-        {
-                return m_Handle.get();
-        }
-
-        void SetOption( enum mysql_option option, const void * value )
-        {
-                MYSQL * handle = RequireHandle( "mysql_options" );
-                if ( mysql_options( handle, option, value ) != 0 )
-                {
-                        throw MariaDbException::FromHandle( "mysql_options", handle );
-                }
-        }
-
-        void SetStringOption( enum mysql_option option, const std::string & value )
-        {
-                if ( value.empty())
-                {
-                        return;
-                }
-
-                MYSQL * handle = RequireHandle( "mysql_options" );
-
-                m_StringOptions.push_back( value );
-                const char * pszValue = m_StringOptions.back().c_str();
-                if ( mysql_options( handle, option, pszValue ) != 0 )
-                {
-                        MariaDbException ex = MariaDbException::FromHandle( "mysql_options", handle );
-                        m_StringOptions.pop_back();
-                        throw ex;
-                }
-        }
-
-        void RealConnect( const char * host, const char * user, const char * password, const char * database, unsigned int port )
-        {
-                MYSQL * handle = RequireHandle( "mysql_real_connect" );
-                MYSQL * result = mysql_real_connect( handle, host, user, password, database, port, NULL, 0 );
-                if ( result == NULL )
-                {
-                        throw MariaDbException::FromHandle( "mysql_real_connect", handle );
-                }
-        }
-
-        void Execute( const CGString & query )
-        {
-                Execute( (const char *) query );
-        }
-
-        void Execute( const std::string & query )
-        {
-                Execute( query.c_str());
-        }
-
-        void Execute( const char * query )
-        {
-                ExecuteImpl( query );
-        }
-
-        MariaDbResult Query( const CGString & query )
-        {
-                return Query( (const char *) query );
-        }
-
-        MariaDbResult Query( const std::string & query )
-        {
-                return Query( query.c_str());
-        }
-
-        MariaDbResult Query( const char * query )
-        {
-                return QueryImpl( query );
-        }
-
-        void BeginTransaction()
-        {
-                Execute( "START TRANSACTION" );
-        }
-
-        void Commit()
-        {
-                Execute( "COMMIT" );
-        }
-
-        void Rollback()
-        {
-                Execute( "ROLLBACK" );
-        }
-
-        void SetCharacterSet( const char * charset )
-        {
-                if ( charset == NULL || charset[0] == '\0' )
-                {
-                        return;
-                }
-
-                MYSQL * handle = RequireHandle( "mysql_set_character_set" );
-                if ( mysql_set_character_set( handle, charset ) != 0 )
-                {
-                        throw MariaDbException::FromHandle( "mysql_set_character_set", handle );
-                }
-        }
-
-        void ConfigureCharacterSet( const std::string & charset, const std::string & collation )
-        {
-                if ( charset.empty())
-                {
-                        return;
-                }
-
-                SetCharacterSet( charset.c_str());
-
-                const std::string command = BuildSetNamesCommand( charset, collation );
-                if ( !command.empty())
-                {
-                        Execute( command.c_str());
-                }
-        }
-
-        std::string EscapeString( const char * input, size_t length )
-        {
-                if ( input == NULL || length == 0 )
-                {
-                        return std::string();
-                }
-
-                MYSQL * handle = RequireHandle( "mysql_real_escape_string" );
-
-                std::string buffer;
-                buffer.resize( length * 2 + 1 );
-                unsigned long written = mysql_real_escape_string( handle, &buffer[0], input, static_cast<unsigned long>( length ) );
-                buffer.resize( written );
-                return buffer;
-        }
-
-        const char * CharacterSetName() const noexcept
-        {
-                MYSQL * handle = m_Handle.get();
-                return ( handle != NULL ) ? mysql_character_set_name( handle ) : NULL;
-        }
-
-        struct CharacterSetInfo
-        {
-                std::string m_sCharset;
-                std::string m_sCollation;
-        };
-
-        CharacterSetInfo GetCharacterSetInfo() const
-        {
-                CharacterSetInfo info;
-                MYSQL * handle = m_Handle.get();
-                if ( handle == NULL )
-                {
-                        return info;
-                }
-
-                MY_CHARSET_INFO csInfo;
-                mysql_get_character_set_info( handle, &csInfo );
-                if ( csInfo.csname != NULL )
-                {
-                        info.m_sCharset = csInfo.csname;
-                }
-                if ( csInfo.name != NULL )
-                {
-                        info.m_sCollation = csInfo.name;
-                }
-                return info;
-        }
-
-        unsigned int LastErrorCode() const noexcept
-        {
-                MYSQL * handle = m_Handle.get();
-                return ( handle != NULL ) ? mysql_errno( handle ) : 0;
-        }
-
-        std::string LastErrorMessage() const
-        {
-                MYSQL * handle = m_Handle.get();
-                if ( handle == NULL )
-                {
-                        return "No active MariaDB connection";
-                }
-
-                const char * pszError = mysql_error( handle );
-                if ( pszError == NULL || pszError[0] == '\0' )
-                {
-                        return "Unknown MariaDB client error";
-                }
-                return pszError;
-        }
-
-private:
-        MYSQL * RequireHandle( const char * context ) const
-        {
-                MYSQL * handle = m_Handle.get();
-                if ( handle == NULL )
-                {
-                        throw MariaDbException( context != NULL ? context : "mysql", 0, "No active MariaDB connection" );
-                }
-                return handle;
-        }
-
-        void ExecuteImpl( const char * query )
-        {
-                if ( query == NULL )
-                {
-                        throw MariaDbException( "mysql_query", CR_UNKNOWN_ERROR, "Query pointer is null" );
-                }
-
-                MYSQL * handle = RequireHandle( "mysql_query" );
-
-                if ( mysql_query( handle, query ) != 0 )
-                {
-                        throw MariaDbException::FromHandle( "mysql_query", handle );
-                }
-
-                if ( mysql_field_count( handle ) != 0 )
-                {
-                        MYSQL_RES * result = mysql_store_result( handle );
-                        if ( result != NULL )
-                        {
-                                mysql_free_result( result );
-                        }
-                        else if ( mysql_errno( handle ) != 0 )
-                        {
-                                throw MariaDbException::FromHandle( "mysql_store_result", handle );
-                        }
-                }
-        }
-
-        MariaDbResult QueryImpl( const char * query )
-        {
-                if ( query == NULL )
-                {
-                        throw MariaDbException( "mysql_query", CR_UNKNOWN_ERROR, "Query pointer is null" );
-                }
-
-                MYSQL * handle = RequireHandle( "mysql_query" );
-
-                if ( mysql_query( handle, query ) != 0 )
-                {
-                        throw MariaDbException::FromHandle( "mysql_query", handle );
-                }
-
-                MYSQL_RES * result = mysql_store_result( handle );
-                if ( result == NULL && mysql_errno( handle ) != 0 )
-                {
-                        throw MariaDbException::FromHandle( "mysql_store_result", handle );
-                }
-                return MariaDbResult( result );
-        }
-
-        struct MysqlHandleDeleter
-        {
-                void operator()( MYSQL * handle ) const noexcept
-                {
-                        if ( handle != NULL )
-                        {
-                                mysql_close( handle );
-                        }
-                }
-        };
-
-        std::unique_ptr<MYSQL, MysqlHandleDeleter> m_Handle;
-        std::vector<std::string> m_StringOptions;
-};
-
-void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
-{
-        g_Log.Event( GetMySQLErrorLogMask( level ), "MySQL %s error (%u): %s\n", ex.GetContext().c_str(), ex.GetCode(), ex.what());
 }
 
 #if !defined(UNIT_TEST) || defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
@@ -1099,7 +671,8 @@ CGString CWorldStorageMySQL::UniversalRecord::BuildUpdate( const CGString & wher
 
 CWorldStorageMySQL::CWorldStorageMySQL()
 {
-        m_pConnection.reset();
+        m_ConnectionPool.reset();
+        m_DatabaseConfig = Storage::DatabaseConfig();
         m_fAutoReconnect = false;
         m_iReconnectTries = 0;
         m_iReconnectDelay = 0;
@@ -1107,6 +680,7 @@ CWorldStorageMySQL::CWorldStorageMySQL()
         m_sTablePrefix.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
+        m_fConnected = false;
         m_tLastAccountSync = 0;
         m_iTransactionDepth = 0;
         m_fDirtyThreadStop = false;
@@ -1242,13 +816,24 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                 g_Log.Event( LOGM_INIT|LOGL_WARN, "Invalid collation token '%s'; ignoring requested value.", invalidCollation.c_str());
         }
 
-        const std::string setNamesCommand = BuildSetNamesCommand( sessionCharset, sessionCollation );
-
         const char * pszHost = config.m_sHost.IsEmpty() ? NULL : (const char *) config.m_sHost;
         const char * pszUser = config.m_sUser.IsEmpty() ? NULL : (const char *) config.m_sUser;
         const char * pszPassword = config.m_sPassword.IsEmpty() ? NULL : (const char *) config.m_sPassword;
         const char * pszDatabase = config.m_sDatabase.IsEmpty() ? NULL : (const char *) config.m_sDatabase;
         unsigned int uiPort = config.m_iPort > 0 ? static_cast<unsigned int>( config.m_iPort ) : 0;
+
+        Storage::DatabaseConfig dbConfig;
+        dbConfig.m_Enable = true;
+        dbConfig.m_Host = ( pszHost != NULL ) ? pszHost : std::string();
+        dbConfig.m_Port = uiPort;
+        dbConfig.m_Database = ( pszDatabase != NULL ) ? pszDatabase : std::string();
+        dbConfig.m_Username = ( pszUser != NULL ) ? pszUser : std::string();
+        dbConfig.m_Password = ( pszPassword != NULL ) ? pszPassword : std::string();
+        dbConfig.m_Charset = sessionCharset;
+        dbConfig.m_Collation = sessionCollation;
+        dbConfig.m_AutoReconnect = m_fAutoReconnect;
+        dbConfig.m_ReconnectTries = ( m_iReconnectTries > 0 ) ? static_cast<unsigned int>( m_iReconnectTries ) : 1;
+        dbConfig.m_ReconnectDelaySeconds = ( m_iReconnectDelay > 0 ) ? static_cast<unsigned int>( m_iReconnectDelay ) : 1;
 
         const int attempts = std::max( m_fAutoReconnect ? m_iReconnectTries : 1, 1 );
 
@@ -1256,37 +841,10 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
         {
                 try
                 {
-                        std::unique_ptr<MariaDbConnection> connection( new MariaDbConnection() );
-                        connection->Initialize();
+                        std::unique_ptr<Storage::MySql::MySqlConnection> connection( new Storage::MySql::MySqlConnection() );
+                        connection->Open( dbConfig );
 
-                        if ( m_fAutoReconnect )
-                        {
-                                char reconnect = 1;
-                                connection->SetOption( MYSQL_OPT_RECONNECT, &reconnect );
-                        }
-
-                        if ( !sessionCharset.empty())
-                        {
-                                connection->SetStringOption( MYSQL_OPT_SET_CHARSET_NAME, sessionCharset );
-                        }
-
-                        if ( !setNamesCommand.empty())
-                        {
-                                connection->SetStringOption( MYSQL_INIT_COMMAND, setNamesCommand );
-                        }
-
-                        connection->RealConnect( pszHost, pszUser, pszPassword, pszDatabase, uiPort );
-
-                        try
-                        {
-                                connection->ConfigureCharacterSet( sessionCharset, sessionCollation );
-                        }
-                        catch ( const MariaDbException & ex )
-                        {
-                                LogMariaDbException( ex, LOGL_WARN );
-                        }
-
-                        MariaDbConnection::CharacterSetInfo activeInfo = connection->GetCharacterSetInfo();
+                        Storage::DatabaseCharacterSetInfo activeInfo = connection->GetCharacterSetInfo();
                         if ( !sessionCharset.empty())
                         {
                                 m_sTableCharset = sessionCharset.c_str();
@@ -1320,7 +878,17 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
                                 sCollationSuffix.Format( ", collation '%s'", (const char *) m_sTableCollation );
                         }
 
-                        m_pConnection = std::move( connection );
+                        if ( !m_ConnectionPool )
+                        {
+                                m_ConnectionPool.reset( new Storage::MySql::MySqlConnectionPool( dbConfig, 1 ));
+                        }
+                        else
+                        {
+                                m_ConnectionPool->Configure( dbConfig, 1 );
+                        }
+                        m_ConnectionPool->AddConnection( std::move( connection ));
+                        m_DatabaseConfig = dbConfig;
+                        m_fConnected = true;
 
                         g_Log.Event( LOGM_INIT|LOGL_EVENT, "Connected to MySQL server %s:%u using character set '%s'%s.",
                                 ( pszHost != NULL && pszHost[0] != '\0' ) ? pszHost : "localhost",
@@ -1332,9 +900,9 @@ bool CWorldStorageMySQL::Connect( const CServerMySQLConfig & config )
 #endif
                         return true;
                 }
-                catch ( const MariaDbException & ex )
+                catch ( const Storage::DatabaseError & ex )
                 {
-                        LogMariaDbException( ex, LOGL_ERROR );
+                        LogDatabaseError( ex, LOGL_ERROR );
                         if ( ( attempt + 1 ) < attempts )
                         {
                                 int delay = std::max( m_iReconnectDelay, 1 );
@@ -1358,7 +926,15 @@ void CWorldStorageMySQL::Disconnect()
 #ifndef UNIT_TEST
         StopDirtyWorker();
 #endif
-        m_pConnection.reset();
+        m_TransactionGuard.reset();
+        m_TransactionConnection.Reset();
+        if ( m_ConnectionPool )
+        {
+                m_ConnectionPool->Shutdown();
+                m_ConnectionPool.reset();
+        }
+        m_fConnected = false;
+        m_DatabaseConfig = Storage::DatabaseConfig();
 
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
@@ -1399,19 +975,24 @@ CGString CWorldStorageMySQL::BuildSchemaVersionCreateQuery() const
 #ifdef UNIT_TEST
 bool CWorldStorageMySQL::DebugExecuteQuery( const CGString & query )
 {
-        if ( !m_pConnection )
+        if ( !m_ConnectionPool )
         {
                 return false;
         }
 
         try
         {
-                m_pConnection->Execute( query );
+                auto connection = m_ConnectionPool->Acquire();
+                if ( !connection.IsValid())
+                {
+                        return false;
+                }
+                connection->Execute( query );
                 return true;
         }
-        catch ( const MariaDbException & ex )
+        catch ( const Storage::DatabaseError & ex )
         {
-                LogMariaDbException( ex, LOGL_ERROR );
+                LogDatabaseError( ex, LOGL_ERROR );
         }
         return false;
 }
@@ -1437,8 +1018,23 @@ CGString CWorldStorageMySQL::EscapeString( const TCHAR * pszInput ) const
                 return sResult;
         }
 
-        std::string escaped = m_pConnection->EscapeString( pszInput, uiLength );
-        sResult = escaped.c_str();
+        try
+        {
+                Storage::MySql::MySqlConnectionPool::ScopedConnection scopedConnection;
+                Storage::MySql::MySqlConnection * connection = GetActiveConnection( scopedConnection );
+                if ( connection == NULL )
+                {
+                        return sResult;
+                }
+                std::string escaped = connection->EscapeString( pszInput, uiLength );
+                sResult = escaped.c_str();
+                return sResult;
+        }
+        catch ( const Storage::DatabaseError & ex )
+        {
+                LogDatabaseError( ex, LOGL_ERROR );
+        }
+
         return sResult;
 }
 
@@ -1509,12 +1105,12 @@ CGString CWorldStorageMySQL::FormatIPAddressValue( const struct in_addr & value 
 
 bool CWorldStorageMySQL::IsConnected() const
 {
-        return m_pConnection && m_pConnection->IsOpen();
+        return m_fConnected;
 }
 
 bool CWorldStorageMySQL::IsEnabled() const
 {
-        return IsConnected();
+        return m_fConnected;
 }
 
 CGString CWorldStorageMySQL::GetPrefixedTableName( const char * name ) const
@@ -1553,7 +1149,28 @@ CGString CWorldStorageMySQL::GetDefaultTableCollationSuffix() const
         return sSuffix;
 }
 
-bool CWorldStorageMySQL::Query( const CGString & query, MariaDbResult * pResult )
+Storage::MySql::MySqlConnection * CWorldStorageMySQL::GetActiveConnection( Storage::MySql::MySqlConnectionPool::ScopedConnection & scoped ) const
+{
+        if ( m_TransactionConnection && m_TransactionConnection->IsValid())
+        {
+                return &m_TransactionConnection->Get();
+        }
+
+        if ( !m_ConnectionPool )
+        {
+                return NULL;
+        }
+
+        scoped = m_ConnectionPool->Acquire();
+        if ( !scoped.IsValid())
+        {
+                return NULL;
+        }
+
+        return &scoped.Get();
+}
+
+bool CWorldStorageMySQL::Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult )
 {
         if ( ! IsConnected())
         {
@@ -1563,19 +1180,31 @@ bool CWorldStorageMySQL::Query( const CGString & query, MariaDbResult * pResult 
 
         try
         {
+                Storage::MySql::MySqlConnectionPool::ScopedConnection scopedConnection;
+                Storage::MySql::MySqlConnection * connection = GetActiveConnection( scopedConnection );
+                if ( connection == NULL )
+                {
+                        return false;
+                }
+
+                const char * pszQuery = (const char *) query;
                 if ( pResult != NULL )
                 {
-                        *pResult = m_pConnection->Query( query );
+                        std::unique_ptr<Storage::IDatabaseResult> result = connection->Query( pszQuery );
+                        if ( pResult != NULL )
+                        {
+                                *pResult = std::move( result );
+                        }
                 }
                 else
                 {
-                        m_pConnection->Execute( query );
+                        connection->Execute( pszQuery );
                 }
                 return true;
         }
-        catch ( const MariaDbException & ex )
+        catch ( const Storage::DatabaseError & ex )
         {
-                LogMariaDbException( ex, LOGL_ERROR );
+                LogDatabaseError( ex, LOGL_ERROR );
                 g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s", (const char *) query );
         }
         return false;
@@ -1632,12 +1261,31 @@ bool CWorldStorageMySQL::BeginTransaction()
         {
                 try
                 {
-                        m_pConnection->BeginTransaction();
+                        if ( !m_ConnectionPool )
+                        {
+                                return false;
+                        }
+
+                        m_TransactionConnection.Reset();
+                        m_TransactionConnection = m_ConnectionPool->Acquire();
+                        if ( !m_TransactionConnection.IsValid())
+                        {
+                                return false;
+                        }
+                        m_TransactionGuard = m_TransactionConnection->BeginTransaction();
                 }
-                catch ( const MariaDbException & ex )
+                catch ( const Storage::DatabaseError & ex )
                 {
-                        LogMariaDbException( ex, LOGL_ERROR );
+                        LogDatabaseError( ex, LOGL_ERROR );
+                        m_TransactionConnection.Reset();
+                        m_TransactionGuard.reset();
                         return false;
+                }
+                catch ( ... )
+                {
+                        m_TransactionConnection.Reset();
+                        m_TransactionGuard.reset();
+                        throw;
                 }
         }
 
@@ -1661,14 +1309,22 @@ bool CWorldStorageMySQL::CommitTransaction()
         {
                 try
                 {
-                        m_pConnection->Commit();
+                        if ( m_TransactionGuard )
+                        {
+                                m_TransactionGuard->Commit();
+                        }
                 }
-                catch ( const MariaDbException & ex )
+                catch ( const Storage::DatabaseError & ex )
                 {
-                        LogMariaDbException( ex, LOGL_ERROR );
+                        LogDatabaseError( ex, LOGL_ERROR );
                         m_iTransactionDepth = 0;
+                        m_TransactionGuard.reset();
+                        m_TransactionConnection.Reset();
                         return false;
                 }
+
+                m_TransactionGuard.reset();
+                m_TransactionConnection.Reset();
         }
         return true;
 }
@@ -1686,16 +1342,23 @@ bool CWorldStorageMySQL::RollbackTransaction()
 
         try
         {
-                m_pConnection->Rollback();
+                if ( m_TransactionGuard )
+                {
+                        m_TransactionGuard->Rollback();
+                }
         }
-        catch ( const MariaDbException & ex )
+        catch ( const Storage::DatabaseError & ex )
         {
-                LogMariaDbException( ex, LOGL_ERROR );
+                LogDatabaseError( ex, LOGL_ERROR );
                 m_iTransactionDepth = 0;
+                m_TransactionGuard.reset();
+                m_TransactionConnection.Reset();
                 return false;
         }
 
         m_iTransactionDepth = 0;
+        m_TransactionGuard.reset();
+        m_TransactionConnection.Reset();
         return true;
 }
 
@@ -1779,16 +1442,16 @@ int CWorldStorageMySQL::GetSchemaVersion()
 	sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;",
 		(const char *) sTableName, SCHEMA_VERSION_ROW );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return -1;
         }
 
         int iVersion = 0;
-        if ( result.IsValid())
+        if ( result && result->IsValid())
         {
-                MariaDbResult::Row pRow = result.FetchRow();
+                Storage::IDatabaseResult::Row pRow = result->FetchRow();
                 if ( pRow != NULL && pRow[0] != NULL )
                 {
                         iVersion = atoi( pRow[0] );
@@ -2232,16 +1895,16 @@ bool CWorldStorageMySQL::ColumnExists( const CGString & table, const char * colu
                 "WHERE table_schema = '%s' AND table_name = '%s' AND column_name = '%s';",
                 (const char *) sEscDatabase, (const char *) sEscTable, (const char *) sEscColumn );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! const_cast<CWorldStorageMySQL*>(this)->Query( sQuery, &result ))
         {
                 return false;
         }
 
         bool fExists = false;
-        if ( result.IsValid())
+        if ( result && result->IsValid())
         {
-                MariaDbResult::Row pRow = result.FetchRow();
+                Storage::IDatabaseResult::Row pRow = result->FetchRow();
                 if ( pRow != NULL && pRow[0] != NULL )
                 {
                         fExists = ( atoi( pRow[0] ) > 0 );
@@ -2468,16 +2131,16 @@ unsigned int CWorldStorageMySQL::GetAccountId( const CGString & name )
         CGString sQuery;
         sQuery.Format( "SELECT `id` FROM `%s` WHERE `name` = '%s' LIMIT 1;", (const char *) sAccounts, (const char *) sEscName );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return 0;
         }
 
         unsigned int uiId = 0;
-        if ( result.IsValid())
+        if ( result && result->IsValid())
         {
-                MariaDbResult::Row pRow = result.FetchRow();
+                Storage::IDatabaseResult::Row pRow = result->FetchRow();
                 if ( pRow != NULL && pRow[0] != NULL )
                 {
                         uiId = (unsigned int) strtoul( pRow[0], NULL, 10 );
@@ -2509,19 +2172,19 @@ bool CWorldStorageMySQL::FetchAccounts( std::vector<AccountData> & accounts, con
                 (const char *) sAccounts,
                 whereClause.IsEmpty() ? "" : (const char *) whereClause );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
-        if ( !result.IsValid())
+        if ( !result || !result->IsValid())
         {
             return true;
         }
 
-        MariaDbResult::Row pRow;
-        while (( pRow = result.FetchRow()) != NULL )
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
         {
                 AccountData data;
                 data.m_id = pRow[0] ? (unsigned int) strtoul( pRow[0], NULL, 10 ) : 0;
@@ -2567,13 +2230,13 @@ void CWorldStorageMySQL::LoadAccountEmailSchedule( std::vector<AccountData> & ac
         CGString sQuery;
         sQuery.Format( "SELECT `account_id`,`sequence`,`message_id` FROM `%s` ORDER BY `account_id`,`sequence`;", (const char *) sEmails );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return;
         }
 
-        if ( !result.IsValid())
+        if ( !result || !result->IsValid())
         {
                 return;
         }
@@ -2585,8 +2248,8 @@ void CWorldStorageMySQL::LoadAccountEmailSchedule( std::vector<AccountData> & ac
                 mapAccounts[ accounts[i].m_id ] = &accounts[i];
         }
 
-        MariaDbResult::Row pRow;
-        while (( pRow = result.FetchRow()) != NULL )
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
         {
                 unsigned int accountId = pRow[0] ? (unsigned int) strtoul( pRow[0], NULL, 10 ) : 0;
                 auto it = mapAccounts.find( accountId );
@@ -2621,15 +2284,15 @@ bool CWorldStorageMySQL::QuerySchemaValue( int id, int & value )
         sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;",
                 (const char *) sTableName, id );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
-        if ( result.IsValid())
+        if ( result && result->IsValid())
         {
-                MariaDbResult::Row pRow = result.FetchRow();
+                Storage::IDatabaseResult::Row pRow = result->FetchRow();
                 if ( pRow != NULL && pRow[0] != NULL )
                 {
                         value = atoi( pRow[0] );
@@ -3293,19 +2956,19 @@ bool CWorldStorageMySQL::LoadSectors( std::vector<SectorData> & sectors )
         sQuery.Format( "SELECT `map_plane`,`x1`,`y1`,`x2`,`y2`,`has_light_override`,`local_light`,`has_rain_override`,`rain_chance`,`has_cold_override`,`cold_chance` FROM `%s`;",
                 (const char *) sSectors );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
-        if ( !result.IsValid())
+        if ( !result || !result->IsValid())
         {
                 return true;
         }
 
-        MariaDbResult::Row pRow;
-        while (( pRow = result.FetchRow()) != NULL )
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
         {
                 SectorData data;
                 data.m_iMapPlane = pRow[0] ? atoi( pRow[0] ) : 0;
@@ -3341,19 +3004,19 @@ bool CWorldStorageMySQL::LoadWorldObjects( std::vector<WorldObjectRecord> & obje
                 "SELECT o.`uid`,o.`object_type`,o.`object_subtype`,d.`data` FROM `%s` o INNER JOIN `%s` d ON o.`uid` = d.`object_uid` ORDER BY o.`uid`;",
                 (const char *) sObjects, (const char *) sData );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
-        if ( !result.IsValid())
+        if ( !result || !result->IsValid())
         {
                 return true;
         }
 
-        MariaDbResult::Row pRow;
-        while (( pRow = result.FetchRow()) != NULL )
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
         {
                 WorldObjectRecord record;
 #ifdef _WIN32
@@ -3389,19 +3052,19 @@ bool CWorldStorageMySQL::LoadGMPages( std::vector<GMPageRecord> & pages )
         sQuery.Format( "SELECT `account_id`,`account_name`,`reason`,`page_time`,`pos_x`,`pos_y`,`pos_z`,`map_plane` FROM `%s` ORDER BY `id`;",
                 (const char *) sGMPages );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
-        if ( !result.IsValid())
+        if ( !result || !result->IsValid())
         {
                 return true;
         }
 
-        MariaDbResult::Row pRow;
-        while (( pRow = result.FetchRow()) != NULL )
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
         {
                 GMPageRecord record;
                 unsigned int accountId = pRow[0] ? (unsigned int) strtoul( pRow[0], NULL, 10 ) : 0;
@@ -3442,19 +3105,19 @@ bool CWorldStorageMySQL::LoadServers( std::vector<ServerRecord> & servers )
         sQuery.Format( "SELECT `name`,`address`,`port`,`status`,`time_zone`,`clients_avg`,`url`,`email`,`register_password`,`notes`,`language`,`version`,`acc_app`,`last_valid_seconds`,`age_hours` FROM `%s` ORDER BY `name`;",
                 (const char *) sServers );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
-        if ( !result.IsValid())
+        if ( !result || !result->IsValid())
         {
                 return true;
         }
 
-        MariaDbResult::Row pRow;
-        while (( pRow = result.FetchRow()) != NULL )
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
         {
                 ServerRecord record;
                 record.m_sName = pRow[0] ? pRow[0] : "";
@@ -3488,16 +3151,16 @@ CGString CWorldStorageMySQL::GetAccountNameById( unsigned int accountId )
         CGString sQuery;
         sQuery.Format( "SELECT `name` FROM `%s` WHERE `id` = %u LIMIT 1;", (const char *) sAccounts, accountId );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return CGString();
         }
 
         CGString sName;
-        if ( result.IsValid())
+        if ( result && result->IsValid())
         {
-                MariaDbResult::Row pRow = result.FetchRow();
+                Storage::IDatabaseResult::Row pRow = result->FetchRow();
                 if ( pRow != NULL && pRow[0] != NULL )
                 {
                         sName = pRow[0];
@@ -3851,16 +3514,16 @@ bool CWorldStorageMySQL::IsLegacyImportCompleted()
         CGString sQuery;
         sQuery.Format( "SELECT `version` FROM `%s` WHERE `id` = %d LIMIT 1;", (const char *) sTable, SCHEMA_IMPORT_ROW );
 
-        MariaDbResult result;
+        std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
         {
                 return false;
         }
 
         bool fCompleted = false;
-        if ( result.IsValid())
+        if ( result && result->IsValid())
         {
-                MariaDbResult::Row pRow = result.FetchRow();
+                Storage::IDatabaseResult::Row pRow = result->FetchRow();
                 if ( pRow != NULL && pRow[0] != NULL )
                 {
                         fCompleted = ( atoi( pRow[0] ) != 0 );
