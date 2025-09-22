@@ -1,189 +1,194 @@
-# MySQL Schema Overview
+# MySQL Storage Architecture and Schema
 
-This project relies on a small number of MySQL tables that back account
-management and optional world state persistence. The following summary reflects
-schema version 3 as created by the migrations in
-`GraySvr/MySqlStorageService.cpp`.
+SphereServer 0.51x ships with an integrated MySQL storage layer that replaces
+most legacy `*.scp` persistence. The implementation is split into focused
+modules that keep connections, schema evolution and data access logic separate.
+This document explains that layout and details every table that the bundled
+migrations create.
 
-## `schema_version`
-Stores the current schema revision as well as the flag that indicates whether
-a legacy import has been completed.
+## Module overview
 
-| Column  | Type        | Notes                                 |
-| ------- | ----------- | ------------------------------------- |
-| id      | INT         | Primary key. 1 = schema, 2 = import.  |
-| version | INT         | Current version/flag value.           |
+### Storage façade (`GraySvr/MySqlStorageService.*`)
 
-## `accounts`
-Primary record for player accounts.
+`MySqlStorageService` is the high-level API exposed to the rest of the server.
+It owns the components described below and offers helpers used throughout the
+code base (for example `UniversalRecord` for ad-hoc inserts/updates and
+`DirtyQueueProcessor` integration for deferred world saves). The façade is the
+single point that other systems call when they need to issue SQL, queue world
+objects for persistence or read configuration values.
 
-| Column              | Type                       | Notes |
-| ------------------- | -------------------------- | ----- |
-| id                  | INT UNSIGNED AUTO_INCREMENT| Primary key. |
-| name                | VARCHAR(32)                | Unique login name. |
-| password            | VARCHAR(64)                | Stored credential (hashed or plaintext based on configuration). |
-| plevel              | INT                        | Privilege level. |
-| priv_flags          | INT UNSIGNED               | Bit field with auxiliary privileges. |
-| status              | INT UNSIGNED               | Bit field used for jailed/blocked states. |
-| comment             | TEXT                       | GM comment. |
-| email               | VARCHAR(128)               | Contact e-mail. |
-| chat_name           | VARCHAR(64)                | Optional chat handle. |
-| language            | CHAR(3)                    | ISO language code. |
-| total_connect_time  | INT                        | Accumulated connection time. |
-| last_connect_time   | INT                        | Duration of the last session. |
-| last_ip             | VARCHAR(45)                | Last IP address (IPv4/IPv6 textual representation). |
-| last_login          | DATETIME                   | Timestamp of the last login. |
-| first_ip            | VARCHAR(45)                | First IP used by the account. |
-| first_login         | DATETIME                   | Timestamp of the first login. |
-| last_char_uid       | BIGINT UNSIGNED            | UID of the last played character. |
-| email_failures      | INT UNSIGNED               | Failed e-mail delivery attempts. |
-| created_at          | DATETIME                   | Creation timestamp. |
-| updated_at          | DATETIME                   | Updated automatically via ON UPDATE. |
+### Connection manager (`GraySvr/Storage/MySql/ConnectionManager.*`)
 
-*Indexes*: `PRIMARY KEY(id)` and `UNIQUE KEY ux_accounts_name(name)`.
+The connection manager translates `CServerMySQLConfig` into a ready-to-use
+connection pool:
 
-## `account_emails`
-Stores the scheduled mail queue for an account.
+- Validates and normalises charset/collation pairs and computes reasonable
+  defaults (`utf8mb4` when no charset is provided).
+- Manages retries and delays when auto reconnect is enabled. The behaviour is
+  driven by the `MYSQL*` keys inside `spheredef.ini` (host, port, database,
+  credentials, prefix and charset) plus the reconnect flags stored on
+  `CServerMySQLConfig` (`m_fAutoReconnect`, `m_iReconnectTries`,
+  `m_iReconnectDelay`).
+- Provides scoped access to pooled connections (`MySqlConnectionPool`) and keeps
+  track of explicit transactions so that complex save operations can reuse the
+  same handle.
+- Exposes the effective table charset/collation so that DDL generators can pick
+  the right suffix when creating new tables.
 
-| Column     | Type                | Notes |
-| ---------- | ------------------- | ----- |
-| account_id | INT UNSIGNED        | FK to `accounts.id`. |
-| sequence   | SMALLINT UNSIGNED   | Ordering for queued messages. |
-| message_id | SMALLINT UNSIGNED   | Message identifier. |
+### Repository layer (`Storage::Repository`)
 
-*Indexes*: `PRIMARY KEY(account_id, sequence)` with a foreign key cascading on
-account deletion.
+To keep SQL text close to the data it manipulates the service builds a small
+repository hierarchy inside `MySqlStorageService.cpp`:
 
-## `characters` (legacy import staging)
-A simplified representation used by the import flow.
+- `PreparedStatementRepository` provides a thin wrapper around prepared
+  statements. It centralises error handling, parameter binding and connection
+  acquisition from the pool.
+- `WorldObjectMetaRepository`, `WorldObjectDataRepository`,
+  `WorldObjectComponentRepository` and `WorldObjectRelationRepository` map the
+  world persistence tables to C++ records. They are responsible for generating
+  `INSERT ... ON DUPLICATE KEY UPDATE` statements, decomposing dynamic TAG/VAR
+  data and removing orphaned rows.
+- Additional repositories follow the same pattern for GM pages, timers, sector
+  metadata and other subsystems as they are migrated to SQL.
 
-| Column        | Type                | Notes |
-| ------------- | ------------------- | ----- |
-| uid           | BIGINT UNSIGNED     | Primary key. |
-| account_id    | INT UNSIGNED        | FK to `accounts.id`. |
-| name          | VARCHAR(64)         | Character name. |
-| body_id       | INT                 | Body tile identifier. |
-| position_x/y/z| INT                 | World coordinates. |
-| map_plane     | INT                 | Map plane. |
-| created_at    | DATETIME            | Creation time. |
+Developers adding new tables should follow this structure: create a repository
+class that inherits from `PreparedStatementRepository`, define the SQL text once
+in the constructor and expose typed methods that accept simple record structs.
 
-## `items` (legacy import staging)
-Container for legacy item serialization during migration.
+### Schema manager (`GraySvr/Storage/Schema/SchemaManager.*`)
 
-| Column         | Type                | Notes |
-| -------------- | ------------------- | ----- |
-| uid            | BIGINT UNSIGNED     | Primary key. |
-| container_uid  | BIGINT UNSIGNED     | Self-referencing container FK. |
-| owner_uid      | BIGINT UNSIGNED     | FK to `characters.uid`. |
-| type           | INT UNSIGNED        | Item type identifier. |
-| amount         | INT UNSIGNED        | Stack amount. |
-| color          | INT UNSIGNED        | Hue value. |
-| position_x/y/z | INT                 | Position within container/top-level. |
-| map_plane      | INT                 | Map plane. |
-| created_at     | DATETIME            | Creation time. |
+Schema maintenance is handled by `Storage::Schema::SchemaManager`. The manager
+executes the migration chain during start-up and keeps helper routines for
+schema bookkeeping:
 
-The table includes indexes on `container_uid` and `owner_uid` with cascading
-foreign keys for cleanup.
+- Ensures that `<prefix>schema_version` exists and seeds the rows used for
+  metadata tracking.
+- Applies incremental migrations (`ApplyMigration_0_1`, `_1_2`, `_2_3`, …) until
+  the current revision (`CURRENT_SCHEMA_VERSION`) is reached.
+- Extends existing tables with the helper routines `Ensure*Columns`. The logic
+  checks for column existence before issuing `ALTER TABLE` statements, which
+  makes repeated runs idempotent.
+- Provides convenience methods for reading and updating legacy import state,
+  world save counters and the "last save completed" flag that the save system
+  consumes.
 
-## `item_props` (legacy import staging)
-Key-value store for serialized item properties.
+## Making schema changes
 
-| Column  | Type            | Notes |
-| ------- | --------------- | ----- |
-| item_uid| BIGINT UNSIGNED | FK to `items.uid`. |
-| prop    | VARCHAR(64)     | Property name. |
-| value   | TEXT            | Property value. |
+1. Update `CURRENT_SCHEMA_VERSION` inside
+   `Storage/Schema/SchemaManager.cpp` and add a matching branch in
+   `SchemaManager::ApplyMigration`.
+2. Implement a new `ApplyMigration_X_Y` method that uses the façade helpers to
+   build `CREATE TABLE` / `ALTER TABLE` statements. Prefer
+   `storage.GetPrefixedTableName()` and `storage.GetDefaultTableCollationSuffix()`
+   so that prefix and charset rules remain consistent.
+3. If the migration needs to add columns to existing tables, call
+   `EnsureColumnExists` (or follow the pattern in the `Ensure*Columns` helpers)
+   to avoid double-applying the change.
+4. Update `docs/database-schema.md` (this file) and
+   `docs/mysql-schema.sql` so documentation and example dumps match the runtime
+   migrations.
+5. Bump any tests or deployment scripts that assert the schema version.
 
-Primary key: `(item_uid, prop)` with cascading delete on the item.
+Remember that migrations run inside the storage façade with an open connection
+managed by the connection manager, so they can freely execute DDL and DML using
+`storage.ExecuteQuery()` / `storage.Query()`.
 
-## `sectors`, `gm_pages`, `servers`, `timers`
-Supporting tables for optional features mirrored from the legacy schema. The
-important column types are kept unsigned for identifiers/counters and respect
-the foreign keys laid out in the migrations.
+## Schema reference
 
-## World persistence tables (`schema` version ≥ 3)
-The following tables power MySQL backed world persistence.
+The current schema version is **3**. Table names below omit the optional prefix
+configured through `MYSQLPREFIX`.
 
-### `world_objects`
-Metadata for each object that appears in the world save.
+### `schema_version`
 
-| Column         | Type                | Notes |
-| -------------- | ------------------- | ----- |
-| uid            | BIGINT UNSIGNED     | Primary key matching the Sphere UID. |
-| object_type    | VARCHAR(32)         | Either `char` or `item`. |
-| object_subtype | VARCHAR(64)         | Hex-encoded base ID. |
-| name           | VARCHAR(128)        | Optional display name. |
-| account_id     | INT UNSIGNED        | Owner account (characters only). |
-| container_uid  | BIGINT UNSIGNED     | Parent container when applicable. |
-| top_level_uid  | BIGINT UNSIGNED     | Top-level owner for containment resolution. |
-| position_x/y/z | INT                 | Cached location or container offset. |
-| created_at     | DATETIME            | Creation timestamp. |
-| updated_at     | DATETIME            | Auto-updated timestamp. |
+Tracks migration and operational metadata. Seeded by the schema manager.
 
-*Indexes*: keys on `object_type`, `account_id`, `container_uid`, and
-`top_level_uid` assist lookups for synchronization flows. Foreign keys keep the
-tree consistent and default to `SET NULL` for soft-orphan handling.
+| `id` | Purpose | Typical values |
+| ---- | ------- | -------------- |
+| 1 | Schema revision (`CURRENT_SCHEMA_VERSION`). | `3` |
+| 2 | Legacy account import flag (`0` pending, `1` complete). | `0` or `1` |
+| 3 | World save counter (incremented for every completed save). | `0+` |
+| 4 | World save completion flag (`0` = interrupted, `1` = success). | `0` or `1` |
 
-### `world_object_data`
-Stores the serialized script blob of the object.
+### Account management
 
-| Column     | Type            | Notes |
-| ---------- | --------------- | ----- |
-| object_uid | BIGINT UNSIGNED | FK to `world_objects.uid`. |
-| data       | LONGTEXT        | Serialized object state. |
-| checksum   | VARCHAR(64)     | Hex digest of the serialized payload. |
+`accounts`
+: Primary record for Sphere accounts. Stores credentials, privilege levels,
+  chat/e-mail metadata and timestamps. Indexed on the auto-increment primary key
+  and `name` (unique).
 
-Primary key: `object_uid` with cascading delete.
+`account_emails`
+: Queue of scheduled account messages (activation, warnings). Uses a composite
+  primary key `(account_id, sequence)` with a cascading foreign key back to
+  `accounts`.
 
-### `world_object_components`
-Breaks down TAG/VAR style dynamic properties.
+### Legacy import staging
 
-| Column      | Type            | Notes |
-| ----------- | --------------- | ----- |
-| object_uid  | BIGINT UNSIGNED | FK to `world_objects.uid`. |
-| component   | VARCHAR(32)     | Component category (e.g., `TAG`). |
-| name        | VARCHAR(128)    | Property name. |
-| sequence    | INT             | Stable ordering index. |
-| value       | LONGTEXT        | Optional value. |
+`characters`
+: Minimal representation of imported characters. Holds positional data and links
+  back to `accounts`. Used only while migrating flat-file saves.
 
-Primary key: `(object_uid, component, name, sequence)` with indexes on
-`component` to speed component fetches.
+`items`
+: Legacy container for serialized items during the import. Maintains foreign keys
+  to both `items.uid` (self-referencing containers) and `characters.uid` for
+  ownership tracking.
 
-### `world_object_relations`
-Represents parent/child relationships such as equipment or container contents.
+`item_props`
+: Name/value pairs for item properties captured during import. Uses a composite
+  primary key `(item_uid, prop)` and cascades deletes from `items`.
 
-| Column     | Type            | Notes |
-| ---------- | --------------- | ----- |
-| parent_uid | BIGINT UNSIGNED | FK to `world_objects.uid`. |
-| child_uid  | BIGINT UNSIGNED | FK to `world_objects.uid`. |
-| relation   | VARCHAR(32)     | Relation name (`equipped`, `container`). |
-| sequence   | INT             | Ordering for siblings. |
+### Operational tables
 
-Composite primary key `(parent_uid, child_uid, relation, sequence)` with a
-secondary index on `child_uid` and cascading deletes on both foreign keys.
+`sectors`
+: World sector overrides (light, rain, cold) maintained for optional gameplay
+  features. Columns stay unsigned for counters and use nullable fields for
+  optional overrides.
 
-### `world_savepoints`
-Book-keeping for manual world snapshots.
+`gm_pages`
+: Player-submitted GM help requests. Includes account name, reason, timestamps
+  and location. Extended as needed via the schema manager.
 
-| Column        | Type                | Notes |
-| ------------- | ------------------- | ----- |
-| id            | BIGINT UNSIGNED AUTO_INCREMENT | Primary key. |
-| label         | VARCHAR(64)         | Optional label. |
-| created_at    | DATETIME            | Creation timestamp. |
-| objects_count | INT                 | Object count recorded in the snapshot. |
-| checksum      | VARCHAR(64)         | Integrity checksum. |
+`servers`
+: Shard listings published to the legacy server list. Stores networking
+  metadata, contact details, localisation information and ageing statistics.
 
-### `world_object_audit`
-Audit log of object mutations.
+`timers`
+: Auxiliary timers that back scheduled operations from the classic scripts.
 
-| Column     | Type                | Notes |
-| ---------- | ------------------- | ----- |
-| id         | BIGINT UNSIGNED AUTO_INCREMENT | Primary key. |
-| object_uid | BIGINT UNSIGNED     | FK to `world_objects.uid`. |
-| changed_at | DATETIME            | Timestamp of the change. |
-| change_type| VARCHAR(32)         | Type/category of modification. |
-| data_before| LONGTEXT            | Optional previous serialized state. |
-| data_after | LONGTEXT            | Optional new serialized state. |
+### World persistence (`schema` version ≥ 3)
 
-Indexes exist on `object_uid` to accelerate history lookups.
+`world_objects`
+: Metadata for every persisted object (characters and items). Stores the base
+  object type/subtype, optional display name, ownership references and cached
+  location/container data. Indexed by owner and container identifiers to speed
+  delta synchronisation.
 
+`world_object_data`
+: Serialized object payload (script state) keyed by `object_uid`. Includes a
+  checksum to detect divergence.
+
+`world_object_components`
+: Normalised representation of dynamic script data (TAG/VAR style properties).
+  Composite primary key `(object_uid, component, name, sequence)` preserves
+  ordering for repeated tags.
+
+`world_object_relations`
+: Parent/child relationships such as equipment slots or nested containers.
+  Composite primary key `(parent_uid, child_uid, relation, sequence)` plus an
+  index on `child_uid` to speed reverse lookups.
+
+`world_savepoints`
+: Bookkeeping table for manual save checkpoints. Records a label, timestamp,
+  object count and checksum.
+
+`world_object_audit`
+: Optional history table that captures before/after snapshots of object
+  mutations together with the change type and timestamp.
+
+## Additional resources
+
+- `docs/mysql-schema.sql` – example dump that mirrors the migrations above.
+- `docs/storage-migration.md` – upgrade checklist covering configuration and
+  deployment changes.
+- `GraySvr/Storage/Schema/SchemaManager.*` – canonical source for migrations.
+- `GraySvr/MySqlStorageService.cpp` – reference implementation of repository
+  classes and persistence workflows.
