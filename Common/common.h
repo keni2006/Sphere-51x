@@ -81,14 +81,32 @@ inline T max( const T & a, const U & b )
 #define HKEY_LOCAL_MACHINE	(( HKEY ) 0x80000002 )
 #endif	// HKEY_LOCAL_MACHINE
 
-#ifndef _UNICODE		// _WIN32
-#define TCHAR			char
-#define LPCTSTR			LPCSTR
-#define LPCWSTR			LPCSTR
-#endif  // _UNICODE _WIN32
+#ifndef _TCHAR_DEFINED
+#ifdef _UNICODE
+typedef wchar_t			TCHAR;
+#else
+typedef char			TCHAR;
+#endif
+#define _TCHAR_DEFINED
+#endif  // _TCHAR_DEFINED
+
+#ifndef _LPCTSTR_DEFINED
+typedef const TCHAR *		LPCTSTR;
+#define _LPCTSTR_DEFINED
+#endif  // _LPCTSTR_DEFINED
+
+#ifndef _LPCWSTR_DEFINED
+#ifdef _UNICODE
+typedef const wchar_t *         LPCWSTR;
+#else
+typedef const char *            LPCWSTR;
+#endif
+#define _LPCWSTR_DEFINED
+#endif  // _LPCWSTR_DEFINED
+
 #ifndef _TEXT
 #define _TEXT(x)		x
-#endif	// _TEXT
+#endif  // _TEXT
 
 #ifndef _INC_WINDOWS	// Did NOT include "windows.h" need these for UNICODE.
 #ifdef _WIN32
