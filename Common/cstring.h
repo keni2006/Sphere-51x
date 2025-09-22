@@ -77,15 +77,20 @@ public:
 		return( GetBuffer() );
 	}
     int SetLength( int iLen );
-	CGString()
-	{
-		Init();
-	}
-    CGString( const TCHAR * pStr )
-    {
-	    Init();
-    	Copy( pStr );
-    }
+        CGString()
+        {
+                Init();
+        }
+        CGString( const CGString & other )
+        {
+                Init();
+                Copy( other.GetPtr());
+        }
+        CGString( const TCHAR * pStr )
+        {
+                Init();
+                Copy( pStr );
+        }
 
     int GetLength() const
     {

@@ -9,6 +9,14 @@
 #include <memory>
 #include <vector>
 
+namespace Storage
+{
+namespace Repository
+{
+        class PreparedStatementRepository;
+}
+}
+
 class CAccount;
 class CObjBase;
 class CRealTime;
@@ -171,6 +179,10 @@ public:
         };
 
         bool Start( const CServerMySQLConfig & config );
+        bool Connect( const CServerMySQLConfig & config )
+        {
+                return Start( config );
+        }
         void Stop();
         bool IsConnected() const;
         bool IsEnabled() const;
@@ -236,6 +248,7 @@ private:
         friend class Transaction;
         friend class UniversalRecord;
         friend class Storage::Schema::SchemaManager;
+        friend class Storage::Repository::PreparedStatementRepository;
 
         bool Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult = NULL );
         bool ExecuteQuery( const CGString & query );
@@ -276,7 +289,6 @@ private:
         bool UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized );
         bool RefreshWorldObjectComponents( const CObjBase * pObject );
         bool RefreshWorldObjectRelations( const CObjBase * pObject );
-        void AppendVarDefComponents( const CGString & table, unsigned long long uid, const CVarDefMap * pMap, const TCHAR * pszComp, std::vector<UniversalRecord> & outRecords );
         CGString ComputeSerializedChecksum( const CGString & serialized ) const;
         bool ExecuteRecordsInsert( const std::vector<UniversalRecord> & records );
         bool ClearTable( const CGString & table );

@@ -17,6 +17,8 @@
 
 // C standard types.
 
+#include <cstring>
+
 #ifndef _MAX_PATH			// stdlib.h ?
 #define _MAX_PATH   260 	// max. length of full pathname
 #endif

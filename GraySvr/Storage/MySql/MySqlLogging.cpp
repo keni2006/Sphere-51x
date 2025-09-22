@@ -1,4 +1,8 @@
+#if defined(UNIT_TEST)
+#include "../../../tests/stubs/graysvr.h"
+#else
 #include "../../graysvr.h"
+#endif
 #include "Storage/MySql/MySqlLogging.h"
 
 WORD GetMySQLErrorLogMask( LOGL_TYPE level )
