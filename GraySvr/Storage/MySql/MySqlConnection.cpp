@@ -220,13 +220,18 @@ namespace MySql
                 bind.is_null = GetNullFlagPointer( index );
                 bind.length = &m_Lengths[index];
 
-                if ( data != NULL && length > 0 )
+                if ( data != NULL )
                 {
                         const unsigned char * bytes = static_cast<const unsigned char *>( data );
                         m_Buffers[index].assign( bytes, bytes + length );
+                        if ( length == 0 )
+                        {
+                                m_Buffers[index].push_back( 0 );
+                        }
+
                         bind.buffer = m_Buffers[index].data();
                         bind.buffer_length = static_cast<unsigned long>( m_Buffers[index].size());
-                        m_Lengths[index] = static_cast<unsigned long>( m_Buffers[index].size());
+                        m_Lengths[index] = static_cast<unsigned long>( length );
                         m_IsNull[index] = 0;
                 }
                 else

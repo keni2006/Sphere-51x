@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <unordered_set>
 
 namespace Storage
 {
@@ -304,6 +305,8 @@ private:
         CGString BuildSchemaVersionCreateQuery() const;
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
+        bool SaveWorldObjectInternal( CObjBase * pObject, std::unordered_set<unsigned long long> & visited );
+        bool PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited );
         bool SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
         bool UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized );
         bool UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized );

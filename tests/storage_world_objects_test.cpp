@@ -29,12 +29,12 @@ namespace
         const ExecutedPreparedStatement * FindStatement( const std::vector<ExecutedPreparedStatement> & statements,
                 const std::string & needle )
         {
-                auto it = std::find_if( statements.begin(), statements.end(), [&]( const ExecutedPreparedStatement & stmt )
+                auto it = std::find_if( statements.rbegin(), statements.rend(), [&]( const ExecutedPreparedStatement & stmt )
                 {
                         return stmt.query.find( needle ) != std::string::npos;
                 });
 
-                if ( it == statements.end())
+                if ( it == statements.rend())
                 {
                         return nullptr;
                 }

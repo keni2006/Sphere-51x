@@ -2461,35 +2461,118 @@ CGString MySqlStorageService::GetAccountNameById( unsigned int accountId )
 
 bool MySqlStorageService::SaveWorldObjectInternal( CObjBase * pObject )
 {
+        std::unordered_set<unsigned long long> visited;
+        return SaveWorldObjectInternal( pObject, visited );
+}
+
+bool MySqlStorageService::SaveWorldObjectInternal( CObjBase * pObject, std::unordered_set<unsigned long long> & visited )
+{
         if ( pObject == NULL )
         {
                 return false;
         }
 
+        std::vector<CObjBase *> ancestors;
+        std::unordered_set<unsigned long long> seenAncestors;
+        CObjBase * pCurrent = pObject;
+
+        while ( pCurrent != NULL )
+        {
+                CObjBase * pParent = NULL;
+
+                if ( pCurrent->IsItem())
+                {
+                        CItem * pItem = dynamic_cast<CItem *>( pCurrent );
+                        if ( pItem != NULL )
+                        {
+                                pParent = const_cast<CObjBase *>( pItem->GetContainer());
+                        }
+                }
+
+                if ( pParent == NULL )
+                {
+                        CObjBaseTemplate * pTop = pCurrent->GetTopLevelObj();
+                        CObjBase * pTopObj = dynamic_cast<CObjBase *>( pTop );
+                        if (( pTopObj != NULL ) && ( pTopObj != pCurrent ))
+                        {
+                                pParent = pTopObj;
+                        }
+                }
+
+                if ( pParent == NULL )
+                {
+                        break;
+                }
+
+                const unsigned long long parentUid = (unsigned long long) (UINT) pParent->GetUID();
+                if ( parentUid == 0 )
+                {
+                        break;
+                }
+
+                if ( ! seenAncestors.insert( parentUid ).second )
+                {
+                        break;
+                }
+
+                ancestors.push_back( pParent );
+                pCurrent = pParent;
+        }
+
+        for ( auto it = ancestors.rbegin(); it != ancestors.rend(); ++it )
+        {
+                if ( ! PersistWorldObject( *it, visited ))
+                {
+                        return false;
+                }
+        }
+
+        return PersistWorldObject( pObject, visited );
+}
+
+bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited )
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+        auto insertResult = visited.insert( uid );
+        if ( ! insertResult.second )
+        {
+                return true;
+        }
+
+        bool fResult = true;
         CGString sSerialized;
         if ( ! SerializeWorldObject( pObject, sSerialized ))
         {
-                return false;
+                fResult = false;
+        }
+        else if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+        {
+                fResult = false;
+        }
+        else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+        {
+                fResult = false;
+        }
+        else if ( ! RefreshWorldObjectComponents( pObject ))
+        {
+                fResult = false;
+        }
+        else if ( ! RefreshWorldObjectRelations( pObject ))
+        {
+                fResult = false;
         }
 
-        if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+        if ( insertResult.second )
         {
-                return false;
-        }
-        if ( ! UpsertWorldObjectData( pObject, sSerialized ))
-        {
-                return false;
-        }
-        if ( ! RefreshWorldObjectComponents( pObject ))
-        {
-                return false;
-        }
-        if ( ! RefreshWorldObjectRelations( pObject ))
-        {
-                return false;
+                visited.erase( insertResult.first );
         }
 
-        return true;
+        return fResult;
 }
 
 bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const
