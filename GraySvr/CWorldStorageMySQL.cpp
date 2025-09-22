@@ -31,7 +31,6 @@
 #include <memory>
 #include <sstream>
 #include <string>
-#include <list>
 #include <new>
 #include <stdexcept>
 
@@ -430,6 +429,29 @@ public:
                 return m_Code;
         }
 
+        static MariaDbException FromHandle( const char * context, MYSQL * handle )
+        {
+                unsigned int code = 0;
+                std::string message;
+
+                if ( handle != NULL )
+                {
+                        code = mysql_errno( handle );
+                        const char * pszError = mysql_error( handle );
+                        if ( pszError != NULL && pszError[0] != '\0' )
+                        {
+                                message = pszError;
+                        }
+                }
+
+                if ( message.empty())
+                {
+                        message = ( handle == NULL ) ? "No active MariaDB connection" : "Unknown MariaDB client error";
+                }
+
+                return MariaDbException( context != NULL ? context : "mysql", code, message );
+        }
+
 private:
         std::string m_Context;
         unsigned int m_Code;
@@ -443,7 +465,7 @@ public:
         MariaDbResult() noexcept = default;
 
         explicit MariaDbResult( MYSQL_RES * result ) noexcept :
-                m_Result( result )
+                m_Handle( result )
         {
         }
 
@@ -460,23 +482,23 @@ public:
 
         void Reset( MYSQL_RES * result = NULL ) noexcept
         {
-                m_Result.reset( result );
+                m_Handle.reset( result );
         }
 
         bool IsValid() const noexcept
         {
-                return m_Result.get() != NULL;
+                return m_Handle.get() != NULL;
         }
 
         unsigned int NumFields() const noexcept
         {
-                MYSQL_RES * handle = m_Result.get();
+                MYSQL_RES * handle = m_Handle.get();
                 return ( handle != NULL ) ? mysql_num_fields( handle ) : 0;
         }
 
         Row FetchRow()
         {
-                MYSQL_RES * handle = m_Result.get();
+                MYSQL_RES * handle = m_Handle.get();
                 if ( handle == NULL )
                 {
                         return NULL;
@@ -496,7 +518,7 @@ private:
                 }
         };
 
-        std::unique_ptr<MYSQL_RES, MysqlResultDeleter> m_Result;
+        std::unique_ptr<MYSQL_RES, MysqlResultDeleter> m_Handle;
 };
 
 class MariaDbConnection
@@ -512,10 +534,13 @@ public:
         MariaDbConnection( const MariaDbConnection & ) = delete;
         MariaDbConnection & operator=( const MariaDbConnection & ) = delete;
 
+        MariaDbConnection( MariaDbConnection && other ) noexcept = default;
+        MariaDbConnection & operator=( MariaDbConnection && other ) noexcept = default;
+
         void Close() noexcept
         {
-                m_Handle.reset();
                 m_StringOptions.clear();
+                m_Handle.reset();
         }
 
         bool IsOpen() const noexcept
@@ -544,7 +569,7 @@ public:
                 MYSQL * handle = RequireHandle( "mysql_options" );
                 if ( mysql_options( handle, option, value ) != 0 )
                 {
-                        throw MariaDbException( "mysql_options", mysql_errno( handle ), LastErrorMessage());
+                        throw MariaDbException::FromHandle( "mysql_options", handle );
                 }
         }
 
@@ -557,14 +582,13 @@ public:
 
                 MYSQL * handle = RequireHandle( "mysql_options" );
 
-                m_StringOptions.emplace_back( value );
+                m_StringOptions.push_back( value );
                 const char * pszValue = m_StringOptions.back().c_str();
                 if ( mysql_options( handle, option, pszValue ) != 0 )
                 {
-                        unsigned int code = mysql_errno( handle );
-                        std::string message = LastErrorMessage();
+                        MariaDbException ex = MariaDbException::FromHandle( "mysql_options", handle );
                         m_StringOptions.pop_back();
-                        throw MariaDbException( "mysql_options", code, message );
+                        throw ex;
                 }
         }
 
@@ -574,43 +598,53 @@ public:
                 MYSQL * result = mysql_real_connect( handle, host, user, password, database, port, NULL, 0 );
                 if ( result == NULL )
                 {
-                        throw MariaDbException( "mysql_real_connect", mysql_errno( handle ), LastErrorMessage());
+                        throw MariaDbException::FromHandle( "mysql_real_connect", handle );
                 }
         }
 
         void Execute( const CGString & query )
         {
-                ExecuteImpl( (const char *) query );
+                Execute( (const char *) query );
         }
 
         void Execute( const std::string & query )
         {
-                ExecuteImpl( query.c_str());
+                Execute( query.c_str());
+        }
+
+        void Execute( const char * query )
+        {
+                ExecuteImpl( query );
         }
 
         MariaDbResult Query( const CGString & query )
         {
-                return QueryImpl( (const char *) query );
+                return Query( (const char *) query );
         }
 
         MariaDbResult Query( const std::string & query )
         {
-                return QueryImpl( query.c_str());
+                return Query( query.c_str());
+        }
+
+        MariaDbResult Query( const char * query )
+        {
+                return QueryImpl( query );
         }
 
         void BeginTransaction()
         {
-                ExecuteImpl( "START TRANSACTION" );
+                Execute( "START TRANSACTION" );
         }
 
         void Commit()
         {
-                ExecuteImpl( "COMMIT" );
+                Execute( "COMMIT" );
         }
 
         void Rollback()
         {
-                ExecuteImpl( "ROLLBACK" );
+                Execute( "ROLLBACK" );
         }
 
         void SetCharacterSet( const char * charset )
@@ -623,7 +657,7 @@ public:
                 MYSQL * handle = RequireHandle( "mysql_set_character_set" );
                 if ( mysql_set_character_set( handle, charset ) != 0 )
                 {
-                        throw MariaDbException( "mysql_set_character_set", mysql_errno( handle ), LastErrorMessage());
+                        throw MariaDbException::FromHandle( "mysql_set_character_set", handle );
                 }
         }
 
@@ -639,21 +673,22 @@ public:
                 const std::string command = BuildSetNamesCommand( charset, collation );
                 if ( !command.empty())
                 {
-                        Execute( command );
+                        Execute( command.c_str());
                 }
         }
 
-        std::string EscapeString( const char * input, size_t length ) const
+        std::string EscapeString( const char * input, size_t length )
         {
-                if ( input == NULL )
+                if ( input == NULL || length == 0 )
                 {
                         return std::string();
                 }
 
                 MYSQL * handle = RequireHandle( "mysql_real_escape_string" );
+
                 std::string buffer;
                 buffer.resize( length * 2 + 1 );
-                unsigned long written = mysql_real_escape_string( handle, &buffer[0], input, static_cast<unsigned long>( length ));
+                unsigned long written = mysql_real_escape_string( handle, &buffer[0], input, static_cast<unsigned long>( length ) );
                 buffer.resize( written );
                 return buffer;
         }
@@ -720,18 +755,23 @@ private:
                 MYSQL * handle = m_Handle.get();
                 if ( handle == NULL )
                 {
-                        throw MariaDbException( context, 0, "No active MariaDB connection" );
+                        throw MariaDbException( context != NULL ? context : "mysql", 0, "No active MariaDB connection" );
                 }
                 return handle;
         }
 
-        void ExecuteImpl( const char * pszQuery )
+        void ExecuteImpl( const char * query )
         {
+                if ( query == NULL )
+                {
+                        throw MariaDbException( "mysql_query", CR_UNKNOWN_ERROR, "Query pointer is null" );
+                }
+
                 MYSQL * handle = RequireHandle( "mysql_query" );
 
-                if ( mysql_query( handle, pszQuery ) != 0 )
+                if ( mysql_query( handle, query ) != 0 )
                 {
-                        throw MariaDbException( "mysql_query", mysql_errno( handle ), LastErrorMessage());
+                        throw MariaDbException::FromHandle( "mysql_query", handle );
                 }
 
                 if ( mysql_field_count( handle ) != 0 )
@@ -743,24 +783,29 @@ private:
                         }
                         else if ( mysql_errno( handle ) != 0 )
                         {
-                                throw MariaDbException( "mysql_store_result", mysql_errno( handle ), LastErrorMessage());
+                                throw MariaDbException::FromHandle( "mysql_store_result", handle );
                         }
                 }
         }
 
-        MariaDbResult QueryImpl( const char * pszQuery )
+        MariaDbResult QueryImpl( const char * query )
         {
+                if ( query == NULL )
+                {
+                        throw MariaDbException( "mysql_query", CR_UNKNOWN_ERROR, "Query pointer is null" );
+                }
+
                 MYSQL * handle = RequireHandle( "mysql_query" );
 
-                if ( mysql_query( handle, pszQuery ) != 0 )
+                if ( mysql_query( handle, query ) != 0 )
                 {
-                        throw MariaDbException( "mysql_query", mysql_errno( handle ), LastErrorMessage());
+                        throw MariaDbException::FromHandle( "mysql_query", handle );
                 }
 
                 MYSQL_RES * result = mysql_store_result( handle );
                 if ( result == NULL && mysql_errno( handle ) != 0 )
                 {
-                        throw MariaDbException( "mysql_store_result", mysql_errno( handle ), LastErrorMessage());
+                        throw MariaDbException::FromHandle( "mysql_store_result", handle );
                 }
                 return MariaDbResult( result );
         }
@@ -777,7 +822,7 @@ private:
         };
 
         std::unique_ptr<MYSQL, MysqlHandleDeleter> m_Handle;
-        std::list<std::string> m_StringOptions;
+        std::vector<std::string> m_StringOptions;
 };
 
 void LogMariaDbException( const MariaDbException & ex, LOGL_TYPE level )
