@@ -2317,7 +2317,16 @@ bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & obj
                 record.m_fIsChar = ( strcmpi( pszType, "char" ) == 0 );
                 const char * pszSubtype = pRow[2] ? pRow[2] : "";
                 record.m_iBaseId = (int) strtol( pszSubtype, NULL, 0 );
-                record.m_sSerialized = pRow[3] ? pRow[3] : "";
+                const char * pszSerialized = pRow[3];
+                if ( pszSerialized == NULL || pszSerialized[0] == '\0' )
+                {
+                        g_Log.Event( LOGM_INIT|LOGL_WARN,
+                                "Skipping world object 0%llx (%s 0x%x) due to empty serialized data from MySQL.",
+                                record.m_uid, pszType, record.m_iBaseId );
+                        continue;
+                }
+
+                record.m_sSerialized = pszSerialized;
                 objects.push_back( record );
         }
 
@@ -2614,6 +2623,14 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         input.close();
 
         const std::string serialized = buffer.str();
+        if ( serialized.empty())
+        {
+                const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                        "Serialization produced empty data for world object 0%llx; aborting persistence.", uid );
+                return false;
+        }
+
         outSerialized = serialized.c_str();
 
         return true;

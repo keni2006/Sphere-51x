@@ -132,11 +132,12 @@ TEST_CASE( TestSaveWorldObjectPersistsMetaAndData )
         {
                 throw std::runtime_error( "UID parameter for world object data was incorrect" );
         }
-        if ( dataStmt->parameters[1] != std::string() )
+        const std::string expectedData = "UID=16909060\n";
+        if ( dataStmt->parameters[1] != expectedData )
         {
-                throw std::runtime_error( "Serialized payload was expected to be empty in stub" );
+                throw std::runtime_error( "Serialized payload did not contain object data" );
         }
-        if ( dataStmt->parameters[2] != ComputeFnv1a64( std::string() ))
+        if ( dataStmt->parameters[2] != ComputeFnv1a64( expectedData ))
         {
                 throw std::runtime_error( "Checksum was not recorded for world object data" );
         }
