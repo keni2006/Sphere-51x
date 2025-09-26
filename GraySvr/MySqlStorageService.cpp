@@ -110,6 +110,47 @@ namespace
                 std::string m_Path;
         };
 
+        class CharSaveParityGuard
+        {
+        public:
+                explicit CharSaveParityGuard( CObjBase * pObject ) :
+                        m_pChar( dynamic_cast<CChar *>( pObject )),
+                        m_fOriginalWorldParity( false ),
+                        m_fOriginalCharParity( false ),
+                        m_fWorldParityAdjusted( false )
+                {
+                        if ( m_pChar != NULL )
+                        {
+                                m_fOriginalWorldParity = g_World.m_fSaveParity;
+                                m_fOriginalCharParity = m_pChar->IsStat( STATF_SaveParity );
+
+                                if ( m_fOriginalWorldParity == m_fOriginalCharParity )
+                                {
+                                        g_World.m_fSaveParity = ! g_World.m_fSaveParity;
+                                        m_fWorldParityAdjusted = true;
+                                }
+                        }
+                }
+
+                CharSaveParityGuard( const CharSaveParityGuard & ) = delete;
+                CharSaveParityGuard & operator=( const CharSaveParityGuard & ) = delete;
+
+                ~CharSaveParityGuard()
+                {
+                        if ( m_pChar != NULL && m_fWorldParityAdjusted )
+                        {
+                                m_pChar->ModStat( STATF_SaveParity, m_fOriginalCharParity );
+                                g_World.m_fSaveParity = m_fOriginalWorldParity;
+                        }
+                }
+
+        private:
+                CChar * m_pChar;
+                bool m_fOriginalWorldParity;
+                bool m_fOriginalCharParity;
+                bool m_fWorldParityAdjusted;
+        };
+
 bool GenerateTempScriptPath( std::string & outPath )
 {
         char szBaseName[L_tmpnam];
@@ -2590,6 +2631,8 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         {
                 return false;
         }
+
+        CharSaveParityGuard parityGuard( pObject );
 
         std::string sTempPath;
         if ( ! GenerateTempScriptPath( sTempPath ))
