@@ -455,8 +455,15 @@ public:
                 return m_BaseDefs;
         }
 
-        virtual void r_Write( CScript & )
+        virtual void r_Write( CScript & script )
         {
+                std::ofstream output( script.GetFilePath(), std::ios::app );
+                if ( !output.is_open())
+                {
+                        return;
+                }
+
+                output << "UID=" << m_UID << '\n';
         }
 
         virtual bool r_Load( CScript & )
