@@ -6,9 +6,101 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <cctype>
+#include <vector>
+#include <iterator>
 
 namespace
 {
+        std::string TrimWhitespace( const std::string & value )
+        {
+                const std::string::size_type first = value.find_first_not_of( " \t\r\n" );
+                if ( first == std::string::npos )
+                {
+                        return std::string();
+                }
+                const std::string::size_type last = value.find_last_not_of( " \t\r\n" );
+                return value.substr( first, last - first + 1 );
+        }
+
+        std::string StripMatchingQuotes( const std::string & value )
+        {
+                if ( value.size() >= 2 && value.front() == value.back() && ( value.front() == '`' || value.front() == '\'' ))
+                {
+                        return value.substr( 1, value.size() - 2 );
+                }
+                return value;
+        }
+
+        std::vector<std::string> SplitCommaSeparated( const std::string & text )
+        {
+                std::vector<std::string> parts;
+                std::string current;
+                bool inSingleQuotes = false;
+                for ( char ch : text )
+                {
+                        if ( ch == '\'' )
+                        {
+                                inSingleQuotes = !inSingleQuotes;
+                                current.push_back( ch );
+                                continue;
+                        }
+                        if ( ch == ',' && !inSingleQuotes )
+                        {
+                                parts.push_back( current );
+                                current.clear();
+                                continue;
+                        }
+                        current.push_back( ch );
+                }
+                parts.push_back( current );
+                return parts;
+        }
+
+        std::vector<std::string> ExtractColumnsFromInsert( const std::string & query )
+        {
+                const std::string::size_type open = query.find( '(' );
+                if ( open == std::string::npos )
+                {
+                        return {};
+                }
+                const std::string::size_type close = query.find( ')', open );
+                if ( close == std::string::npos )
+                {
+                        return {};
+                }
+                const std::string segment = query.substr( open + 1, close - open - 1 );
+                std::vector<std::string> columns;
+                for ( const std::string & token : SplitCommaSeparated( segment ))
+                {
+                        columns.push_back( StripMatchingQuotes( TrimWhitespace( token )));
+                }
+                return columns;
+        }
+
+        std::vector<std::string> ExtractValuesFromInsert( const std::string & query )
+        {
+                const std::string marker = "VALUES (";
+                const std::string::size_type start = query.find( marker );
+                if ( start == std::string::npos )
+                {
+                        return {};
+                }
+                const std::string::size_type open = start + marker.size();
+                const std::string::size_type close = query.find( ')', open );
+                if ( close == std::string::npos )
+                {
+                        return {};
+                }
+                const std::string segment = query.substr( open, close - open );
+                std::vector<std::string> values;
+                for ( const std::string & token : SplitCommaSeparated( segment ))
+                {
+                        values.push_back( StripMatchingQuotes( TrimWhitespace( token )));
+                }
+                return values;
+        }
+
         CAccount BuildSampleAccount()
         {
                 CAccount account;
@@ -114,6 +206,73 @@ TEST_CASE( TestUpsertAccountCreatesAndUpdatesRows )
         {
                 throw std::runtime_error( "Email schedule was not reinserted correctly" );
         }
+}
+
+TEST_CASE( TestNewAccountInsertUsesZeroCounters )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+
+        CAccount account;
+        account.SetName( "beta" );
+        account.SetPassword( "" );
+        account.SetPrivLevel( 0 );
+
+        PushMysqlResultSet({ { "7" } });
+
+        if ( !storage.Service().UpsertAccount( account ))
+        {
+                throw std::runtime_error( "UpsertAccount returned false" );
+        }
+
+        const auto & queries = storage.ExecutedQueries();
+        const std::string accountTable = "`test_accounts`";
+        auto insertIt = std::find_if( queries.begin(), queries.end(), [&]( const std::string & query )
+        {
+                return query.find( "INSERT INTO" ) != std::string::npos && query.find( accountTable ) != std::string::npos;
+        });
+
+        if ( insertIt == queries.end())
+        {
+                throw std::runtime_error( "Account insert query contents were not captured" );
+        }
+
+        const std::vector<std::string> columns = ExtractColumnsFromInsert( *insertIt );
+        const std::vector<std::string> values = ExtractValuesFromInsert( *insertIt );
+
+        if ( columns.empty() || values.empty() )
+        {
+                throw std::runtime_error( "Failed to parse account insert query" );
+        }
+
+        if ( columns.size() != values.size())
+        {
+                throw std::runtime_error( "Account insert column/value mismatch" );
+        }
+
+        auto assertColumnZero = [&]( const std::string & column )
+        {
+                const auto it = std::find( columns.begin(), columns.end(), column );
+                if ( it == columns.end())
+                {
+                        throw std::runtime_error( "Column '" + column + "' missing from account insert" );
+                }
+
+                const std::size_t index = static_cast<std::size_t>( std::distance( columns.begin(), it ));
+                if ( values[index] != "0" )
+                {
+                        throw std::runtime_error( "Column '" + column + "' expected to be zero but was '" + values[index] + "'" );
+                }
+        };
+
+        assertColumnZero( "total_connect_time" );
+        assertColumnZero( "last_connect_time" );
+        assertColumnZero( "email_failures" );
 }
 
 TEST_CASE( TestDeleteAccountRemovesRows )
