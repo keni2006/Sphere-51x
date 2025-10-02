@@ -817,7 +817,7 @@ namespace Repository
                         m_Table( static_cast<const char *>( table ))
                 {
                         const std::string quoted = "`" + m_Table + "`";
-                        m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `parent_uid` = ? OR `child_uid` = ?;";
+                        m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `child_uid` = ?;";
                         m_InsertQuery =
                                 "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?);";
                 }
@@ -827,7 +827,6 @@ namespace Repository
                         return ExecuteBatch( m_DeleteQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
                         {
                                 statement.BindUInt64( 0, uid );
-                                statement.BindUInt64( 1, uid );
                         });
                 }
 

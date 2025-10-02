@@ -329,6 +329,78 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         }
 }
 
+TEST_CASE( TestSavingContainerDoesNotRemoveChildRelations )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        CItem container;
+        container.SetUID( 0x02030405u );
+        container.SetBaseID( 0x400 );
+        container.SetTopLevel( true );
+        container.SetTopPoint( CPointMap( 50, 60, 0 ));
+        container.SetTopLevelObj( &container );
+
+        storage.ResetQueryLog();
+        if ( !storage.Service().SaveWorldObject( &container ))
+        {
+                throw std::runtime_error( "Failed to save container" );
+        }
+
+        CItem item;
+        item.SetUID( 0x01000010u );
+        item.SetBaseID( 0x401 );
+        item.SetContainer( &container );
+        item.SetTopLevel( false );
+        item.SetInContainer( true );
+        item.SetContainedPoint( CPointMap( 5, 6, 7 ));
+        item.SetTopLevelObj( &container );
+
+        storage.ResetQueryLog();
+        if ( !storage.Service().SaveWorldObject( &item ))
+        {
+                throw std::runtime_error( "Failed to save contained item" );
+        }
+
+        storage.ResetQueryLog();
+        if ( !storage.Service().SaveWorldObject( &container ))
+        {
+                throw std::runtime_error( "Failed to re-save container" );
+        }
+
+        const auto & statements = storage.ExecutedStatements();
+        const ExecutedPreparedStatement * deleteStmt = nullptr;
+        for ( const auto & stmt : statements )
+        {
+                if ( stmt.query.find( "`test_world_object_relations`" ) != std::string::npos &&
+                        stmt.query.find( "DELETE FROM" ) != std::string::npos )
+                {
+                        deleteStmt = &stmt;
+                        break;
+                }
+        }
+
+        if ( deleteStmt == nullptr )
+        {
+                throw std::runtime_error( "Expected relation delete statement when saving container" );
+        }
+        if ( deleteStmt->query.find( "parent_uid" ) != std::string::npos )
+        {
+                throw std::runtime_error( "Relation delete unexpectedly targeted parent uid" );
+        }
+        if ( deleteStmt->parameters.size() != 1 )
+        {
+                throw std::runtime_error( "Relation delete should bind a single uid" );
+        }
+        if ( deleteStmt->parameters[0] != "33752069" )
+        {
+                throw std::runtime_error( "Relation delete bound incorrect uid" );
+        }
+}
+
 TEST_CASE( TestDeleteWorldObjectUsesPreparedStatement )
 {
         StorageServiceFacade storage;
