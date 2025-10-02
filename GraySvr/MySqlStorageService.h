@@ -254,6 +254,8 @@ public:
         bool LoadGMPages( std::vector<GMPageRecord> & pages );
         bool LoadServers( std::vector<ServerRecord> & servers );
 
+        CGString GetAccountNameById( unsigned int accountId );
+
         const CGString & GetTablePrefix() const
         {
                 return m_sTablePrefix;
@@ -318,7 +320,6 @@ private:
         CGString ComputeSerializedChecksum( const CGString & serialized ) const;
         bool ExecuteRecordsInsert( const std::vector<UniversalRecord> & records );
         bool ClearTable( const CGString & table );
-        CGString GetAccountNameById( unsigned int accountId );
 
         Storage::MySql::ConnectionManager m_ConnectionManager;
         Storage::Schema::SchemaManager m_SchemaManager;
