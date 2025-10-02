@@ -716,6 +716,7 @@ private:
 	PLEVEL_TYPE m_PrivLevel;
 	CGString m_sName;			// Name = no spaces. case independant.
 	CGString m_sPassword;
+	bool m_fStorageUpdatesEnabled;
 
 #define PRIVOLD_ADMIN		0x0001
 #define PRIVOLD_COUNS		0x0004

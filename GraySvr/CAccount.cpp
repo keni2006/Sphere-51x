@@ -622,7 +622,8 @@ PLEVEL_TYPE CAccount::GetPrivLevelText( const TCHAR * pszFlags ) // static
 	return( level );
 }
 
-CAccount::CAccount( const TCHAR * pszName, bool fGuest )
+CAccount::CAccount( const TCHAR * pszName, bool fGuest ) :
+	m_fStorageUpdatesEnabled( false )
 {
 	// Make sure the name is in valid format.
 	// Assume the pszName has been stripped of all just !
@@ -632,22 +633,25 @@ CAccount::CAccount( const TCHAR * pszName, bool fGuest )
 	ASSERT( ! m_sName.IsEmpty());
 	ASSERT( ! ISWHITESPACE( m_sName[0] ));
 
-	if ( ! strnicmp( m_sName, "GUEST", 5 ) || fGuest )
-	{
-		SetPrivLevel( PLEVEL_Guest );
-	}
-	else
-	{
-		SetPrivLevel( PLEVEL_Player );
-	}
-
-	m_lang[0] = 0;
 	m_PrivFlags = PRIV_DETAIL;	// Set on by default for everyone.
 	m_Total_Connect_Time = 0;
+	m_Last_Connect_Time = 0;
 	m_First_IP.s_addr = 0;
 	m_Last_IP.s_addr = 0;	// last ip i logged in from.
-	m_Last_Connect_Time = 0;
 	m_iEmailFailures = 0;
+	m_lang[0] = 0;
+	m_lang[1] = 0;
+	m_lang[2] = 0;
+	m_lang[3] = 0;
+
+	PLEVEL_TYPE plevel = PLEVEL_Player;
+	if ( ! strnicmp( m_sName, "GUEST", 5 ) || fGuest )
+	{
+		plevel = PLEVEL_Guest;
+	}
+
+	m_fStorageUpdatesEnabled = true;
+	SetPrivLevel( plevel );
 
 	// Add myself to the list.
 	g_World.m_Accounts.AddSortKey(this,pszName);
@@ -769,6 +773,8 @@ bool CAccount::CheckBlockedEmail( const TCHAR * pszEmail) // static
 
 void CAccount::RequestStorageUpdate()
 {
+	if ( ! m_fStorageUpdatesEnabled )
+		return;
 	if ( g_Serv.IsLoading())
 		return;
 	MySqlStorageService * pStorage = g_World.Storage();
