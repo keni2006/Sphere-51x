@@ -2519,18 +2519,7 @@ bool CClient::Cmd_Use_Item( CItem * pItem, bool fTestTouch )
 			}
 		}
 		return true;
-	case ITEM_NORMAL: {          //ABYSS STUFF HERE
-		// Handle all ITEM_NORMAL cases here.  Avoid nested switches if possible.
-		if (!m_pChar->ContentFind(ITEMID_NECRO_BOOK))
-		{
-			SysMessage("NOW U CAN USE UR BOOK IDIOT.");
-			return false;
-		}
-		else {
-			//SOMETHING ELSE
-			return false;
-		}
-	}
+
 
 	case ITEM_METRONOME:
 		pItem->OnTick();
