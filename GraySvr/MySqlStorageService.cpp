@@ -2287,11 +2287,12 @@ bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & obj
 
         const CGString sObjects = GetPrefixedTableName( "world_objects" );
         const CGString sData = GetPrefixedTableName( "world_object_data" );
+        const CGString sAccounts = GetPrefixedTableName( "accounts" );
 
         CGString sQuery;
         sQuery.Format(
-                "SELECT o.`uid`,o.`object_type`,o.`object_subtype`,d.`data` FROM `%s` o INNER JOIN `%s` d ON o.`uid` = d.`object_uid` ORDER BY o.`uid`;",
-                (const char *) sObjects, (const char *) sData );
+                "SELECT o.`uid`,o.`object_type`,o.`object_subtype`,o.`account_id`,IFNULL(a.`name`, ''),d.`data` FROM `%s` o INNER JOIN `%s` d ON o.`uid` = d.`object_uid` LEFT JOIN `%s` a ON o.`account_id` = a.`id` ORDER BY o.`uid`;",
+                (const char *) sObjects, (const char *) sData, (const char *) sAccounts );
 
         std::unique_ptr<Storage::IDatabaseResult> result;
         if ( ! Query( sQuery, &result ))
@@ -2308,7 +2309,9 @@ bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & obj
         while (( pRow = result->FetchRow()) != NULL )
         {
                 WorldObjectRecord record;
-#ifdef _WIN32
+                record.m_fHasAccountId = false;
+                record.m_iAccountId = 0;
+                #ifdef _WIN32
                 record.m_uid = pRow[0] ? (unsigned long long) _strtoui64( pRow[0], NULL, 10 ) : 0;
 #else
                 record.m_uid = pRow[0] ? (unsigned long long) strtoull( pRow[0], NULL, 10 ) : 0;
@@ -2317,7 +2320,23 @@ bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & obj
                 record.m_fIsChar = ( strcmpi( pszType, "char" ) == 0 );
                 const char * pszSubtype = pRow[2] ? pRow[2] : "";
                 record.m_iBaseId = (int) strtol( pszSubtype, NULL, 0 );
-                const char * pszSerialized = pRow[3];
+                const char * pszAccountId = pRow[3];
+                if ( pszAccountId != NULL && pszAccountId[0] != '\0' )
+                {
+                        record.m_fHasAccountId = true;
+                        record.m_iAccountId = (unsigned int) strtoul( pszAccountId, NULL, 10 );
+                }
+
+                if ( pRow[4] != NULL && pRow[4][0] != '\0' )
+                {
+                        record.m_sAccountName = pRow[4];
+                }
+                else
+                {
+                        record.m_sAccountName = CGString();
+                }
+
+                const char * pszSerialized = pRow[5];
                 if ( pszSerialized == NULL || pszSerialized[0] == '\0' )
                 {
                         g_Log.Event( LOGM_INIT|LOGL_WARN,
@@ -2712,6 +2731,14 @@ bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGStr
                                 if ( ! sAccountName.IsEmpty())
                                 {
                                         unsigned int accountId = GetAccountId( sAccountName );
+                                        if ( accountId == 0 )
+                                        {
+                                                if ( UpsertAccount( *pAccount ))
+                                                {
+                                                        accountId = GetAccountId( sAccountName );
+                                                }
+                                        }
+
                                         if ( accountId > 0 )
                                         {
                                                 record.m_HasAccountId = true;

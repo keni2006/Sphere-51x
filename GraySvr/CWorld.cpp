@@ -962,6 +962,52 @@ bool CWorld::LoadSectionFromStorage()
                                         m_fStorageLoadFailed = true;
                                         return false;
                                 }
+
+                                if ( record.m_fIsChar )
+                                {
+                                        CChar * pChar = dynamic_cast<CChar*>( pObj );
+                                        if ( pChar != NULL )
+                                        {
+                                                bool fHasAccount = ( pChar->m_pPlayer != NULL && pChar->m_pPlayer->GetAccount() != NULL );
+                                                if ( ! fHasAccount )
+                                                {
+                                                        CAccount * pAccount = NULL;
+                                                        if ( !record.m_sAccountName.IsEmpty())
+                                                        {
+                                                                pAccount = AccountFind( (const TCHAR *) record.m_sAccountName );
+                                                        }
+
+                                                        if ( pAccount == NULL && record.m_fHasAccountId )
+                                                        {
+                                                                CGString sAccountName = record.m_sAccountName;
+                                                                if ( sAccountName.IsEmpty())
+                                                                {
+                                                                        sAccountName = pStorage->GetAccountNameById( record.m_iAccountId );
+                                                                }
+                                                                if ( ! sAccountName.IsEmpty())
+                                                                {
+                                                                        pAccount = AccountFind( (const TCHAR *) sAccountName );
+                                                                }
+                                                        }
+
+                                                        if ( pAccount != NULL )
+                                                        {
+                                                                if ( ! pChar->SetPlayerAccount( pAccount ))
+                                                                {
+                                                                        g_Log.Event( LOGM_INIT|LOGL_WARN,
+                                                                                "Failed to attach character 0%llx to account '%s' while loading from MySQL.\n",
+                                                                                record.m_uid, pAccount->GetName());
+                                                                }
+                                                        }
+                                                        else if ( record.m_fHasAccountId )
+                                                        {
+                                                                g_Log.Event( LOGM_INIT|LOGL_WARN,
+                                                                        "Unable to resolve account %u for character 0%llx during MySQL load.\n",
+                                                                        record.m_iAccountId, record.m_uid );
+                                                        }
+                                                }
+                                        }
+                                }
                                 return true;
                         }
                         m_iStorageLoadStage = 2;

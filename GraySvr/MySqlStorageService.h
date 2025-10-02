@@ -152,6 +152,9 @@ public:
                 unsigned long long m_uid;
                 bool m_fIsChar;
                 int m_iBaseId;
+                bool m_fHasAccountId;
+                unsigned int m_iAccountId;
+                CGString m_sAccountName;
                 CGString m_sSerialized;
         };
 

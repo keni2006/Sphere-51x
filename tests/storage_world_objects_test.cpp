@@ -176,6 +176,70 @@ TEST_CASE( TestSaveWorldObjectPersistsMetaAndData )
         }
 }
 
+TEST_CASE( TestSaveWorldObjectPersistsAccountWhenMissing )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        CAccount account;
+        account.SetName( "fresh_account" );
+
+        CPlayer player( &account );
+
+        CChar character;
+        character.SetUID( 0x01020304u );
+        character.SetBaseID( 0x200 );
+        character.SetName( "Hero" );
+        character.SetPlayer( &player );
+        character.SetTopLevel( true );
+        character.SetTopPoint( CPointMap( 100, 200, 5 ));
+        character.SetTopLevelObj( &character );
+
+        PushMysqlResultSet({});
+        PushMysqlResultSet({ { "88" } });
+        PushMysqlResultSet({ { "88" } });
+
+        if ( !storage.Service().SaveWorldObject( &character ))
+        {
+                throw std::runtime_error( "SaveWorldObject returned false" );
+        }
+
+        const auto & statements = storage.ExecutedStatements();
+
+        const ExecutedPreparedStatement * metaStmt = FindStatement( statements, "`test_world_objects`" );
+        if ( metaStmt == nullptr )
+        {
+                throw std::runtime_error( "World object metadata statement was not executed" );
+        }
+        if ( metaStmt->parameters.size() != 10 )
+        {
+                throw std::runtime_error( "Unexpected parameter count for world object meta statement" );
+        }
+        if ( metaStmt->parameters[4] != "88" )
+        {
+                throw std::runtime_error( "Account id was not persisted after inserting the account" );
+        }
+
+        const auto & queries = storage.ExecutedQueries();
+        auto insertIt = std::find_if( queries.begin(), queries.end(), []( const std::string & query )
+        {
+                return query.find( "INSERT INTO" ) != std::string::npos &&
+                        query.find( "`test_accounts`" ) != std::string::npos;
+        });
+
+        if ( insertIt == queries.end())
+        {
+                throw std::runtime_error( "Account insert query was not executed" );
+        }
+}
+
 TEST_CASE( TestSaveItemPersistsContainerRelations )
 {
         StorageServiceFacade storage;
@@ -292,5 +356,48 @@ TEST_CASE( TestDeleteWorldObjectUsesPreparedStatement )
         if ( deleteStmt->parameters.size() != 1 || deleteStmt->parameters[0] != "11259375" )
         {
                 throw std::runtime_error( "World object delete bound incorrect uid" );
+        }
+}
+
+TEST_CASE( TestLoadWorldObjectsIncludesAccountMetadata )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        PushMysqlResultSet({
+                { "16909060", "char", "0x200", "77", "hero_account", "UID=16909060\n" }
+        });
+
+        std::vector<MySqlStorageService::WorldObjectRecord> records;
+        if ( !storage.Service().LoadWorldObjects( records ))
+        {
+                throw std::runtime_error( "LoadWorldObjects returned false" );
+        }
+
+        if ( records.size() != 1 )
+        {
+                throw std::runtime_error( "Expected a single world object record" );
+        }
+
+        const MySqlStorageService::WorldObjectRecord & record = records[0];
+        if ( !record.m_fHasAccountId )
+        {
+                throw std::runtime_error( "World object record did not indicate an account id was present" );
+        }
+        if ( record.m_iAccountId != 77 )
+        {
+                throw std::runtime_error( "World object account id did not match result set" );
+        }
+        const std::string accountName = (const char *) record.m_sAccountName;
+        if ( accountName != "hero_account" )
+        {
+                throw std::runtime_error( "World object account name did not match result set" );
         }
 }
