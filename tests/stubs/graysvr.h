@@ -99,8 +99,19 @@ inline CGString GetMergedFileName( const CGString & base, const char * name )
 struct StubWorld
 {
         bool m_fSaveParity;
+        int m_Time;
 
-        StubWorld() : m_fSaveParity( false ) {}
+        StubWorld() : m_fSaveParity( false ), m_Time( 0 ) {}
+
+        int GetTime() const
+        {
+                return m_Time;
+        }
+
+        void SetTime( int time )
+        {
+                m_Time = time;
+        }
 };
 
 extern StubWorld g_World;
@@ -646,13 +657,35 @@ public:
                 m_ContainedPoint(),
                 m_IsTopLevel( false ),
                 m_IsInContainer( false ),
-                m_Deleted( false )
+                m_Deleted( false ),
+                m_TimeoutAt( 0 )
         {
         }
 
         virtual ~CObjBase()
         {
                 StubObjectRegistry().erase( m_UID );
+        }
+
+        virtual void SetTimeout( int iDelayInTicks )
+        {
+                if ( iDelayInTicks < 0 )
+                {
+                        m_TimeoutAt = 0;
+                        return;
+                }
+
+                m_TimeoutAt = g_World.GetTime() + iDelayInTicks;
+        }
+
+        bool IsTimerSet() const
+        {
+                return m_TimeoutAt != 0;
+        }
+
+        int GetTimerDiff() const
+        {
+                return m_TimeoutAt - g_World.GetTime();
         }
 
         virtual bool IsChar() const
@@ -865,6 +898,7 @@ private:
         bool m_IsTopLevel;
         bool m_IsInContainer;
         bool m_Deleted;
+        int m_TimeoutAt;
 };
 
 class CAccount

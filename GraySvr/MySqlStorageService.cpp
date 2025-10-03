@@ -2339,10 +2339,20 @@ bool MySqlStorageService::SaveWorldObject( CObjBase * pObject )
                 return false;
         }
 
-        return WithTransaction( [this, pObject]() -> bool
+        const bool persisted = WithTransaction( [this, pObject]() -> bool
         {
                 return SaveWorldObjectInternal( pObject );
         });
+
+        if ( persisted )
+        {
+                if ( ! SyncObjectTimer( *pObject ))
+                {
+                        g_Log.Event( LOGM_SAVE | LOGL_WARN, "Failed to synchronize timer after persisting world object: %s\n", FormatWorldObjectContext( *pObject ).c_str());
+                }
+        }
+
+        return persisted;
 }
 
 bool MySqlStorageService::SaveWorldObjects( const std::vector<CObjBase*> & objects )
@@ -2356,7 +2366,7 @@ bool MySqlStorageService::SaveWorldObjects( const std::vector<CObjBase*> & objec
                         return true;
         }
 
-        return WithTransaction( [this, &objects]() -> bool
+        const bool persisted = WithTransaction( [this, &objects]() -> bool
         {
                 for ( size_t i = 0; i < objects.size(); ++i )
                 {
@@ -2372,6 +2382,24 @@ bool MySqlStorageService::SaveWorldObjects( const std::vector<CObjBase*> & objec
                 }
                 return true;
         });
+
+        if ( persisted )
+        {
+                for ( size_t i = 0; i < objects.size(); ++i )
+                {
+                        CObjBase * pObject = objects[i];
+                        if ( pObject == NULL )
+                        {
+                                continue;
+                        }
+                        if ( ! SyncObjectTimer( *pObject ))
+                        {
+                                g_Log.Event( LOGM_SAVE | LOGL_WARN, "Failed to synchronize timer after persisting world object: %s\n", FormatWorldObjectContext( *pObject ).c_str());
+                        }
+                }
+        }
+
+        return persisted;
 }
 
 bool MySqlStorageService::DeleteWorldObject( const CObjBase * pObject )
@@ -2394,6 +2422,31 @@ bool MySqlStorageService::DeleteWorldObject( const CObjBase * pObject )
 bool MySqlStorageService::DeleteObject( const CObjBase * pObject )
 {
         return DeleteWorldObject( pObject );
+}
+
+bool MySqlStorageService::SyncObjectTimer( const CObjBase & object )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        if ( !object.IsChar() && !object.IsItem())
+        {
+                return true;
+        }
+
+        if ( !object.IsTimerSet())
+        {
+                return DeleteTimersForObject( object );
+        }
+
+        long long expiresInTicks = static_cast<long long>( object.GetTimerDiff());
+        if ( expiresInTicks < 0 )
+        {
+                expiresInTicks = 0;
+        }
+        return UpsertTimerForObject( object, expiresInTicks );
 }
 
 bool MySqlStorageService::DeleteTimersForObject( const CObjBase & object )

@@ -338,6 +338,7 @@ private:
         CGString EscapeString( const TCHAR * pszInput ) const;
         CGString FormatStringValue( const CGString & value ) const;
         CGString FormatOptionalStringValue( const CGString & value ) const;
+        bool SyncObjectTimer( const CObjBase & object );
         CGString FormatDateTimeValue( const CGString & value ) const;
         CGString FormatDateTimeValue( const CRealTime & value ) const;
         CGString FormatIPAddressValue( const CGString & value ) const;

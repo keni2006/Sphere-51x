@@ -507,24 +507,28 @@ void CObjBase::SetTimeout( int iDelayInTicks )
 
         if ( ! g_Serv.IsLoading())
         {
-                MySqlStorageService * pStorage = g_World.Storage();
-                if ( pStorage != NULL && pStorage->IsEnabled() && IsValidUID())
+                const bool fShouldSyncTimer = !m_fStorageNew && !m_fStorageDeleted;
+                if ( fShouldSyncTimer )
                 {
-                        if ( m_timeout == 0 )
+                        MySqlStorageService * pStorage = g_World.Storage();
+                        if ( pStorage != NULL && pStorage->IsEnabled() && IsValidUID())
                         {
-                                if ( ! pStorage->DeleteTimersForObject( *this ))
+                                if ( m_timeout == 0 )
                                 {
-                                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to delete timer for object 0%lx while updating timeout.\n", (unsigned long) GetUID());
+                                        if ( ! pStorage->DeleteTimersForObject( *this ))
+                                        {
+                                                g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to delete timer for object 0%lx while updating timeout.\n", (unsigned long) GetUID());
+                                        }
                                 }
-                        }
-                        else
-                        {
-                                long long expiresInTicks = static_cast<long long>( GetTimerDiff());
-                                if ( expiresInTicks < 0 )
-                                        expiresInTicks = 0;
-                                if ( ! pStorage->UpsertTimerForObject( *this, expiresInTicks ))
+                                else
                                 {
-                                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist timer for object 0%lx in MySQL.\n", (unsigned long) GetUID());
+                                        long long expiresInTicks = static_cast<long long>( GetTimerDiff());
+                                        if ( expiresInTicks < 0 )
+                                                expiresInTicks = 0;
+                                        if ( ! pStorage->UpsertTimerForObject( *this, expiresInTicks ))
+                                        {
+                                                g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist timer for object 0%lx in MySQL.\n", (unsigned long) GetUID());
+                                        }
                                 }
                         }
                 }

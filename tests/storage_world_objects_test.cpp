@@ -176,6 +176,82 @@ TEST_CASE( TestSaveWorldObjectPersistsMetaAndData )
         }
 }
 
+TEST_CASE( TestSavingNewCharacterWithTimeoutPersistsTimer )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        CAccount account;
+        account.SetName( "hero_account" );
+
+        CPlayer player( &account );
+
+        CChar character;
+        character.SetUID( 0x01020304u );
+        character.SetBaseID( 0x200 );
+        character.SetName( "Hero" );
+        character.SetPlayer( &player );
+        character.SetTopLevel( true );
+        character.SetTopPoint( CPointMap( 100, 200, 5 ));
+        character.SetTopLevelObj( &character );
+        character.SetTimeout( 5 );
+
+        PushMysqlResultSet({ { "77" } });
+
+        if ( !storage.Service().SaveWorldObject( &character ))
+        {
+                throw std::runtime_error( "SaveWorldObject returned false" );
+        }
+
+        const auto & statements = storage.ExecutedStatements();
+        const ExecutedPreparedStatement * deleteStmt = FindStatement( statements, "`test_timers`" );
+        if ( deleteStmt == nullptr )
+        {
+                throw std::runtime_error( "Timer delete statement was not executed" );
+        }
+        if ( deleteStmt->query.find( "DELETE FROM" ) == std::string::npos )
+        {
+                throw std::runtime_error( "Timer statement did not delete existing records" );
+        }
+        if ( deleteStmt->parameters.size() != 1 || deleteStmt->parameters[0] != "16909060" )
+        {
+                throw std::runtime_error( "Timer delete bound incorrect uid" );
+        }
+
+        const auto & queries = storage.ExecutedQueries();
+        auto timerInsertIt = std::find_if( queries.begin(), queries.end(), []( const std::string & query )
+        {
+                return query.find( "`test_timers`" ) != std::string::npos &&
+                        query.find( "INSERT INTO" ) != std::string::npos;
+        });
+
+        if ( timerInsertIt == queries.end())
+        {
+                throw std::runtime_error( "Timer insert query was not executed" );
+        }
+        if ( timerInsertIt->find( "16909060" ) == std::string::npos )
+        {
+                throw std::runtime_error( "Timer insert did not reference the character uid" );
+        }
+
+        const auto & events = g_Log.Events();
+        auto foreignKeyIt = std::find_if( events.begin(), events.end(), []( const LogEventEntry & entry )
+        {
+                return entry.m_message.find( "foreign key" ) != std::string::npos;
+        });
+        if ( foreignKeyIt != events.end())
+        {
+                throw std::runtime_error( "Timer synchronization generated a foreign key error" );
+        }
+}
+
 TEST_CASE( TestSaveWorldObjectPersistsAccountWhenMissing )
 {
         StorageServiceFacade storage;
