@@ -31,7 +31,6 @@ extern size_t DEBUG_ValidateAlloc( const void * pThis );
 #include "CParty.h"
 #include "CVarDefMap.h"
 #include <memory>
-#include <deque>
 #include <set>
 #include <string>
 #include <vector>
@@ -4941,7 +4940,6 @@ public:
         int             m_iStorageLoadStage;
         std::unique_ptr<MySqlStorageService::Transaction> m_pSaveTransaction;
         std::vector<MySqlStorageService::WorldObjectRecord> m_StorageLoadObjects;
-        std::deque<MySqlStorageService::WorldObjectRecord> m_StorageLoadObjectQueue;
         size_t  m_uStorageLoadObjectIndex;
         std::vector<MySqlStorageService::SectorData> m_StorageLoadSectors;
         size_t  m_uStorageLoadSectorIndex;
