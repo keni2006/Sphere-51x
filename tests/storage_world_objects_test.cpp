@@ -41,6 +41,26 @@ namespace
 
                 return &(*it);
         }
+
+        class SkippingChar : public CChar
+        {
+        public:
+                explicit SkippingChar( unsigned int skipCount = 1 ) : m_SkipWrites( skipCount ) {}
+
+                void r_Write( CScript & script ) override
+                {
+                        if ( m_SkipWrites > 0 )
+                        {
+                                --m_SkipWrites;
+                                return;
+                        }
+
+                        CObjBase::r_Write( script );
+                }
+
+        private:
+                unsigned int m_SkipWrites;
+        };
 }
 
 TEST_CASE( TestSaveWorldObjectPersistsMetaAndData )
@@ -398,6 +418,93 @@ TEST_CASE( TestSavingContainerDoesNotRemoveChildRelations )
         if ( deleteStmt->parameters[0] != "33752069" )
         {
                 throw std::runtime_error( "Relation delete bound incorrect uid" );
+        }
+}
+
+TEST_CASE( TestCharacterSkippedSerializationPersistsBeforeItems )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        g_World.m_fSaveParity = false;
+
+        SkippingChar character;
+        character.SetUID( 0x01020304u );
+        character.SetBaseID( 0x200 );
+        character.SetTopLevel( true );
+        character.SetTopLevelObj( &character );
+
+        CItem backpack;
+        backpack.SetUID( 0x02030405u );
+        backpack.SetBaseID( 0x401 );
+        backpack.SetContainer( &character );
+        backpack.SetTopLevel( false );
+        backpack.SetInContainer( true );
+        backpack.SetTopLevelObj( &character );
+
+        std::vector<CObjBase*> objects;
+        objects.push_back( &character );
+        objects.push_back( &backpack );
+
+        PushMysqlResultSet({});
+
+        if ( !storage.Service().SaveWorldObjects( objects ))
+        {
+                throw std::runtime_error( "SaveWorldObjects returned false" );
+        }
+
+        const auto & statements = storage.ExecutedStatements();
+        std::vector<const ExecutedPreparedStatement*> worldObjectUpserts;
+        for ( const auto & stmt : statements )
+        {
+                if ( stmt.query.find( "`test_world_objects`" ) != std::string::npos &&
+                        stmt.query.find( "INSERT INTO" ) != std::string::npos )
+                {
+                        worldObjectUpserts.push_back( &stmt );
+                }
+        }
+
+        size_t charIndex = static_cast<size_t>( -1 );
+        size_t itemIndex = static_cast<size_t>( -1 );
+        for ( size_t i = 0; i < worldObjectUpserts.size(); ++i )
+        {
+                const auto & stmt = *worldObjectUpserts[i];
+                if ( stmt.parameters.size() < 2 )
+                {
+                        continue;
+                }
+
+                const std::string & type = stmt.parameters[1];
+                if ( type == "char" && charIndex == static_cast<size_t>( -1 ))
+                {
+                        charIndex = i;
+                }
+                else if ( type == "item" && itemIndex == static_cast<size_t>( -1 ))
+                {
+                        itemIndex = i;
+                }
+        }
+
+        if ( charIndex == static_cast<size_t>( -1 ))
+        {
+                throw std::runtime_error( "Character metadata upsert missing" );
+        }
+
+        if ( itemIndex == static_cast<size_t>( -1 ))
+        {
+                throw std::runtime_error( "Item metadata upsert missing" );
+        }
+
+        if ( charIndex >= itemIndex )
+        {
+                throw std::runtime_error( "Item metadata upsert did not occur after character" );
         }
 }
 
