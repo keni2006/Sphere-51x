@@ -64,6 +64,117 @@ namespace
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
         static const int CURRENT_SCHEMA_VERSION = 3;
 
+        std::string FormatWorldObjectContext( const CObjBase & object )
+        {
+                std::ostringstream ss;
+
+                const unsigned long long uid = (unsigned long long) (UINT) object.GetUID();
+                ss << "uid=0" << std::hex << std::nouppercase << uid;
+                ss << std::dec;
+
+                ss << ", type=" << ( object.IsChar() ? "char" : "item" );
+
+                ss << ", base=0x" << std::hex << std::nouppercase << (unsigned int) object.GetBaseID();
+                ss << std::dec;
+
+                const TCHAR * pszName = object.GetName();
+                if ( pszName != NULL && pszName[0] != '\0' )
+                {
+                        CGString sName( pszName );
+                        if ( ! sName.IsEmpty())
+                        {
+                                ss << ", name=\"" << (const char *) sName << "\"";
+                        }
+                }
+
+                if ( object.IsChar())
+                {
+                        const CChar * pChar = dynamic_cast<const CChar*>( &object );
+                        if ( pChar != NULL && pChar->m_pPlayer != NULL )
+                        {
+                                CAccount * pAccount = pChar->m_pPlayer->GetAccount();
+                                if ( pAccount != NULL )
+                                {
+                                        CGString sAccountName = CGString( pAccount->GetName());
+                                        if ( ! sAccountName.IsEmpty())
+                                        {
+                                                ss << ", account=" << (const char *) sAccountName;
+                                        }
+                                }
+                        }
+                }
+
+                if ( object.IsItem())
+                {
+                        const CItem * pItem = dynamic_cast<const CItem*>( &object );
+                        if ( pItem != NULL )
+                        {
+                                const CObjBase * pContainer = pItem->GetContainer();
+                                if ( pContainer != NULL )
+                                {
+                                        const unsigned long long containerUid = (unsigned long long) (UINT) pContainer->GetUID();
+                                        ss << ", container_uid=0" << std::hex << std::nouppercase << containerUid;
+                                        ss << std::dec;
+
+                                        const TCHAR * pszContainerName = pContainer->GetName();
+                                        if ( pszContainerName != NULL && pszContainerName[0] != '\0' )
+                                        {
+                                                CGString sContainerName( pszContainerName );
+                                                if ( ! sContainerName.IsEmpty())
+                                                {
+                                                        ss << " (\"" << (const char *) sContainerName << "\")";
+                                                }
+                                        }
+                                }
+                        }
+                }
+
+                const CObjBaseTemplate * pTopTemplate = object.GetTopLevelObj();
+                const CObjBase * pTopObject = dynamic_cast<const CObjBase*>( pTopTemplate );
+                if ( pTopObject != NULL )
+                {
+                        const unsigned long long topUid = (unsigned long long) (UINT) pTopObject->GetUID();
+                        ss << ", top_level_uid=0" << std::hex << std::nouppercase << topUid;
+                        ss << std::dec;
+
+                        if ( pTopObject != &object )
+                        {
+                                const TCHAR * pszTopName = pTopObject->GetName();
+                                if ( pszTopName != NULL && pszTopName[0] != '\0' )
+                                {
+                                        CGString sTopName( pszTopName );
+                                        if ( ! sTopName.IsEmpty())
+                                        {
+                                                ss << " (\"" << (const char *) sTopName << "\")";
+                                        }
+                                }
+                        }
+                }
+
+                if ( object.IsTopLevel())
+                {
+                        const CPointMap & pt = object.GetTopPoint();
+                        ss << ", position=(" << pt.m_x << ',' << pt.m_y << ',' << pt.m_z << ')';
+                }
+
+                return ss.str();
+        }
+
+        void LogPersistenceFailure( const CObjBase & object, LOGL_TYPE level, const std::string & stage, const std::string & reason )
+        {
+                const char * stageText = stage.empty() ? "unknown" : stage.c_str();
+                const std::string context = FormatWorldObjectContext( object );
+
+                if ( reason.empty())
+                {
+                        g_Log.Event( LOGM_SAVE | level, "Persistence failure during %s: %s", stageText, context.c_str());
+                }
+                else
+                {
+                        g_Log.Event( LOGM_SAVE | level, "Persistence failure during %s: %s | %s", stageText, reason.c_str(), context.c_str());
+                }
+        }
+
         class TempFileGuard
         {
         public:
@@ -552,8 +663,8 @@ namespace Storage
                                 continue;
                         }
 
-                        const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
-                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.", uid );
+                        LogPersistenceFailure( *pObject, LOGL_WARN, "save queue",
+                                "SaveWorldObjects returned false; review previous errors for details" );
                 }
         }
 
@@ -3100,18 +3211,22 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         }
         else if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
         {
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                 fResult = false;
         }
         else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
         {
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
                 fResult = false;
         }
         else if ( ! RefreshWorldObjectComponents( pObject ))
         {
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
                 fResult = false;
         }
         else if ( ! RefreshWorldObjectRelations( pObject ))
         {
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
                 fResult = false;
         }
 
@@ -3133,18 +3248,22 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         std::string sTempPath;
         if ( ! GenerateTempScriptPath( sTempPath ))
         {
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "failed to generate temporary script path" );
                 return false;
         }
 
         TempFileGuard tempFile( sTempPath );
         if ( ! tempFile.IsValid())
         {
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "failed to create temporary script file" );
                 return false;
         }
 
         CScript script;
         if ( ! script.Open( tempFile.GetPath().c_str(), OF_WRITE | OF_TEXT ))
         {
+                std::string reason = "unable to open temporary script file \"" + tempFile.GetPath() + "\" for writing";
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
                 return false;
         }
 
@@ -3154,6 +3273,8 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         std::ifstream input( tempFile.GetPath().c_str(), std::ios::in | std::ios::binary );
         if ( ! input.is_open())
         {
+                std::string reason = "unable to reopen temporary script file \"" + tempFile.GetPath() + "\" for reading";
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
                 return false;
         }
 
@@ -3164,9 +3285,7 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         const std::string serialized = buffer.str();
         if ( serialized.empty())
         {
-                const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
-                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
-                        "Serialization produced empty data for world object 0%llx; aborting persistence.", uid );
+                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "serialization produced empty data" );
                 return false;
         }
 
