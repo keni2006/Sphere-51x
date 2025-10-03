@@ -417,6 +417,18 @@ void CClient::Cmd_GM_Page( const TCHAR * pszReason ) // Help button (Calls GM Ca
 		pPage->SetReason( pszReason );	// Description of reason for call.
 	}
 	pPage->m_p = m_pChar->GetTopPoint();		// Origin Point of call.
+
+	if ( ! g_World.IsSaving())
+	{
+		MySqlStorageService * pStorage = g_World.Storage();
+		if ( pStorage != NULL && pStorage->IsEnabled())
+		{
+			if ( ! pStorage->SaveGMPage( *pPage ))
+			{
+				g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist GM page for account '%s'.\n", pPage->GetName());
+			}
+		}
+	}
 }
 
 void CClient::ClearGMHandle()
