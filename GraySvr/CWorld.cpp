@@ -5,6 +5,7 @@
 
 #include "graysvr.h"	// predef header.
 #include "MySqlStorageService.h"
+#include "Storage/MySql/MySqlLogging.h"
 
 bool World_fDeleteCycle = false;
 
@@ -1340,6 +1341,45 @@ void CWorld::Save( bool fForceImmediate ) // Save world state
 	MySqlStorageService * pStorage = Storage();
 	const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
 
+	auto ReportSaveFailure = [this, fStorageEnabled]()
+	{
+		g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED. " GRAY_TITLE " is UNSTABLE!\n" );
+		Broadcast( "Save FAILED. " GRAY_TITLE " is UNSTABLE!" );
+		if ( fStorageEnabled )
+		{
+			AbortStorageSave();
+		}
+		else
+		{
+			m_File.Close(); // close if not already closed.
+		}
+	};
+
+	if ( fStorageEnabled )
+	{
+		try
+		{
+			SaveTry( fForceImmediate );
+		}
+		catch ( const Storage::DatabaseError & ex )
+		{
+			LogDatabaseError( ex, LOGL_CRIT );
+			ReportSaveFailure();
+		}
+		catch (...)
+		{
+			if ( g_Serv.m_fSecure )
+			{
+				ReportSaveFailure();
+			}
+			else
+			{
+				throw;
+			}
+		}
+		return;
+	}
+
 	if ( g_Serv.m_fSecure ) // enable the try code.
 	{
 		try
@@ -1348,16 +1388,7 @@ void CWorld::Save( bool fForceImmediate ) // Save world state
 		}
 		catch (...) // catch all
 		{
-			g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED. " GRAY_TITLE " is UNSTABLE!\n" );
-			Broadcast( "Save FAILED. " GRAY_TITLE " is UNSTABLE!" );
-			if ( fStorageEnabled )
-			{
-				AbortStorageSave();
-			}
-			else
-			{
-				m_File.Close(); // close if not already closed.
-			}
+			ReportSaveFailure();
 		}
 	}
 	else
