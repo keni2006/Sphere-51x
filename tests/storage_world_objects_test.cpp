@@ -315,7 +315,7 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         {
                 throw std::runtime_error( "World object relation insert missing" );
         }
-        if ( relationStmt->parameters.size() != 3 && relationStmt->parameters.size() != 4 )
+        if ( relationStmt->parameters.size() != 4 )
         {
                 throw std::runtime_error( "Unexpected relation parameter count" );
         }
@@ -326,10 +326,6 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         if ( relationStmt->parameters[2] != "container" )
         {
                 throw std::runtime_error( "Relation type not recorded as container" );
-        }
-        if ( relationStmt->parameters.size() == 4 && relationStmt->parameters[3] != "0" )
-        {
-                throw std::runtime_error( "Relation sequence not defaulted to zero" );
         }
 }
 
