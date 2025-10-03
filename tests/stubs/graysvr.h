@@ -12,6 +12,9 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <algorithm>
+#include <unordered_map>
+#include <cstdlib>
 #include <netinet/in.h>
 
 #ifndef _WIN32
@@ -34,6 +37,73 @@ inline char * my_strupr( char * value )
 #endif
 
 #include "common_stub.h"
+
+using ITEMID_TYPE = unsigned int;
+using CREID_TYPE = unsigned int;
+
+class CObjBase;
+class CItem;
+
+constexpr int TICK_PER_SEC = 1;
+constexpr unsigned int STATF_SaveParity = 0x01u;
+
+inline std::unordered_map<unsigned int, CObjBase*> & StubObjectRegistry()
+{
+        static std::unordered_map<unsigned int, CObjBase*> s_Registry;
+        return s_Registry;
+}
+
+inline CObjBase * StubFindObject( unsigned int uid )
+{
+        auto & registry = StubObjectRegistry();
+        auto it = registry.find( uid );
+        if ( it == registry.end())
+        {
+                return nullptr;
+        }
+        return it->second;
+}
+
+inline unsigned int StubParseUnsigned( const char * text )
+{
+        if ( text == nullptr )
+        {
+                return 0;
+        }
+        return static_cast<unsigned int>( std::strtoul( text, nullptr, 0 ));
+}
+
+void StubAttachObjectToContainer( CObjBase & object, unsigned int containerUid );
+
+inline CGString GetMergedFileName( const CGString & base, const char * name )
+{
+        std::string result;
+        if ( !base.IsEmpty())
+        {
+                result = (const char *) base;
+                if ( !result.empty() && result.back() != '/' )
+                {
+                        result.push_back( '/' );
+                }
+        }
+        if ( name != nullptr )
+        {
+                result += name;
+        }
+
+        CGString merged;
+        merged = result.c_str();
+        return merged;
+}
+
+struct StubWorld
+{
+        bool m_fSaveParity;
+
+        StubWorld() : m_fSaveParity( false ) {}
+};
+
+extern StubWorld g_World;
 
 constexpr WORD LOGM_INIT = 0x0100;
 constexpr WORD LOGM_SAVE = 0x0200;
@@ -95,7 +165,7 @@ struct CRealTime
 class CServer
 {
 public:
-        CServer() : m_loading( false ) {}
+        CServer() : m_iSavePeriod( 0 ), m_sWorldBaseDir(), m_loading( false ) {}
 
         bool IsLoading() const
         {
@@ -106,6 +176,9 @@ public:
         {
                 m_loading = loading;
         }
+
+        int m_iSavePeriod;
+        CGString m_sWorldBaseDir;
 
 private:
         bool m_loading;
@@ -189,12 +262,28 @@ private:
 class CScript
 {
 public:
-        CScript() : m_Open( false ) {}
+        CScript() :
+                m_Path(),
+                m_Open( false ),
+                m_Sections(),
+                m_CurrentSectionIndex( static_cast<size_t>( -1 )),
+                m_CurrentKeyIndex( 0 ),
+                m_CurrentKey(),
+                m_CurrentArg(),
+                m_Mode( Mode::None )
+        {
+        }
 
         bool Open( const char * path, unsigned int flags = 0 )
         {
                 m_Path = ( path != nullptr ) ? path : "";
                 m_Open = true;
+                m_Sections.clear();
+                m_CurrentSectionIndex = static_cast<size_t>( -1 );
+                m_CurrentKeyIndex = 0;
+                m_CurrentKey.clear();
+                m_CurrentArg.clear();
+                m_Mode = Mode::None;
 
                 if (( flags & OF_WRITE ) != 0 )
                 {
@@ -205,7 +294,7 @@ public:
                         }
 
                         std::ofstream output( m_Path.c_str(), mode );
-                        if ( !output.is_open())
+                        if ( ! output.is_open())
                         {
                                 m_Open = false;
                                 m_Path.clear();
@@ -213,7 +302,87 @@ public:
                         }
                 }
 
-                return true;
+                if (( flags & OF_READ ) != 0 )
+                {
+                        std::ifstream input( m_Path.c_str(), std::ios::in | std::ios::binary );
+                        if ( ! input.is_open())
+                        {
+                                m_Open = false;
+                                m_Path.clear();
+                                return false;
+                        }
+
+                        Section current;
+                        std::string line;
+                        while ( std::getline( input, line ))
+                        {
+                                if ( ! line.empty() && line.back() == '\r' )
+                                {
+                                        line.pop_back();
+                                }
+
+                                std::string trimmed = Trim( line );
+                                if ( trimmed.empty())
+                                {
+                                        continue;
+                                }
+                                if (( trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']' ))
+                                {
+                                        if ( ! current.m_Name.empty())
+                                        {
+                                                m_Sections.push_back( current );
+                                        }
+
+                                        current = Section();
+                                        std::string inside = Trim( trimmed.substr( 1, trimmed.size() - 2 ));
+                                        size_t spacePos = inside.find_first_of( " \t" );
+                                        if ( spacePos == std::string::npos )
+                                        {
+                                                current.m_Name = ToUpper( inside );
+                                                current.m_HeaderArg.clear();
+                                        }
+                                        else
+                                        {
+                                                current.m_Name = ToUpper( inside.substr( 0, spacePos ));
+                                                current.m_HeaderArg = Trim( inside.substr( spacePos + 1 ));
+                                        }
+                                        continue;
+                                }
+
+                                if ( trimmed[0] == ';' || ( trimmed.size() >= 2 && trimmed[0] == '/' && trimmed[1] == '/' ))
+                                {
+                                        continue;
+                                }
+
+                                if ( current.m_Name.empty())
+                                {
+                                        continue;
+                                }
+
+                                size_t equalsPos = trimmed.find( '=' );
+                                std::string key;
+                                std::string value;
+                                if ( equalsPos == std::string::npos )
+                                {
+                                        key = Trim( trimmed );
+                                        value.clear();
+                                }
+                                else
+                                {
+                                        key = Trim( trimmed.substr( 0, equalsPos ));
+                                        value = Trim( trimmed.substr( equalsPos + 1 ));
+                                }
+
+                                current.m_Entries.emplace_back( ToUpper( key ), value );
+                        }
+
+                        if ( ! current.m_Name.empty())
+                        {
+                                m_Sections.push_back( current );
+                        }
+                }
+
+                return m_Open;
         }
 
         bool Open( const char * path, int flags )
@@ -224,21 +393,117 @@ public:
         void Close()
         {
                 m_Open = false;
+                m_Sections.clear();
+                m_CurrentSectionIndex = static_cast<size_t>( -1 );
+                m_CurrentKeyIndex = 0;
+                m_CurrentKey.clear();
+                m_CurrentArg.clear();
+                m_Mode = Mode::None;
         }
 
         bool FindNextSection()
         {
-                return false;
+                if ( m_Sections.empty())
+                {
+                                m_Mode = Mode::None;
+                                return false;
+                }
+
+                if ( m_CurrentSectionIndex == static_cast<size_t>( -1 ))
+                {
+                        m_CurrentSectionIndex = 0;
+                }
+                else
+                {
+                        if ( m_CurrentSectionIndex + 1 >= m_Sections.size())
+                        {
+                                m_Mode = Mode::None;
+                                return false;
+                        }
+                        ++m_CurrentSectionIndex;
+                }
+
+                ResetIteration();
+                return true;
+        }
+
+        bool IsSectionType( const char * name ) const
+        {
+                if ( name == nullptr || m_CurrentSectionIndex >= m_Sections.size())
+                {
+                        return false;
+                }
+
+                return m_Sections[m_CurrentSectionIndex].m_Name == ToUpper( std::string( name ));
+        }
+
+        const char * GetSection() const
+        {
+                if ( m_CurrentSectionIndex >= m_Sections.size())
+                {
+                        return "";
+                }
+                return m_Sections[m_CurrentSectionIndex].m_Name.c_str();
         }
 
         const char * GetKey() const
         {
-                return "";
+                return m_CurrentKey.c_str();
         }
 
         const char * GetFilePath() const
         {
                 return m_Path.c_str();
+        }
+
+        const char * GetArgStr() const
+        {
+                if ( m_Mode == Mode::Key )
+                {
+                        return m_CurrentArg.c_str();
+                }
+                if ( m_CurrentSectionIndex >= m_Sections.size())
+                {
+                        return "";
+                }
+                return m_Sections[m_CurrentSectionIndex].m_HeaderArg.c_str();
+        }
+
+        long GetArgHex() const
+        {
+                return static_cast<long>( std::strtoul( GetArgStr(), nullptr, 0 ));
+        }
+
+        long GetArgVal() const
+        {
+                return static_cast<long>( std::strtol( GetArgStr(), nullptr, 0 ));
+        }
+
+        bool ReadKey()
+        {
+                if ( m_CurrentSectionIndex >= m_Sections.size())
+                {
+                        m_Mode = Mode::Section;
+                        return false;
+                }
+
+                Section & section = m_Sections[m_CurrentSectionIndex];
+                if ( m_CurrentKeyIndex >= section.m_Entries.size())
+                {
+                        m_Mode = Mode::Section;
+                        return false;
+                }
+
+                m_CurrentKey = section.m_Entries[m_CurrentKeyIndex].first;
+                m_CurrentArg = section.m_Entries[m_CurrentKeyIndex].second;
+                ++m_CurrentKeyIndex;
+                m_Mode = Mode::Key;
+                return true;
+        }
+
+        bool ReadKeyParse()
+        {
+                return ReadKey();
         }
 
         void WriteStr( const char *, ... )
@@ -251,8 +516,57 @@ public:
         }
 
 private:
+        enum class Mode
+        {
+                None,
+                Section,
+                Key
+        };
+
+        struct Section
+        {
+                std::string m_Name;
+                std::string m_HeaderArg;
+                std::vector<std::pair<std::string,std::string>> m_Entries;
+        };
+
+        static std::string Trim( const std::string & value )
+        {
+                size_t start = value.find_first_not_of( " \t\r\n" );
+                if ( start == std::string::npos )
+                {
+                        return std::string();
+                }
+                size_t end = value.find_last_not_of( " \t\r\n" );
+                return value.substr( start, end - start + 1 );
+        }
+
+        static std::string ToUpper( const std::string & value )
+        {
+                std::string result = value;
+                std::transform( result.begin(), result.end(), result.begin(), []( unsigned char ch )
+                {
+                        return static_cast<char>( std::toupper( ch ));
+                });
+                return result;
+        }
+
+        void ResetIteration()
+        {
+                m_CurrentKeyIndex = 0;
+                m_CurrentKey.clear();
+                m_CurrentArg.clear();
+                m_Mode = Mode::Section;
+        }
+
         std::string m_Path;
         bool m_Open;
+        std::vector<Section> m_Sections;
+        size_t m_CurrentSectionIndex;
+        size_t m_CurrentKeyIndex;
+        std::string m_CurrentKey;
+        std::string m_CurrentArg;
+        Mode m_Mode;
 };
 
 class CVarDefCont
@@ -331,8 +645,14 @@ public:
                 m_TopPoint(),
                 m_ContainedPoint(),
                 m_IsTopLevel( false ),
-                m_IsInContainer( false )
+                m_IsInContainer( false ),
+                m_Deleted( false )
         {
+        }
+
+        virtual ~CObjBase()
+        {
+                StubObjectRegistry().erase( m_UID );
         }
 
         virtual bool IsChar() const
@@ -347,7 +667,13 @@ public:
 
         void SetUID( unsigned int uid )
         {
+                auto & registry = StubObjectRegistry();
+                registry.erase( m_UID );
                 m_UID = uid;
+                if ( uid != 0 )
+                {
+                        registry[m_UID] = this;
+                }
         }
 
         unsigned int GetUID() const
@@ -466,9 +792,64 @@ public:
                 output << "UID=" << m_UID << '\n';
         }
 
-        virtual bool r_Load( CScript & )
+        virtual bool r_Load( CScript & script )
         {
+                bool fHasContainer = false;
+                while ( script.ReadKey())
+                {
+                        const char * pszKey = script.GetKey();
+                        const char * pszArg = script.GetArgStr();
+                        if ( pszKey == nullptr )
+                        {
+                                continue;
+                        }
+
+                        if ( !strcasecmp( pszKey, "UID" ))
+                        {
+                                SetUID( StubParseUnsigned( pszArg ));
+                        }
+                        else if ( !strcasecmp( pszKey, "NAME" ))
+                        {
+                                SetName( pszArg );
+                        }
+                        else if ( !strcasecmp( pszKey, "CONT" ))
+                        {
+                                StubAttachObjectToContainer( *this, StubParseUnsigned( pszArg ));
+                                fHasContainer = true;
+                        }
+                        else if ( !strcasecmp( pszKey, "P" ))
+                        {
+                                int x = 0;
+                                int y = 0;
+                                int z = 0;
+                                if ( pszArg != nullptr )
+                                {
+                                        std::sscanf( pszArg, "%d,%d,%d", &x, &y, &z );
+                                        SetTopPoint( CPointMap( x, y, z ));
+                                }
+                        }
+                }
+
+                if ( ! fHasContainer )
+                {
+                        SetInContainer( false );
+                        SetContainer( nullptr );
+                        SetTopLevel( true );
+                        SetTopLevelObj( this );
+                }
+
                 return true;
+        }
+
+        virtual void Delete()
+        {
+                m_Deleted = true;
+                StubObjectRegistry().erase( m_UID );
+        }
+
+        bool IsDeleted() const
+        {
+                return m_Deleted;
         }
 
 private:
@@ -483,6 +864,7 @@ private:
         CPointMap m_ContainedPoint;
         bool m_IsTopLevel;
         bool m_IsInContainer;
+        bool m_Deleted;
 };
 
 class CAccount
@@ -607,6 +989,16 @@ public:
                 return true;
         }
 
+        static CChar * CreateBasic( CREID_TYPE )
+        {
+                return new CChar();
+        }
+
+        bool IsStat( unsigned int ) const
+        {
+                return false;
+        }
+
         void SetPlayer( CPlayer * player )
         {
                 m_pPlayer = player;
@@ -625,6 +1017,11 @@ public:
                 return true;
         }
 
+        static CItem * CreateScript( ITEMID_TYPE )
+        {
+                return new CItem();
+        }
+
         bool IsEquipped() const
         {
                 return m_Equipped;
@@ -635,9 +1032,53 @@ public:
                 m_Equipped = equipped;
         }
 
+        void AddContainedItem( CItem * item )
+        {
+                if ( item != nullptr )
+                {
+                        m_Contents.push_back( item );
+                }
+        }
+
+        const std::vector<CItem*> & GetContents() const
+        {
+                return m_Contents;
+        }
+
 private:
         bool m_Equipped;
+        std::vector<CItem*> m_Contents;
 };
+
+inline void StubAttachObjectToContainer( CObjBase & object, unsigned int containerUid )
+{
+        CObjBase * pContainer = StubFindObject( containerUid );
+        if ( pContainer == nullptr )
+        {
+                object.SetContainer( nullptr );
+                object.SetInContainer( false );
+                return;
+        }
+
+        object.SetContainer( pContainer );
+        object.SetInContainer( true );
+        object.SetTopLevel( false );
+
+        CObjBaseTemplate * pTop = pContainer->GetTopLevelObj();
+        if ( pTop == nullptr )
+        {
+                pTop = pContainer;
+        }
+        object.SetTopLevelObj( pTop );
+
+        if ( CItem * pContainerItem = dynamic_cast<CItem*>( pContainer ))
+        {
+                if ( CItem * pItem = dynamic_cast<CItem*>( &object ))
+                {
+                        pContainerItem->AddContainedItem( pItem );
+                }
+        }
+}
 
 class CSector {};
 class CGMPage {};
