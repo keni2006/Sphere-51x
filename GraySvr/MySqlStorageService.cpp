@@ -3205,29 +3205,33 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
 
         bool fResult = true;
         CGString sSerialized;
-        if ( ! SerializeWorldObject( pObject, sSerialized ))
+        const SerializationResult serializationResult = SerializeWorldObject( pObject, sSerialized );
+        if ( serializationResult == SerializationResult::Failed )
         {
                 fResult = false;
         }
-        else if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+        else if ( serializationResult == SerializationResult::Success )
         {
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
-                fResult = false;
-        }
-        else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
-        {
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
-                fResult = false;
-        }
-        else if ( ! RefreshWorldObjectComponents( pObject ))
-        {
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                fResult = false;
-        }
-        else if ( ! RefreshWorldObjectRelations( pObject ))
-        {
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                fResult = false;
+                if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
+                        fResult = false;
+                }
+                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
+                        fResult = false;
+                }
+                else if ( ! RefreshWorldObjectComponents( pObject ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                        fResult = false;
+                }
+                else if ( ! RefreshWorldObjectRelations( pObject ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                        fResult = false;
+                }
         }
 
         if ( insertResult.second )
@@ -3238,25 +3242,25 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         return fResult;
 }
 
-bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const
+MySqlStorageService::SerializationResult MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const
 {
         if ( pObject == NULL )
         {
-                return false;
+                return SerializationResult::Failed;
         }
 
         std::string sTempPath;
         if ( ! GenerateTempScriptPath( sTempPath ))
         {
                 LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "failed to generate temporary script path" );
-                return false;
+                return SerializationResult::Failed;
         }
 
         TempFileGuard tempFile( sTempPath );
         if ( ! tempFile.IsValid())
         {
                 LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "failed to create temporary script file" );
-                return false;
+                return SerializationResult::Failed;
         }
 
         CScript script;
@@ -3264,7 +3268,7 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         {
                 std::string reason = "unable to open temporary script file \"" + tempFile.GetPath() + "\" for writing";
                 LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
-                return false;
+                return SerializationResult::Failed;
         }
 
         pObject->r_Write( script );
@@ -3275,7 +3279,7 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         {
                 std::string reason = "unable to reopen temporary script file \"" + tempFile.GetPath() + "\" for reading";
                 LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
-                return false;
+                return SerializationResult::Failed;
         }
 
         std::ostringstream buffer;
@@ -3285,13 +3289,22 @@ bool MySqlStorageService::SerializeWorldObject( CObjBase * pObject, CGString & o
         const std::string serialized = buffer.str();
         if ( serialized.empty())
         {
+                if ( pObject->IsChar())
+                {
+                        const CChar * pChar = dynamic_cast<const CChar*>( pObject );
+                        if ( pChar != NULL && g_World.m_fSaveParity == pChar->IsStat( STATF_SaveParity ))
+                        {
+                                return SerializationResult::Skipped;
+                        }
+                }
+
                 LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "serialization produced empty data" );
-                return false;
+                return SerializationResult::Failed;
         }
 
         outSerialized = serialized.c_str();
 
-        return true;
+        return SerializationResult::Success;
 }
 
 bool MySqlStorageService::ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const

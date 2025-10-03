@@ -314,8 +314,15 @@ private:
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
         bool SaveWorldObjectInternal( CObjBase * pObject, std::unordered_set<unsigned long long> & visited );
+        enum class SerializationResult
+        {
+                Failed = 0,
+                Skipped,
+                Success
+        };
+
         bool PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited );
-        bool SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
+        SerializationResult SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
         bool UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized );
         bool UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized );
         bool RefreshWorldObjectComponents( const CObjBase * pObject );
