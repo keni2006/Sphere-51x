@@ -189,6 +189,38 @@ public:
                 int m_iAgeHours;
         };
 
+        struct TimerRecord
+        {
+                enum class Type : unsigned int
+                {
+                        Unknown = 0,
+                        Character = 1,
+                        Item = 2,
+                        Script = 3
+                };
+
+                unsigned long long m_id;
+                bool m_fHasCharacter;
+                unsigned long long m_uCharacterUid;
+                bool m_fHasItem;
+                unsigned long long m_uItemUid;
+                long long m_iExpiresAt;
+                Type m_eType;
+                CGString m_sData;
+
+                TimerRecord() :
+                        m_id( 0 ),
+                        m_fHasCharacter( false ),
+                        m_uCharacterUid( 0 ),
+                        m_fHasItem( false ),
+                        m_uItemUid( 0 ),
+                        m_iExpiresAt( 0 ),
+                        m_eType( Type::Unknown ),
+                        m_sData()
+                {
+                }
+        };
+
         bool Start( const CServerMySQLConfig & config );
         bool Connect( const CServerMySQLConfig & config )
         {
@@ -256,6 +288,12 @@ public:
         bool ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const;
         bool LoadGMPages( std::vector<GMPageRecord> & pages );
         bool LoadServers( std::vector<ServerRecord> & servers );
+        bool LoadTimers( std::vector<TimerRecord> & timers );
+
+        bool SaveTimers( const std::vector<TimerRecord> & timers );
+        bool UpsertTimerForObject( const CObjBase & object, long long expiresInTicks );
+        bool DeleteTimersForObject( const CObjBase & object );
+        bool ClearTimers();
 
         CGString GetAccountNameById( unsigned int accountId );
 

@@ -18,7 +18,7 @@ namespace
         static const int SCHEMA_IMPORT_ROW = 2;
         static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
-        static const int CURRENT_SCHEMA_VERSION = 4;
+        static const int CURRENT_SCHEMA_VERSION = 5;
 }
 
 namespace Storage
@@ -588,6 +588,136 @@ bool SchemaManager::ApplyMigration_3_4( MySqlStorageService & storage )
         return true;
 }
 
+bool SchemaManager::ApplyMigration_4_5( MySqlStorageService & storage )
+{
+        const CGString sTimers = storage.GetPrefixedTableName( "timers" );
+        const CGString sWorldObjects = storage.GetPrefixedTableName( "world_objects" );
+        if ( sTimers.IsEmpty() || sWorldObjects.IsEmpty())
+        {
+                return true;
+        }
+
+        if ( storage.m_sDatabaseName.IsEmpty())
+        {
+                return false;
+        }
+
+        const CGString sCharacters = storage.GetPrefixedTableName( "characters" );
+        const CGString sItems = storage.GetPrefixedTableName( "items" );
+
+        CGString sEscDatabase = storage.EscapeString( (const TCHAR *) storage.m_sDatabaseName );
+        CGString sEscTimers = storage.EscapeString( (const TCHAR *) sTimers );
+        CGString sEscCharacters = storage.EscapeString( (const TCHAR *) sCharacters );
+        CGString sEscItems = storage.EscapeString( (const TCHAR *) sItems );
+        CGString sEscWorldObjects = storage.EscapeString( (const TCHAR *) sWorldObjects );
+
+        CGString sQuery;
+        sQuery.Format(
+                "SELECT DISTINCT `CONSTRAINT_NAME` FROM information_schema.KEY_COLUMN_USAGE "
+                "WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s' "
+                "AND `REFERENCED_TABLE_NAME` IN ('%s','%s');",
+                (const char *) sEscDatabase,
+                (const char *) sEscTimers,
+                (const char *) sEscCharacters,
+                (const char *) sEscItems );
+
+        std::unique_ptr<Storage::IDatabaseResult> result;
+        if ( ! storage.Query( sQuery, &result ))
+        {
+                return false;
+        }
+
+        std::vector<CGString> constraints;
+        if ( result && result->IsValid())
+        {
+                Storage::IDatabaseResult::Row row;
+                while (( row = result->FetchRow()) != NULL )
+                {
+                        if ( row[0] != NULL && row[0][0] != '\0' )
+                        {
+                                constraints.emplace_back( row[0] );
+                        }
+                }
+        }
+
+        for ( size_t i = 0; i < constraints.size(); ++i )
+        {
+                CGString sDrop;
+                sDrop.Format( "ALTER TABLE `%s` DROP FOREIGN KEY `%s`;",
+                        (const char *) sTimers,
+                        (const char *) constraints[i] );
+                if ( ! storage.ExecuteQuery( sDrop ))
+                {
+                        return false;
+                }
+        }
+
+        auto HasForeignKeyForColumn = [&]( const char * column ) -> bool
+        {
+                CGString sCheck;
+                sCheck.Format(
+                        "SELECT COUNT(*) FROM information_schema.KEY_COLUMN_USAGE "
+                        "WHERE `TABLE_SCHEMA` = '%s' AND `TABLE_NAME` = '%s' "
+                        "AND `COLUMN_NAME` = '%s' AND `REFERENCED_TABLE_NAME` = '%s';",
+                        (const char *) sEscDatabase,
+                        (const char *) sEscTimers,
+                        column,
+                        (const char *) sEscWorldObjects );
+
+                std::unique_ptr<Storage::IDatabaseResult> check;
+                if ( ! storage.Query( sCheck, &check ))
+                {
+                        return false;
+                }
+
+                if ( check && check->IsValid())
+                {
+                        Storage::IDatabaseResult::Row countRow = check->FetchRow();
+                        if ( countRow != NULL && countRow[0] != NULL )
+                        {
+#ifdef _WIN32
+                                long long count = _strtoi64( countRow[0], NULL, 10 );
+#else
+                                long long count = strtoll( countRow[0], NULL, 10 );
+#endif
+                                return ( count > 0 );
+                        }
+                }
+
+                return false;
+        };
+
+        if ( ! HasForeignKeyForColumn( "character_uid" ))
+        {
+                CGString sAddChar;
+                sAddChar.Format(
+                        "ALTER TABLE `%s` ADD CONSTRAINT `fk_timers_character_world` "
+                        "FOREIGN KEY (`character_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE;",
+                        (const char *) sTimers,
+                        (const char *) sWorldObjects );
+                if ( ! storage.ExecuteQuery( sAddChar ))
+                {
+                        return false;
+                }
+        }
+
+        if ( ! HasForeignKeyForColumn( "item_uid" ))
+        {
+                CGString sAddItem;
+                sAddItem.Format(
+                        "ALTER TABLE `%s` ADD CONSTRAINT `fk_timers_item_world` "
+                        "FOREIGN KEY (`item_uid`) REFERENCES `%s`(`uid`) ON DELETE CASCADE;",
+                        (const char *) sTimers,
+                        (const char *) sWorldObjects );
+                if ( ! storage.ExecuteQuery( sAddItem ))
+                {
+                        return false;
+                }
+        }
+
+        return true;
+}
+
 bool SchemaManager::EnsureColumnExists( MySqlStorageService & storage, const CGString & table, const char * column, const char * definition )
 {
         if ( ColumnExists( storage, table, column ))
@@ -855,6 +985,17 @@ bool SchemaManager::ApplyMigration( MySqlStorageService & storage, int fromVersi
                         return false;
                 }
                 if ( ! SetSchemaVersion( storage, 4 ))
+                {
+                        return false;
+                }
+                break;
+
+        case 4:
+                if ( ! ApplyMigration_4_5( storage ))
+                {
+                        return false;
+                }
+                if ( ! SetSchemaVersion( storage, 5 ))
                 {
                         return false;
                 }

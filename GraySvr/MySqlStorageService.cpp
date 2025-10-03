@@ -62,7 +62,7 @@ namespace
         static const int SCHEMA_IMPORT_ROW = 2;       // Tracks legacy import state
         static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
-        static const int CURRENT_SCHEMA_VERSION = 4;
+        static const int CURRENT_SCHEMA_VERSION = 5;
 
         std::string FormatWorldObjectContext( const CObjBase & object )
         {
@@ -2263,6 +2263,97 @@ bool MySqlStorageService::DeleteObject( const CObjBase * pObject )
         return DeleteWorldObject( pObject );
 }
 
+bool MySqlStorageService::DeleteTimersForObject( const CObjBase & object )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        const CGString sTimers = GetPrefixedTableName( "timers" );
+        const unsigned long long uid = (unsigned long long) (UINT) object.GetUID();
+
+        if ( object.IsChar())
+        {
+                CGString sQuery;
+                sQuery.Format( "DELETE FROM `%s` WHERE `character_uid` = %llu;", (const char *) sTimers, uid );
+                return ExecuteQuery( sQuery );
+        }
+
+        if ( object.IsItem())
+        {
+                CGString sQuery;
+                sQuery.Format( "DELETE FROM `%s` WHERE `item_uid` = %llu;", (const char *) sTimers, uid );
+                return ExecuteQuery( sQuery );
+        }
+
+        return true;
+}
+
+bool MySqlStorageService::UpsertTimerForObject( const CObjBase & object, long long expiresInTicks )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        if ( ! object.IsChar() && ! object.IsItem())
+        {
+                return true;
+        }
+
+        Transaction transaction( *this );
+        if ( ! transaction.Begin())
+        {
+                return false;
+        }
+
+        if ( ! DeleteTimersForObject( object ))
+        {
+                transaction.Rollback();
+                return false;
+        }
+
+        if ( expiresInTicks > 0 )
+        {
+                const CGString sTimers = GetPrefixedTableName( "timers" );
+                UniversalRecord record( *this, sTimers );
+
+                if ( object.IsChar())
+                {
+                        record.SetUInt( "character_uid", (unsigned long long) (UINT) object.GetUID());
+                        record.SetNull( "item_uid" );
+                        record.SetUInt( "type", static_cast<unsigned long long>( TimerRecord::Type::Character ));
+                }
+                else
+                {
+                        record.SetNull( "character_uid" );
+                        record.SetUInt( "item_uid", (unsigned long long) (UINT) object.GetUID());
+                        record.SetUInt( "type", static_cast<unsigned long long>( TimerRecord::Type::Item ));
+                }
+
+                record.SetInt( "expires_at", expiresInTicks );
+                record.SetNull( "data" );
+
+                std::vector<UniversalRecord> records;
+                records.push_back( record );
+
+                if ( ! ExecuteRecordsInsert( records ))
+                {
+                        transaction.Rollback();
+                        return false;
+                }
+        }
+
+        if ( ! transaction.Commit())
+        {
+                transaction.Rollback();
+                return false;
+        }
+
+        return true;
+}
+
 #ifndef UNIT_TEST
 void MySqlStorageService::ScheduleSave( ObjectHandle handle, StorageDirtyType type )
 {
@@ -2439,6 +2530,86 @@ bool MySqlStorageService::SaveServer( const CServRef & server )
 }
 #endif
 
+bool MySqlStorageService::SaveTimers( const std::vector<TimerRecord> & timers )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        const CGString sTimers = GetPrefixedTableName( "timers" );
+
+        Transaction transaction( *this );
+        if ( ! transaction.Begin())
+        {
+                return false;
+        }
+
+        if ( ! ClearTable( sTimers ))
+        {
+                transaction.Rollback();
+                return false;
+        }
+
+        if ( ! timers.empty())
+        {
+                std::vector<UniversalRecord> records;
+                records.reserve( timers.size());
+
+                for ( size_t i = 0; i < timers.size(); ++i )
+                {
+                        const TimerRecord & timer = timers[i];
+                        UniversalRecord record( *this, sTimers );
+
+                        if ( timer.m_fHasCharacter )
+                        {
+                                record.SetUInt( "character_uid", timer.m_uCharacterUid );
+                        }
+                        else
+                        {
+                                record.SetNull( "character_uid" );
+                        }
+
+                        if ( timer.m_fHasItem )
+                        {
+                                record.SetUInt( "item_uid", timer.m_uItemUid );
+                        }
+                        else
+                        {
+                                record.SetNull( "item_uid" );
+                        }
+
+                        record.SetInt( "expires_at", timer.m_iExpiresAt );
+                        record.SetUInt( "type", static_cast<unsigned long long>( timer.m_eType ));
+
+                        if ( timer.m_sData.IsEmpty())
+                        {
+                                record.SetNull( "data" );
+                        }
+                        else
+                        {
+                                record.SetString( "data", timer.m_sData );
+                        }
+
+                        records.push_back( record );
+                }
+
+                if ( ! ExecuteRecordsInsert( records ))
+                {
+                        transaction.Rollback();
+                        return false;
+                }
+        }
+
+        if ( ! transaction.Commit())
+        {
+                transaction.Rollback();
+                return false;
+        }
+
+        return true;
+}
+
 bool MySqlStorageService::ClearGMPages()
 {
         if ( ! IsConnected())
@@ -2457,6 +2628,16 @@ bool MySqlStorageService::ClearServers()
         }
         const CGString sServers = GetPrefixedTableName( "servers" );
         return ClearTable( sServers );
+}
+
+bool MySqlStorageService::ClearTimers()
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+        const CGString sTimers = GetPrefixedTableName( "timers" );
+        return ClearTable( sTimers );
 }
 
 bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
@@ -3085,6 +3266,98 @@ bool MySqlStorageService::LoadServers( std::vector<ServerRecord> & servers )
                 record.m_iAgeHours = pRow[14] ? atoi( pRow[14] ) : 0;
                 servers.push_back( record );
         }
+        return true;
+}
+
+bool MySqlStorageService::LoadTimers( std::vector<TimerRecord> & timers )
+{
+        timers.clear();
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        const CGString sTimers = GetPrefixedTableName( "timers" );
+        CGString sQuery;
+        sQuery.Format( "SELECT `id`,`character_uid`,`item_uid`,`expires_at`,`type`,`data` FROM `%s` ORDER BY `id`;",
+                (const char *) sTimers );
+
+        std::unique_ptr<Storage::IDatabaseResult> result;
+        if ( ! Query( sQuery, &result ))
+        {
+                return false;
+        }
+
+        if ( !result || !result->IsValid())
+        {
+                return true;
+        }
+
+        Storage::IDatabaseResult::Row pRow;
+        while (( pRow = result->FetchRow()) != NULL )
+        {
+                TimerRecord record;
+#ifdef _WIN32
+                record.m_id = pRow[0] ? (unsigned long long) _strtoui64( pRow[0], NULL, 10 ) : 0;
+#else
+                record.m_id = pRow[0] ? (unsigned long long) strtoull( pRow[0], NULL, 10 ) : 0;
+#endif
+
+                if ( pRow[1] != NULL && pRow[1][0] != '\0' )
+                {
+                        record.m_fHasCharacter = true;
+#ifdef _WIN32
+                        record.m_uCharacterUid = (unsigned long long) _strtoui64( pRow[1], NULL, 10 );
+#else
+                        record.m_uCharacterUid = (unsigned long long) strtoull( pRow[1], NULL, 10 );
+#endif
+                }
+
+                if ( pRow[2] != NULL && pRow[2][0] != '\0' )
+                {
+                        record.m_fHasItem = true;
+#ifdef _WIN32
+                        record.m_uItemUid = (unsigned long long) _strtoui64( pRow[2], NULL, 10 );
+#else
+                        record.m_uItemUid = (unsigned long long) strtoull( pRow[2], NULL, 10 );
+#endif
+                }
+
+#ifdef _WIN32
+                record.m_iExpiresAt = pRow[3] ? _strtoi64( pRow[3], NULL, 10 ) : 0;
+#else
+                record.m_iExpiresAt = pRow[3] ? strtoll( pRow[3], NULL, 10 ) : 0;
+#endif
+
+                unsigned int uType = pRow[4] ? (unsigned int) strtoul( pRow[4], NULL, 10 ) : 0;
+                switch ( uType )
+                {
+                case 1:
+                        record.m_eType = TimerRecord::Type::Character;
+                        break;
+                case 2:
+                        record.m_eType = TimerRecord::Type::Item;
+                        break;
+                case 3:
+                        record.m_eType = TimerRecord::Type::Script;
+                        break;
+                default:
+                        record.m_eType = TimerRecord::Type::Unknown;
+                        break;
+                }
+
+                if ( pRow[5] != NULL )
+                {
+                        record.m_sData = pRow[5];
+                }
+                else
+                {
+                        record.m_sData = CGString();
+                }
+
+                timers.push_back( record );
+        }
+
         return true;
 }
 

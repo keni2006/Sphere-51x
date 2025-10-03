@@ -4947,6 +4947,8 @@ public:
         size_t  m_uStorageLoadGMPageIndex;
         std::vector<MySqlStorageService::ServerRecord> m_StorageLoadServers;
         size_t  m_uStorageLoadServerIndex;
+        std::vector<MySqlStorageService::TimerRecord> m_StorageLoadTimers;
+        size_t  m_uStorageLoadTimerIndex;
 
         // World data.
 	CSector m_Sectors[ SECTOR_QTY ];
@@ -4983,6 +4985,7 @@ private:
         bool SaveStorageSector( CSector & sector );
         bool SaveStorageGMPages();
         bool SaveStorageServers();
+        bool SaveStorageTimers();
         bool SaveObjectToStorage( CObjBase * pObj );
         bool BeginStorageSave();
         void AbortStorageSave();

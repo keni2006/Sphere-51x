@@ -95,7 +95,7 @@ managed by the connection manager, so they can freely execute DDL and DML using
 
 ## Schema reference
 
-The current schema version is **4**. Table names below omit the optional prefix
+The current schema version is **5**. Table names below omit the optional prefix
 configured through `MYSQLPREFIX`.
 
 ### `schema_version`
@@ -104,7 +104,7 @@ Tracks migration and operational metadata. Seeded by the schema manager.
 
 | `id` | Purpose | Typical values |
 | ---- | ------- | -------------- |
-| 1 | Schema revision (`CURRENT_SCHEMA_VERSION`). | `4` |
+| 1 | Schema revision (`CURRENT_SCHEMA_VERSION`). | `5` |
 | 2 | Legacy account import flag (`0` pending, `1` complete). | `0` or `1` |
 | 3 | World save counter (incremented for every completed save). | `0+` |
 | 4 | World save completion flag (`0` = interrupted, `1` = success). | `0` or `1` |
@@ -152,9 +152,14 @@ Tracks migration and operational metadata. Seeded by the schema manager.
   metadata, contact details, localisation information and ageing statistics.
 
 `timers`
-: Auxiliary timers that back scheduled operations from the classic scripts.
+: Auxiliary timers that back scheduled operations from the classic scripts. Each
+  row references a persisted world object via `character_uid` or `item_uid`,
+  both of which point to `<prefix>world_objects`.`uid`. The `expires_at` column
+  stores the remaining world ticks (1 tick = 100 ms) until the timer fires and
+  `type` distinguishes character (`1`) from item (`2`) timers. Script engines
+  may persist additional payloads in `data` for future extensions.
 
-### World persistence (`schema` version ≥ 3, current version 4)
+### World persistence (`schema` version ≥ 3, current version 5)
 
 `world_objects`
 : Metadata for every persisted object (characters and items). Stores the base
