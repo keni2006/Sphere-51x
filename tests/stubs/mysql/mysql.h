@@ -87,10 +87,6 @@ enum mysql_option
         MYSQL_INIT_COMMAND
 };
 
-#ifndef MYSQL_NO_DATA
-#define MYSQL_NO_DATA 100
-#endif
-
 unsigned int mysql_num_fields( MYSQL_RES * result );
 MYSQL_ROW mysql_fetch_row( MYSQL_RES * result );
 void mysql_free_result( MYSQL_RES * result );
@@ -114,9 +110,6 @@ unsigned long mysql_stmt_param_count( MYSQL_STMT * stmt );
 int mysql_stmt_bind_param( MYSQL_STMT * stmt, MYSQL_BIND * bnd );
 int mysql_stmt_execute( MYSQL_STMT * stmt );
 int mysql_stmt_reset( MYSQL_STMT * stmt );
-int mysql_stmt_store_result( MYSQL_STMT * stmt );
-int mysql_stmt_fetch( MYSQL_STMT * stmt );
-void mysql_stmt_free_result( MYSQL_STMT * stmt );
 int mysql_stmt_close( MYSQL_STMT * stmt );
 unsigned int mysql_stmt_errno( MYSQL_STMT * stmt );
 const char * mysql_stmt_error( MYSQL_STMT * stmt );

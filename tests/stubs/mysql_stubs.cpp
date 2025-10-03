@@ -11,13 +11,8 @@
 #include <string>
 #include <vector>
 
-#ifndef MYSQL_NO_DATA
-#define MYSQL_NO_DATA 100
-#endif
-
 CLog g_Log;
 CServer g_Serv;
-WorldStub g_World;
 
 namespace
 {
@@ -44,8 +39,6 @@ namespace
                 unsigned int last_error = 0;
                 unsigned long param_count = 0;
                 std::vector<MYSQL_BIND> binds;
-                std::vector<std::vector<std::string>> result_rows;
-                size_t result_index = 0;
         };
 
         bool g_query_called = false;
@@ -543,56 +536,6 @@ extern "C"
                         }
                 }
                 return 0;
-        }
-
-        int mysql_stmt_store_result( MYSQL_STMT * stmt )
-        {
-                if ( stmt == nullptr || stmt->internal == nullptr )
-                {
-                        return 1;
-                }
-
-                StatementData * data = static_cast<StatementData*>( stmt->internal );
-                data->result_rows.clear();
-                data->result_index = 0;
-
-                if ( g_pending_results.empty())
-                {
-                        return 0;
-                }
-
-                data->result_rows = std::move( g_pending_results.front());
-                g_pending_results.pop_front();
-                return 0;
-        }
-
-        int mysql_stmt_fetch( MYSQL_STMT * stmt )
-        {
-                if ( stmt == nullptr || stmt->internal == nullptr )
-                {
-                        return MYSQL_NO_DATA;
-                }
-
-                StatementData * data = static_cast<StatementData*>( stmt->internal );
-                if ( data->result_index < data->result_rows.size())
-                {
-                        ++data->result_index;
-                        return 0;
-                }
-
-                return MYSQL_NO_DATA;
-        }
-
-        void mysql_stmt_free_result( MYSQL_STMT * stmt )
-        {
-                if ( stmt == nullptr || stmt->internal == nullptr )
-                {
-                        return;
-                }
-
-                StatementData * data = static_cast<StatementData*>( stmt->internal );
-                data->result_rows.clear();
-                data->result_index = 0;
         }
 
         int mysql_stmt_close( MYSQL_STMT * stmt )
