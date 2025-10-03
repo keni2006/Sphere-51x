@@ -13,7 +13,6 @@
 
 CLog g_Log;
 CServer g_Serv;
-CWorld g_World;
 
 namespace
 {
