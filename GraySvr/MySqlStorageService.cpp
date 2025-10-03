@@ -3590,23 +3590,6 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
                                 record.m_Sequence = 0;
                                 records.push_back( std::move( record ));
                         }
-
-                        const CObjBaseTemplate * pTopTemplate = pItem->GetTopLevelObj();
-                        const CObjBase * pTopObject = dynamic_cast<const CObjBase*>( pTopTemplate );
-                        const CChar * pTopChar = dynamic_cast<const CChar*>( pTopObject );
-                        if ( pTopChar != NULL && pTopObject != NULL )
-                        {
-                                const unsigned long long parentUid = (unsigned long long) (UINT) pTopChar->GetUID();
-                                if ( parentUid != 0 && parentUid != uid )
-                                {
-                                        Storage::Repository::WorldObjectRelationRecord ownerRecord;
-                                        ownerRecord.m_ParentUid = parentUid;
-                                        ownerRecord.m_ChildUid = uid;
-                                        ownerRecord.m_Relation = "owner";
-                                        ownerRecord.m_Sequence = 0;
-                                        records.push_back( std::move( ownerRecord ));
-                                }
-                        }
                 }
         }
 
