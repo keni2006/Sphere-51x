@@ -160,6 +160,20 @@ namespace
                 return ss.str();
         }
 
+        void TruncateStringToLimit( std::string & value, size_t limit )
+        {
+                if ( limit == 0 )
+                {
+                        value.clear();
+                        return;
+                }
+
+                if ( value.size() > limit )
+                {
+                        value.resize( limit );
+                }
+        }
+
         void LogPersistenceFailure( const CObjBase & object, LOGL_TYPE level, const std::string & stage, const std::string & reason )
         {
                 const char * stageText = stage.empty() ? "unknown" : stage.c_str();
@@ -805,6 +819,49 @@ namespace Repository
                                 return true;
                         }
 
+                        auto ShouldReprepare = []( const Storage::DatabaseError & ex )
+                        {
+                                const std::string & context = ex.GetContext();
+                                if ( context != "mysql_stmt_reset" &&
+                                        context != "mysql_stmt_execute" &&
+                                        context != "mysql_stmt_bind_param" &&
+                                        context != "mysql_stmt_prepare" )
+                                {
+                                        return false;
+                                }
+
+                                switch ( ex.GetCode())
+                                {
+                                        case 0:
+                                        {
+                                                const char * psz = ex.what();
+                                                if ( psz != NULL )
+                                                {
+                                                        if ( std::strstr( psz, "Parameter index out of range" ) != NULL )
+                                                        {
+                                                                return true;
+                                                        }
+                                                        if ( std::strstr( psz, "Unknown MySQL statement error" ) != NULL )
+                                                        {
+                                                                return true;
+                                                        }
+                                                }
+                                                return false;
+                                        }
+                                        case 1243: // Unknown prepared statement handler
+                                        case 2000: // Unknown or undefined error
+                                        case 2006: // Server has gone away
+                                        case 2013: // Lost connection during query
+                                        case 2027: // Malformed packet
+                                        case 2047: // Wrong or unknown protocol
+                                                return true;
+                                        default:
+                                                break;
+                                }
+
+                                return false;
+                        };
+
                         try
                         {
                                 Storage::MySql::MySqlConnectionPool::ScopedConnection scoped;
@@ -816,12 +873,43 @@ namespace Repository
                                         return false;
                                 }
 
-                                std::unique_ptr<Storage::IDatabaseStatement> statement = connection->Prepare( query );
+                                auto prepareStatement = [&]() -> std::unique_ptr<Storage::IDatabaseStatement>
+                                {
+                                        return connection->Prepare( query );
+                                };
+
+                                std::unique_ptr<Storage::IDatabaseStatement> statement = prepareStatement();
+
                                 for ( size_t i = 0; i < count; ++i )
                                 {
-                                        statement->Reset();
-                                        binder( *statement, i );
-                                        statement->Execute();
+                                        bool needReset = ( i != 0 );
+                                        bool retried = false;
+
+                                        while ( true )
+                                        {
+                                                try
+                                                {
+                                                        if ( needReset )
+                                                        {
+                                                                statement->Reset();
+                                                        }
+
+                                                        binder( *statement, i );
+                                                        statement->Execute();
+                                                        break;
+                                                }
+                                                catch ( const Storage::DatabaseError & ex )
+                                                {
+                                                        if ( !ShouldReprepare( ex ) || retried )
+                                                        {
+                                                                throw;
+                                                        }
+
+                                                        statement = prepareStatement();
+                                                        retried = true;
+                                                        needReset = false;
+                                                }
+                                        }
                                 }
 
                                 return true;
@@ -1137,7 +1225,8 @@ namespace Repository
                         const std::string quoted = "`" + m_Table + "`";
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `child_uid` = ?;";
                         m_InsertQuery =
-                                "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?);";
+                                "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?) "
+                                "ON DUPLICATE KEY UPDATE `relation`=VALUES(`relation`),`sequence`=VALUES(`sequence`);";
                 }
 
                 bool DeleteForObject( unsigned long long uid )
@@ -3831,16 +3920,27 @@ bool MySqlStorageService::UpsertWorldObjectMeta( CObjBase * pObject, const CGStr
         Storage::Repository::WorldObjectMetaRecord record;
         record.m_Uid = uid;
         record.m_ObjectType = pObject->IsChar() ? "char" : "item";
+        TruncateStringToLimit( record.m_ObjectType, 32 );
+        if ( record.m_ObjectType.empty())
+        {
+                record.m_ObjectType = pObject->IsChar() ? "char" : "item";
+        }
 
         CGString sSubtype;
         sSubtype.Format( "0x%x", (unsigned int) pObject->GetBaseID());
         record.m_ObjectSubtype = (const char *) sSubtype;
+        TruncateStringToLimit( record.m_ObjectSubtype, 64 );
 
         const TCHAR * pszName = pObject->GetName();
         if ( pszName != NULL && pszName[0] != '\0' )
         {
                 record.m_HasName = true;
                 record.m_Name = pszName;
+                TruncateStringToLimit( record.m_Name, 128 );
+                if ( record.m_Name.empty())
+                {
+                        record.m_HasName = false;
+                }
         }
 
         if ( pObject->IsChar())
