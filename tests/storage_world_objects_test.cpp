@@ -315,8 +315,7 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         {
                 throw std::runtime_error( "World object relation insert missing" );
         }
-        const size_t relationParameterCount = relationStmt->parameters.size();
-        if ( relationParameterCount < 3 )
+        if ( relationStmt->parameters.size() != 3 && relationStmt->parameters.size() != 4 )
         {
                 throw std::runtime_error( "Unexpected relation parameter count" );
         }
@@ -324,25 +323,13 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         {
                 throw std::runtime_error( "Relation parent/child identifiers incorrect" );
         }
-        const bool fHasSequenceColumn = relationStmt->query.find( "`sequence`" ) != std::string::npos;
-        const size_t relationValueCount = relationParameterCount - 2 - ( fHasSequenceColumn ? 1 : 0 );
-        if ( relationValueCount == 0 )
+        if ( relationStmt->parameters[2] != "container" )
         {
-                throw std::runtime_error( "Relation type values were not recorded" );
+                throw std::runtime_error( "Relation type not recorded as container" );
         }
-        for ( size_t i = 0; i < relationValueCount; ++i )
+        if ( relationStmt->parameters.size() == 4 && relationStmt->parameters[3] != "0" )
         {
-                if ( relationStmt->parameters[2 + i] != "container" )
-                {
-                        throw std::runtime_error( "Relation type not recorded as container" );
-                }
-        }
-        if ( fHasSequenceColumn )
-        {
-                if ( relationStmt->parameters.back() != "0" )
-                {
-                        throw std::runtime_error( "Relation sequence not defaulted to zero" );
-                }
+                throw std::runtime_error( "Relation sequence not defaulted to zero" );
         }
 }
 
@@ -360,11 +347,8 @@ TEST_CASE( TestMissingRelationColumnIsCreatedAutomatically )
 
         PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: relation missing
         PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: type missing
-        PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: relation_type missing
         PushMysqlResultSet({ { "1" } }); // EnsureWorldRelationColumn: relation present after ALTER
         PushMysqlResultSet({ { "1" } }); // Update cache: parent_uid exists
-        PushMysqlResultSet({ { "0" } }); // Update cache: type column missing
-        PushMysqlResultSet({ { "0" } }); // Update cache: relation_type column missing
         PushMysqlResultSet({ { "1" } }); // Update cache: relation exists
         PushMysqlResultSet({ { "1" } }); // Update cache: sequence exists
 
@@ -403,7 +387,7 @@ TEST_CASE( TestMissingRelationColumnIsCreatedAutomatically )
                 throw std::runtime_error( "Relation backfill UPDATE was not executed" );
         }
 
-        if ( storage.Service().DebugGetWorldRelationColumnName().CompareNoCase( "relation" ) != 0 )
+        if ( storage.Service().GetWorldRelationColumnName().CompareNoCase( "relation" ) != 0 )
         {
                 throw std::runtime_error( "Relation column cache was not refreshed to `relation`" );
         }
@@ -423,11 +407,8 @@ TEST_CASE( TestLegacyTypeColumnIsRenamedToRelation )
 
         PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: relation missing
         PushMysqlResultSet({ { "1" } }); // EnsureWorldRelationColumn: legacy type present
-        PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: relation_type missing
         PushMysqlResultSet({ { "1" } }); // EnsureWorldRelationColumn: relation present after rename
         PushMysqlResultSet({ { "1" } }); // Update cache: parent_uid exists
-        PushMysqlResultSet({ { "0" } }); // Update cache: legacy type column removed
-        PushMysqlResultSet({ { "0" } }); // Update cache: relation_type column missing
         PushMysqlResultSet({ { "1" } }); // Update cache: relation exists
         PushMysqlResultSet({ { "1" } }); // Update cache: sequence exists
 
@@ -466,7 +447,7 @@ TEST_CASE( TestLegacyTypeColumnIsRenamedToRelation )
                 throw std::runtime_error( "Relation rename path should not issue backfill updates" );
         }
 
-        if ( storage.Service().DebugGetWorldRelationColumnName().CompareNoCase( "relation" ) != 0 )
+        if ( storage.Service().GetWorldRelationColumnName().CompareNoCase( "relation" ) != 0 )
         {
                 throw std::runtime_error( "Relation column cache was not refreshed to `relation`" );
         }
