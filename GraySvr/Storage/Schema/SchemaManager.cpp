@@ -390,8 +390,20 @@ bool SchemaManager::ApplyMigration_2_3( MySqlStorageService & storage )
 
                 if ( ! fRelationColumnExists )
                 {
-                        if ( ! EnsureColumnExists( storage, sWorldObjectRelations, "relation",
-                                "`relation` VARCHAR(32) NOT NULL AFTER `child_uid`" ))
+                        CGString sAddRelation;
+                        sAddRelation.Format(
+                                "ALTER TABLE `%s` ADD COLUMN `relation` VARCHAR(32) NOT NULL DEFAULT 'container' AFTER `child_uid`;",
+                                (const char *) sWorldObjectRelations );
+                        if ( ! storage.ExecuteQuery( sAddRelation ))
+                        {
+                                return false;
+                        }
+
+                        CGString sPopulateRelation;
+                        sPopulateRelation.Format(
+                                "UPDATE `%s` SET `relation` = 'container' WHERE `relation` IS NULL OR `relation` = '';",
+                                (const char *) sWorldObjectRelations );
+                        if ( ! storage.ExecuteQuery( sPopulateRelation ))
                         {
                                 return false;
                         }
