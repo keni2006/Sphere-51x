@@ -3476,27 +3476,32 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         {
                 fResult = false;
         }
-        else if ( serializationResult == SerializationResult::Success )
+        else
         {
                 if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                else if (( serializationResult == SerializationResult::Success ) &&
+                        ( ! UpsertWorldObjectData( pObject, sSerialized )))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
                         fResult = false;
                 }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
+
+                if ( fResult )
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                        fResult = false;
+                        if ( ! RefreshWorldObjectComponents( pObject ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                                fResult = false;
+                        }
+                        else if ( ! RefreshWorldObjectRelations( pObject ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                                fResult = false;
+                        }
                 }
         }
 
