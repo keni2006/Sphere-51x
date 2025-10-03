@@ -3337,84 +3337,9 @@ bool MySqlStorageService::ApplyWorldObjectData( CObjBase & object, const CGStrin
         }
 
         bool fResult = false;
-        bool fLoadedRoot = false;
-        const std::string context = FormatWorldObjectContext( object );
-
-        while ( script.FindNextSection())
+        if ( script.FindNextSection())
         {
-                if ( ! fLoadedRoot )
-                {
-                        fLoadedRoot = true;
-                        fResult = object.r_Load( script );
-                        if ( ! fResult )
-                        {
-                                LogPersistenceFailure( object, LOGL_ERROR, "deserialize", "r_Load failed for root section" );
-                                break;
-                        }
-                        continue;
-                }
-
-                if ( script.IsSectionType( "WORLDITEM" ))
-                {
-                        CItem * pItem = CItem::CreateScript((ITEMID_TYPE) script.GetArgHex());
-                        if ( pItem == NULL )
-                        {
-                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to instantiate item section while applying data for %s.\n", context.c_str());
-                                fResult = false;
-                                break;
-                        }
-
-                        if ( ! pItem->r_Load( script ))
-                        {
-                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to load WORLDITEM section while applying data for %s.\n", context.c_str());
-                                pItem->Delete();
-#ifdef UNIT_TEST
-                                delete pItem;
-#endif
-                                fResult = false;
-                                break;
-                        }
-
-                        continue;
-                }
-
-                if ( script.IsSectionType( "WORLDCHAR" ))
-                {
-                        CChar * pChar = CChar::CreateBasic((CREID_TYPE) script.GetArgHex());
-                        if ( pChar == NULL )
-                        {
-                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to instantiate character section while applying data for %s.\n", context.c_str());
-                                fResult = false;
-                                break;
-                        }
-
-                        if ( ! pChar->r_Load( script ))
-                        {
-                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to load WORLDCHAR section while applying data for %s.\n", context.c_str());
-                                pChar->Delete();
-#ifdef UNIT_TEST
-                                delete pChar;
-#endif
-                                fResult = false;
-                                break;
-                        }
-
-                        continue;
-                }
-
-                if ( script.IsSectionType( "EOF" ))
-                {
-                        continue;
-                }
-
-                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Unexpected section '%s' while applying data for %s.\n", script.GetSection(), context.c_str());
-                fResult = false;
-                break;
-        }
-
-        if ( ! fLoadedRoot )
-        {
-                fResult = false;
+                fResult = object.r_Load( script );
         }
 
         script.Close();
