@@ -45,6 +45,7 @@
 #include <string>
 #include <new>
 #include <stdexcept>
+#include <exception>
 #include <cerrno>
 #include <sys/types.h>
 #ifndef _WIN32
@@ -798,7 +799,8 @@ namespace Repository
 
         protected:
                 bool ExecuteBatch( const std::string & query, size_t count,
-                        const std::function<void(Storage::IDatabaseStatement &, size_t)> & binder ) const
+                        const std::function<void(Storage::IDatabaseStatement &, size_t)> & binder,
+                        const std::function<bool(const Storage::DatabaseError &)> & errorHandler = std::function<bool(const Storage::DatabaseError &)>()) const
                 {
                         if ( count == 0 )
                         {
@@ -828,6 +830,24 @@ namespace Repository
                         }
                         catch ( const Storage::DatabaseError & ex )
                         {
+                                if ( errorHandler )
+                                {
+                                        bool fHandled = false;
+                                        try
+                                        {
+                                                fHandled = errorHandler( ex );
+                                        }
+                                        catch ( const std::exception & handlerEx )
+                                        {
+                                                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                        "Exception while handling MySQL error: %s", handlerEx.what());
+                                        }
+
+                                        if ( fHandled )
+                                        {
+                                                return false;
+                                        }
+                                }
                                 LogDatabaseError( ex, LOGL_ERROR );
                         }
                         catch ( const std::bad_alloc & )
@@ -1092,8 +1112,7 @@ namespace Repository
                 {
                         const std::string quoted = "`" + m_Table + "`";
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `child_uid` = ?;";
-                        m_InsertQuery =
-                                "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?);";
+                        RefreshMetadata();
                 }
 
                 bool DeleteForObject( unsigned long long uid )
@@ -1106,21 +1125,88 @@ namespace Repository
 
                 bool InsertMany( const std::vector<WorldObjectRelationRecord> & records )
                 {
-                        return ExecuteBatch( m_InsertQuery, records.size(),
-                                [&]( Storage::IDatabaseStatement & statement, size_t index )
+                        if ( records.empty())
                         {
-                                const WorldObjectRelationRecord & record = records[index];
-                                statement.BindUInt64( 0, record.m_ParentUid );
-                                statement.BindUInt64( 1, record.m_ChildUid );
-                                statement.BindString( 2, record.m_Relation );
-                                statement.BindInt64( 3, record.m_Sequence );
-                        });
+                                return true;
+                        }
+
+                        for ( int attempt = 0; attempt < 2; ++attempt )
+                        {
+                                const std::string insertQuery = BuildInsertQuery();
+                                bool fRequestedRetry = false;
+
+                                bool fSuccess = ExecuteBatch( insertQuery, records.size(),
+                                        [&]( Storage::IDatabaseStatement & statement, size_t index )
+                                {
+                                        const WorldObjectRelationRecord & record = records[index];
+                                        statement.BindUInt64( 0, record.m_ParentUid );
+                                        statement.BindUInt64( 1, record.m_ChildUid );
+                                        statement.BindString( 2, record.m_Relation );
+                                        if ( m_HasSequence )
+                                        {
+                                                statement.BindInt64( 3, record.m_Sequence );
+                                        }
+                                },
+                                        [&]( const Storage::DatabaseError & ex )
+                                {
+                                        if ( ex.GetCode() == 1054 && m_RelationColumn == "relation" )
+                                        {
+                                                const std::string message = ex.what();
+                                                if ( message.find( "`relation`" ) != std::string::npos ||
+                                                        message.find( "'relation'" ) != std::string::npos )
+                                                {
+                                                        fRequestedRetry = m_Storage.HandleMissingWorldRelationColumn();
+                                                        if ( fRequestedRetry )
+                                                        {
+                                                                RefreshMetadata();
+                                                                return true;
+                                                        }
+                                                }
+                                        }
+                                        return false;
+                                });
+
+                                if ( fSuccess )
+                                {
+                                        return true;
+                                }
+
+                                if ( !fRequestedRetry )
+                                {
+                                        return false;
+                                }
+                        }
+
+                        return false;
                 }
 
         private:
+                void RefreshMetadata()
+                {
+                        m_RelationColumn = static_cast<const char *>( m_Storage.GetWorldRelationColumnName());
+                        if ( m_RelationColumn.empty())
+                        {
+                                m_RelationColumn = "relation";
+                        }
+                        m_HasSequence = m_Storage.HasWorldRelationSequenceColumn();
+                }
+
+                std::string BuildInsertQuery() const
+                {
+                        const std::string quoted = "`" + m_Table + "`";
+                        const std::string relationColumn = "`" + m_RelationColumn + "`";
+                        if ( m_HasSequence )
+                        {
+                                return "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`," + relationColumn + ",`sequence`) VALUES (?,?,?,?);";
+                        }
+
+                        return "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`," + relationColumn + ") VALUES (?,?,?);";
+                }
+
                 std::string m_Table;
                 std::string m_DeleteQuery;
-                std::string m_InsertQuery;
+                std::string m_RelationColumn;
+                bool m_HasSequence;
         };
 }
 }
@@ -1393,12 +1479,14 @@ CGString MySqlStorageService::UniversalRecord::BuildUpdate( const CGString & whe
 #endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
 MySqlStorageService::MySqlStorageService() :
-        m_tLastAccountSync( 0 )
+        m_tLastAccountSync( 0 ),
+        m_fWorldRelationHasSequenceColumn( true )
 {
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
+        m_sWorldRelationColumnName = "relation";
 }
 
 MySqlStorageService::~MySqlStorageService()
@@ -1473,6 +1561,12 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
                 return false;
         }
 
+        if ( !InitializeWorldRelationSchema())
+        {
+                g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                        "World object relation metadata could not be detected; falling back to legacy defaults." );
+        }
+
 #ifndef UNIT_TEST
         m_DirtyProcessor = std::make_unique<Storage::DirtyQueueProcessor>( *this );
         m_SnapshotProcessor = std::make_unique<Storage::SnapshotQueueProcessor>( *this );
@@ -1493,6 +1587,8 @@ void MySqlStorageService::Stop()
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
         m_tLastAccountSync = 0;
+        m_sWorldRelationColumnName = "relation";
+        m_fWorldRelationHasSequenceColumn = true;
 }
 
 CGString MySqlStorageService::BuildSchemaVersionCreateQuery() const
@@ -1518,6 +1614,176 @@ CGString MySqlStorageService::BuildSchemaVersionCreateQuery() const
                 pszCharset,
                 (const char *) sCollationSuffix );
         return sQuery;
+}
+
+void MySqlStorageService::UpdateWorldRelationSchemaCache()
+{
+        m_sWorldRelationColumnName = "relation";
+        m_fWorldRelationHasSequenceColumn = true;
+
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        if ( sRelations.IsEmpty())
+        {
+                return;
+        }
+
+        if ( !ColumnExists( sRelations, "parent_uid" ))
+        {
+                return;
+        }
+
+        bool fRelationColumnExists = ColumnExists( sRelations, "relation" );
+        if ( !fRelationColumnExists )
+        {
+                if ( ColumnExists( sRelations, "type" ))
+                {
+                        m_sWorldRelationColumnName = "type";
+                        fRelationColumnExists = true;
+                }
+        }
+
+        if ( !fRelationColumnExists )
+        {
+                m_sWorldRelationColumnName.Empty();
+        }
+
+        m_fWorldRelationHasSequenceColumn = ColumnExists( sRelations, "sequence" );
+}
+
+bool MySqlStorageService::InitializeWorldRelationSchema()
+{
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        if ( sRelations.IsEmpty())
+        {
+                return true;
+        }
+
+        const bool fEnsuredRelationColumn = EnsureWorldRelationColumn();
+        UpdateWorldRelationSchemaCache();
+
+        if ( m_sWorldRelationColumnName.IsEmpty())
+        {
+                m_sWorldRelationColumnName = "relation";
+                return false;
+        }
+
+        if ( m_sWorldRelationColumnName.CompareNoCase( "relation" ) == 0 )
+        {
+                return true;
+        }
+
+        if ( m_sWorldRelationColumnName.CompareNoCase( "type" ) == 0 )
+        {
+                if ( !fEnsuredRelationColumn )
+                {
+                        g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                                "world_object_relations table is missing the `relation` column; continuing with legacy `type` data." );
+                }
+                return true;
+        }
+
+        return true;
+}
+
+bool MySqlStorageService::EnsureWorldRelationColumn()
+{
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        if ( sRelations.IsEmpty())
+        {
+                return false;
+        }
+
+        if ( ColumnExists( sRelations, "relation" ))
+        {
+                return true;
+        }
+
+        const bool fHasLegacyTypeColumn = ColumnExists( sRelations, "type" );
+        if ( fHasLegacyTypeColumn )
+        {
+                CGString sRenameQuery;
+                sRenameQuery.Format(
+                        "ALTER TABLE `%s` CHANGE COLUMN `type` `relation` VARCHAR(32) NOT NULL;",
+                        (const char *) sRelations );
+                if ( ExecuteQuery( sRenameQuery ))
+                {
+                        g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                                "Renamed legacy `type` column to `relation` in world_object_relations table." );
+                        if ( ColumnExists( sRelations, "relation" ))
+                        {
+                                return true;
+                        }
+                }
+                else
+                {
+                        g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                                "Failed to rename legacy `type` column to `relation` in world_object_relations table; attempting to add new column instead." );
+                }
+        }
+
+        CGString sAddRelation;
+        sAddRelation.Format(
+                "ALTER TABLE `%s` ADD COLUMN `relation` VARCHAR(32) NOT NULL DEFAULT 'container' AFTER `child_uid`;",
+                (const char *) sRelations );
+        if ( ExecuteQuery( sAddRelation ))
+        {
+                g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                        "Added missing `relation` column to world_object_relations table automatically." );
+
+                CGString sPopulateRelation;
+                if ( fHasLegacyTypeColumn )
+                {
+                        sPopulateRelation.Format(
+                                "UPDATE `%s` SET `relation` = `type` WHERE `relation` IS NULL OR `relation` = '';",
+                                (const char *) sRelations );
+                }
+                else
+                {
+                        sPopulateRelation.Format(
+                                "UPDATE `%s` SET `relation` = 'container' WHERE `relation` IS NULL OR `relation` = '';",
+                                (const char *) sRelations );
+                }
+                ExecuteQuery( sPopulateRelation );
+
+                return ColumnExists( sRelations, "relation" );
+        }
+
+        g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                "Failed to add missing `relation` column to world_object_relations table." );
+        return ColumnExists( sRelations, "relation" );
+}
+
+bool MySqlStorageService::HandleMissingWorldRelationColumn()
+{
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        if ( sRelations.IsEmpty())
+        {
+                return false;
+        }
+
+        const bool fEnsuredRelationColumn = EnsureWorldRelationColumn();
+        UpdateWorldRelationSchemaCache();
+
+        if ( m_sWorldRelationColumnName.IsEmpty())
+        {
+                g_Log.Event( LOGM_SAVE | LOGL_ERROR,
+                        "Unable to repair world_object_relations schema; `relation` column is still unavailable." );
+                m_sWorldRelationColumnName = "relation";
+                return false;
+        }
+
+        if ( m_sWorldRelationColumnName.CompareNoCase( "relation" ) == 0 )
+        {
+                return true;
+        }
+
+        if ( !fEnsuredRelationColumn )
+        {
+                g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                        "Falling back to legacy `type` column for world_object_relations after insert failure." );
+        }
+
+        return true;
 }
 
 #ifdef UNIT_TEST
