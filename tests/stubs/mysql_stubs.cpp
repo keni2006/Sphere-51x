@@ -13,7 +13,6 @@
 
 CLog g_Log;
 CServer g_Serv;
-StubWorld g_World;
 
 namespace
 {
