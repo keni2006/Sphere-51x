@@ -3540,37 +3540,50 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         }
 
         bool fResult = true;
+        bool metadataUpdated = false;
         CGString sSerialized;
         const SerializationResult serializationResult = SerializeWorldObject( pObject, sSerialized );
         if ( serializationResult == SerializationResult::Failed )
         {
                 fResult = false;
         }
-        else if ( serializationResult == SerializationResult::Success )
+        else
         {
                 if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                else
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                        fResult = false;
+                        metadataUpdated = true;
+
+                        if ( serializationResult == SerializationResult::Success )
+                        {
+                                if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                                {
+                                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
+                                        fResult = false;
+                                }
+                        }
+
+                        if ( fResult )
+                        {
+                                if ( ! RefreshWorldObjectComponents( pObject ))
+                                {
+                                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                                        fResult = false;
+                                }
+                                else if ( ! RefreshWorldObjectRelations( pObject ))
+                                {
+                                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                                        fResult = false;
+                                }
+                        }
                 }
         }
 
-        if ( includeContents && fResult )
+        if ( includeContents && fResult && metadataUpdated )
         {
                 const CContainer * pContainer = dynamic_cast<const CContainer *>( pObject );
                 if ( pContainer != NULL )
