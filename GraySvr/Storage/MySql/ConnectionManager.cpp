@@ -226,6 +226,57 @@ namespace MySql
                 return true;
         }
 
+        bool ConnectionManager::Reconnect( ConnectionDetails & outDetails )
+        {
+                if ( !m_DatabaseConfig.m_Enable )
+                {
+                        return false;
+                }
+
+                Storage::DatabaseConfig dbConfig = m_DatabaseConfig;
+
+                m_TransactionGuard.reset();
+                m_TransactionConnection.Reset();
+                if ( m_ConnectionPool )
+                {
+                        m_ConnectionPool->Shutdown();
+                        m_ConnectionPool.reset();
+                }
+
+                m_fConnected = false;
+                m_iTransactionDepth = 0;
+
+                const unsigned int attempts = std::max<unsigned int>( dbConfig.m_ReconnectTries > 0 ? dbConfig.m_ReconnectTries : 1u, 1u );
+                for ( unsigned int attempt = 0; attempt < attempts; ++attempt )
+                {
+                        try
+                        {
+                                if ( AttemptConnection( dbConfig, outDetails ))
+                                {
+                                        return true;
+                                }
+                        }
+                        catch ( const Storage::DatabaseError & ex )
+                        {
+                                LogDatabaseError( ex, LOGL_ERROR );
+                                if ( ( attempt + 1 ) < attempts )
+                                {
+                                        unsigned int delay = std::max<unsigned int>( dbConfig.m_ReconnectDelaySeconds > 0 ? dbConfig.m_ReconnectDelaySeconds : 1u, 1u );
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_WARN ), "Retrying MySQL reconnection in %u second(s).", delay );
+                                        std::this_thread::sleep_for( std::chrono::seconds( delay ));
+                                }
+                        }
+                        catch ( const std::bad_alloc & )
+                        {
+                                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Out of memory while attempting MySQL reconnection." );
+                                break;
+                        }
+                }
+
+                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Unable to reconnect to MySQL server after %u attempt(s).", attempts );
+                return false;
+        }
+
         void ConnectionManager::Disconnect()
         {
                 m_TransactionGuard.reset();
