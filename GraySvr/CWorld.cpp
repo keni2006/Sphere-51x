@@ -800,6 +800,7 @@ bool CWorld::FinalizeStorageSave()
 void CWorld::ResetStorageLoadState()
 {
         m_StorageLoadObjects.clear();
+        m_StorageLoadObjectQueue.clear();
         m_StorageLoadSectors.clear();
         m_StorageLoadGMPages.clear();
         m_StorageLoadServers.clear();
@@ -851,6 +852,7 @@ bool CWorld::InitializeStorageLoad()
                 m_fStorageLoadFailed = true;
                 return false;
         }
+        m_StorageLoadObjectQueue.assign( m_StorageLoadObjects.begin(), m_StorageLoadObjects.end());
         if ( ! pStorage->LoadGMPages( m_StorageLoadGMPages ))
         {
                 g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load GM pages from MySQL.\n" );
@@ -1007,96 +1009,119 @@ bool CWorld::LoadSectionFromStorage()
                         m_iStorageLoadStage = 1;
                         continue;
 
-                case 1:
-                        if ( m_uStorageLoadObjectIndex < m_StorageLoadObjects.size())
-                        {
-                                const MySqlStorageService::WorldObjectRecord & record = m_StorageLoadObjects[m_uStorageLoadObjectIndex++];
-                                UINT uid = (UINT) record.m_uid;
-                                CObjBase * pObj = NULL;
+               case 1:
+                       if ( ! m_StorageLoadObjectQueue.empty())
+                       {
+                               MySqlStorageService::WorldObjectRecord record = m_StorageLoadObjectQueue.front();
+                               m_StorageLoadObjectQueue.pop_front();
 
-                                if ( record.m_fIsChar )
-                                {
-                                        CChar * pChar = CChar::CreateBasic( (CREID_TYPE) record.m_iBaseId );
-                                        if ( pChar == NULL )
-                                        {
-                                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to instantiate character 0x%x for UID 0%llx.\n", record.m_iBaseId, record.m_uid );
-                                                m_fStorageLoadFailed = true;
-                                                return false;
-                                        }
-                                        pChar->SetPrivateUID( uid, false );
-                                        pObj = pChar;
-                                }
-                                else
-                                {
-                                        CItem * pItem = CItem::CreateScript( (ITEMID_TYPE) record.m_iBaseId );
-                                        if ( pItem == NULL )
-                                        {
-                                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to instantiate item 0x%x for UID 0%llx.\n", record.m_iBaseId, record.m_uid );
-                                                m_fStorageLoadFailed = true;
-                                                return false;
-                                        }
-                                        pItem->SetPrivateUID( uid, true );
-                                        pObj = pItem;
-                                }
+                               if ( record.m_fHasContainer )
+                               {
+                                       CObjBase * pContainer = CObjUID( (DWORD) record.m_uContainerUid ).ObjFind();
+                                       if ( pContainer == NULL )
+                                       {
+                                               static const unsigned int MAX_CONTAINER_DEFER_ATTEMPTS = 5;
+                                               if ( record.m_uDeferredCount < MAX_CONTAINER_DEFER_ATTEMPTS )
+                                               {
+                                                       record.m_uDeferredCount++;
+                                                       m_StorageLoadObjectQueue.push_back( record );
+                                                       return true;
+                                               }
 
-                                if ( ! pStorage->ApplyWorldObjectData( *pObj, record.m_sSerialized ))
-                                {
-                                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to deserialize world object 0%llx from MySQL.\n", record.m_uid );
-                                        FreeUID( uid & UID_MASK );
-                                        delete pObj;
-                                        m_fStorageLoadFailed = true;
-                                        return false;
-                                }
+                                               g_Log.Event( LOGM_INIT|LOGL_WARN,
+                                                       "Unable to resolve container 0%llx for world object 0%llx after %u attempts. Proceeding with load.\n",
+                                                       record.m_uContainerUid, record.m_uid, record.m_uDeferredCount );
+                                       }
+                               }
 
-                                if ( record.m_fIsChar )
-                                {
-                                        CChar * pChar = dynamic_cast<CChar*>( pObj );
-                                        if ( pChar != NULL )
-                                        {
-                                                bool fHasAccount = ( pChar->m_pPlayer != NULL && pChar->m_pPlayer->GetAccount() != NULL );
-                                                if ( ! fHasAccount )
-                                                {
-                                                        CAccount * pAccount = NULL;
-                                                        if ( !record.m_sAccountName.IsEmpty())
-                                                        {
-                                                                pAccount = AccountFind( (const TCHAR *) record.m_sAccountName );
-                                                        }
+                               UINT uid = (UINT) record.m_uid;
+                               CObjBase * pObj = NULL;
 
-                                                        if ( pAccount == NULL && record.m_fHasAccountId )
-                                                        {
-                                                                CGString sAccountName = record.m_sAccountName;
-                                                                if ( sAccountName.IsEmpty())
-                                                                {
-                                                                        sAccountName = pStorage->GetAccountNameById( record.m_iAccountId );
-                                                                }
-                                                                if ( ! sAccountName.IsEmpty())
-                                                                {
-                                                                        pAccount = AccountFind( (const TCHAR *) sAccountName );
-                                                                }
-                                                        }
+                               if ( record.m_fIsChar )
+                               {
+                                       CChar * pChar = CChar::CreateBasic( (CREID_TYPE) record.m_iBaseId );
+                                       if ( pChar == NULL )
+                                       {
+                                               g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to instantiate character 0x%x for UID 0%llx.\n", record.m_iBaseId, record.m_uid );
+                                               m_fStorageLoadFailed = true;
+                                               return false;
+                                       }
+                                       pChar->SetPrivateUID( uid, false );
+                                       pObj = pChar;
+                               }
+                               else
+                               {
+                                       CItem * pItem = CItem::CreateScript( (ITEMID_TYPE) record.m_iBaseId );
+                                       if ( pItem == NULL )
+                                       {
+                                               g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to instantiate item 0x%x for UID 0%llx.\n", record.m_iBaseId, record.m_uid );
+                                               m_fStorageLoadFailed = true;
+                                               return false;
+                                       }
+                                       pItem->SetPrivateUID( uid, true );
+                                       pObj = pItem;
+                               }
 
-                                                        if ( pAccount != NULL )
-                                                        {
-                                                                if ( ! pChar->SetPlayerAccount( pAccount ))
-                                                                {
-                                                                        g_Log.Event( LOGM_INIT|LOGL_WARN,
-                                                                                "Failed to attach character 0%llx to account '%s' while loading from MySQL.\n",
-                                                                                record.m_uid, pAccount->GetName());
-                                                                }
-                                                        }
-                                                        else if ( record.m_fHasAccountId )
-                                                        {
-                                                                g_Log.Event( LOGM_INIT|LOGL_WARN,
-                                                                        "Unable to resolve account %u for character 0%llx during MySQL load.\n",
-                                                                        record.m_iAccountId, record.m_uid );
-                                                        }
-                                                }
-                                        }
-                                }
-                                return true;
-                        }
-                        m_iStorageLoadStage = 2;
-                        continue;
+                               if ( ! pStorage->ApplyWorldObjectData( *pObj, record.m_sSerialized ))
+                               {
+                                       g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to deserialize world object 0%llx from MySQL.\n", record.m_uid );
+                                       FreeUID( uid & UID_MASK );
+                                       delete pObj;
+                                       m_fStorageLoadFailed = true;
+                                       return false;
+                               }
+
+                               ++m_uStorageLoadObjectIndex;
+
+                               if ( record.m_fIsChar )
+                               {
+                                       CChar * pChar = dynamic_cast<CChar*>( pObj );
+                                       if ( pChar != NULL )
+                                       {
+                                               bool fHasAccount = ( pChar->m_pPlayer != NULL && pChar->m_pPlayer->GetAccount() != NULL );
+                                               if ( ! fHasAccount )
+                                               {
+                                                       CAccount * pAccount = NULL;
+                                                       if ( !record.m_sAccountName.IsEmpty())
+                                                       {
+                                                               pAccount = AccountFind( (const TCHAR *) record.m_sAccountName );
+                                                       }
+
+                                                       if ( pAccount == NULL && record.m_fHasAccountId )
+                                                       {
+                                                               CGString sAccountName = record.m_sAccountName;
+                                                               if ( sAccountName.IsEmpty())
+                                                               {
+                                                                       sAccountName = pStorage->GetAccountNameById( record.m_iAccountId );
+                                                               }
+                                                               if ( ! sAccountName.IsEmpty())
+                                                               {
+                                                                       pAccount = AccountFind( (const TCHAR *) sAccountName );
+                                                               }
+                                                       }
+
+                                                       if ( pAccount != NULL )
+                                                       {
+                                                               if ( ! pChar->SetPlayerAccount( pAccount ))
+                                                               {
+                                                                       g_Log.Event( LOGM_INIT|LOGL_WARN,
+                                                                               "Failed to attach character 0%llx to account '%s' while loading from MySQL.\n",
+                                                                               record.m_uid, pAccount->GetName());
+                                                               }
+                                                       }
+                                                       else if ( record.m_fHasAccountId )
+                                                       {
+                                                               g_Log.Event( LOGM_INIT|LOGL_WARN,
+                                                                       "Unable to resolve account %u for character 0%llx during MySQL load.\n",
+                                                                       record.m_iAccountId, record.m_uid );
+                                                       }
+                                               }
+                                       }
+                               }
+                               return true;
+                       }
+                       m_iStorageLoadStage = 2;
+                       continue;
 
                 case 2:
                         if ( m_uStorageLoadGMPageIndex < m_StorageLoadGMPages.size())

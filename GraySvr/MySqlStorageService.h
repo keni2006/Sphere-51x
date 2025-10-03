@@ -157,6 +157,11 @@ public:
                 unsigned int m_iAccountId;
                 CGString m_sAccountName;
                 CGString m_sSerialized;
+                bool m_fHasContainer;
+                unsigned long long m_uContainerUid;
+                bool m_fHasTopLevel;
+                unsigned long long m_uTopLevelUid;
+                unsigned int m_uDeferredCount;
         };
 
         struct GMPageRecord

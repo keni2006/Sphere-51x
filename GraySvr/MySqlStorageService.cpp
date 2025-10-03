@@ -34,6 +34,7 @@
 #include <iomanip>
 #include <mutex>
 #include <deque>
+#include <queue>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -227,6 +228,85 @@ namespace
         private:
                 std::string m_Path;
         };
+
+        void TopologicallySortWorldObjects( std::vector<MySqlStorageService::WorldObjectRecord> & objects )
+        {
+                if ( objects.empty())
+                {
+                        return;
+                }
+
+                std::unordered_map<unsigned long long, size_t> indexByUid;
+                indexByUid.reserve( objects.size());
+                for ( size_t i = 0; i < objects.size(); ++i )
+                {
+                        indexByUid[ objects[i].m_uid ] = i;
+                }
+
+                std::vector<int> indegree( objects.size(), 0 );
+                std::vector<std::vector<size_t>> adjacency( objects.size());
+
+                for ( size_t i = 0; i < objects.size(); ++i )
+                {
+                        if ( objects[i].m_fHasContainer )
+                        {
+                                auto it = indexByUid.find( objects[i].m_uContainerUid );
+                                if ( it != indexByUid.end())
+                                {
+                                        indegree[i]++;
+                                        adjacency[it->second].push_back( i );
+                                }
+                        }
+                }
+
+                std::queue<size_t> q;
+                for ( size_t i = 0; i < objects.size(); ++i )
+                {
+                        if ( indegree[i] == 0 )
+                        {
+                                q.push( i );
+                        }
+                }
+
+                std::vector<MySqlStorageService::WorldObjectRecord> sorted;
+                sorted.reserve( objects.size());
+                std::vector<bool> visited( objects.size(), false );
+
+                while ( ! q.empty())
+                {
+                        const size_t index = q.front();
+                        q.pop();
+
+                        if ( visited[index] )
+                        {
+                                continue;
+                        }
+
+                        visited[index] = true;
+                        sorted.push_back( objects[index] );
+
+                        for ( size_t child : adjacency[index] )
+                        {
+                                if ( --indegree[child] == 0 )
+                                {
+                                        q.push( child );
+                                }
+                        }
+                }
+
+                if ( sorted.size() != objects.size())
+                {
+                        for ( size_t i = 0; i < objects.size(); ++i )
+                        {
+                                if ( ! visited[i] )
+                                {
+                                        sorted.push_back( objects[i] );
+                                }
+                        }
+                }
+
+                objects.swap( sorted );
+        }
 
         bool EnsureDirectoryExists( const CGString & path )
         {
@@ -2922,7 +3002,7 @@ bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & obj
 
         CGString sQuery;
         sQuery.Format(
-                "SELECT o.`uid`,o.`object_type`,o.`object_subtype`,o.`account_id`,IFNULL(a.`name`, ''),d.`data` FROM `%s` o INNER JOIN `%s` d ON o.`uid` = d.`object_uid` LEFT JOIN `%s` a ON o.`account_id` = a.`id` ORDER BY o.`uid`;",
+                "SELECT o.`uid`,o.`object_type`,o.`object_subtype`,o.`account_id`,IFNULL(a.`name`, ''),d.`data`,o.`container_uid`,o.`top_level_uid` FROM `%s` o INNER JOIN `%s` d ON o.`uid` = d.`object_uid` LEFT JOIN `%s` a ON o.`account_id` = a.`id` ORDER BY o.`uid`;",
                 (const char *) sObjects, (const char *) sData, (const char *) sAccounts );
 
         std::unique_ptr<Storage::IDatabaseResult> result;
@@ -2977,8 +3057,45 @@ bool MySqlStorageService::LoadWorldObjects( std::vector<WorldObjectRecord> & obj
                 }
 
                 record.m_sSerialized = pszSerialized;
+
+                record.m_fHasContainer = false;
+                record.m_uContainerUid = 0;
+                const char * pszContainerUid = pRow[6];
+                if ( pszContainerUid != NULL && pszContainerUid[0] != '\0' )
+                {
+#ifdef _WIN32
+                        record.m_uContainerUid = (unsigned long long) _strtoui64( pszContainerUid, NULL, 10 );
+#else
+                        record.m_uContainerUid = (unsigned long long) strtoull( pszContainerUid, NULL, 10 );
+#endif
+                        if ( record.m_uContainerUid != 0 )
+                        {
+                                record.m_fHasContainer = true;
+                        }
+                }
+
+                record.m_fHasTopLevel = false;
+                record.m_uTopLevelUid = 0;
+                const char * pszTopLevelUid = pRow[7];
+                if ( pszTopLevelUid != NULL && pszTopLevelUid[0] != '\0' )
+                {
+#ifdef _WIN32
+                        record.m_uTopLevelUid = (unsigned long long) _strtoui64( pszTopLevelUid, NULL, 10 );
+#else
+                        record.m_uTopLevelUid = (unsigned long long) strtoull( pszTopLevelUid, NULL, 10 );
+#endif
+                        if ( record.m_uTopLevelUid != 0 )
+                        {
+                                record.m_fHasTopLevel = true;
+                        }
+                }
+
+                record.m_uDeferredCount = 0;
+
                 objects.push_back( record );
         }
+
+        TopologicallySortWorldObjects( objects );
 
         return true;
 }
