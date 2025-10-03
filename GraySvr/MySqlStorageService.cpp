@@ -838,6 +838,88 @@ namespace Repository
                         return false;
                 }
 
+                bool ExecuteExistsQuery( const std::string & query,
+                        const std::function<void(Storage::IDatabaseStatement &)> & binder,
+                        bool & outExists ) const
+                {
+                        outExists = false;
+
+                        try
+                        {
+                                Storage::MySql::MySqlConnectionPool::ScopedConnection scoped;
+                                Storage::MySql::MySqlConnection * connection = m_Storage.GetActiveConnection( scoped );
+                                if ( connection == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "MySQL prepared statement attempted without an active connection." );
+                                        return false;
+                                }
+
+                                std::unique_ptr<Storage::IDatabaseStatement> statement = connection->Prepare( query );
+                                if ( binder )
+                                {
+                                        binder( *statement );
+                                }
+                                statement->Execute();
+
+                                Storage::MySql::MySqlStatement * mysqlStatement =
+                                        dynamic_cast<Storage::MySql::MySqlStatement *>( statement.get());
+                                if ( mysqlStatement == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "Prepared statement execution did not return a MySQL statement handle." );
+                                        return false;
+                                }
+
+                                MYSQL_STMT * handle = mysqlStatement->GetHandle();
+                                if ( handle == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "MySQL prepared statement handle was null." );
+                                        return false;
+                                }
+
+                                if ( mysql_stmt_store_result( handle ) != 0 )
+                                {
+                                        unsigned int code = mysql_stmt_errno( handle );
+                                        const char * message = mysql_stmt_error( handle );
+                                        throw Storage::DatabaseError( "mysql_stmt_store_result", code,
+                                                message != NULL ? message : "" );
+                                }
+
+                                const int fetchResult = mysql_stmt_fetch( handle );
+                                if ( fetchResult == 0 )
+                                {
+                                        mysql_stmt_free_result( handle );
+                                        outExists = true;
+                                        return true;
+                                }
+
+                                if ( fetchResult == MYSQL_NO_DATA )
+                                {
+                                        mysql_stmt_free_result( handle );
+                                        outExists = false;
+                                        return true;
+                                }
+
+                                unsigned int code = mysql_stmt_errno( handle );
+                                const char * message = mysql_stmt_error( handle );
+                                mysql_stmt_free_result( handle );
+                                throw Storage::DatabaseError( "mysql_stmt_fetch", code, message != NULL ? message : "" );
+                        }
+                        catch ( const Storage::DatabaseError & ex )
+                        {
+                                LogDatabaseError( ex, LOGL_ERROR );
+                        }
+                        catch ( const std::bad_alloc & )
+                        {
+                                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                        "Out of memory while preparing MySQL statement." );
+                        }
+
+                        return false;
+                }
+
                 MySqlStorageService & m_Storage;
         };
 
@@ -870,6 +952,7 @@ namespace Repository
                         m_Table( static_cast<const char *>( table ))
                 {
                         const std::string quoted = "`" + m_Table + "`";
+                        m_ExistsQuery = "SELECT 1 FROM " + quoted + " WHERE `uid` = ? LIMIT 1;";
                         m_UpsertQuery =
                                 "INSERT INTO " + quoted +
                                 " (`uid`,`object_type`,`object_subtype`,`name`,`account_id`,`container_uid`,`top_level_uid`,`position_x`,`position_y`,`position_z`)";
@@ -885,6 +968,15 @@ namespace Repository
                         m_UpsertQuery += "`position_z`=VALUES(`position_z`);";
 
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `uid` = ?;";
+                }
+
+                bool Exists( unsigned long long uid, bool & outExists )
+                {
+                        return ExecuteExistsQuery( m_ExistsQuery,
+                                [&]( Storage::IDatabaseStatement & statement )
+                                {
+                                        statement.BindUInt64( 0, uid );
+                                }, outExists );
                 }
 
                 bool Upsert( const WorldObjectMetaRecord & record )
@@ -970,6 +1062,7 @@ namespace Repository
 
         private:
                 std::string m_Table;
+                std::string m_ExistsQuery;
                 std::string m_UpsertQuery;
                 std::string m_DeleteQuery;
         };
@@ -3206,31 +3299,95 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         bool fResult = true;
         CGString sSerialized;
         const SerializationResult serializationResult = SerializeWorldObject( pObject, sSerialized );
+
+        auto persistSerialized = [&]( const CGString & serializedData ) -> bool
+        {
+                if ( ! UpsertWorldObjectMeta( pObject, serializedData ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
+                        return false;
+                }
+                if ( ! UpsertWorldObjectData( pObject, serializedData ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
+                        return false;
+                }
+                if ( ! RefreshWorldObjectComponents( pObject ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                        return false;
+                }
+                if ( ! RefreshWorldObjectRelations( pObject ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                        return false;
+                }
+                return true;
+        };
+
         if ( serializationResult == SerializationResult::Failed )
         {
                 fResult = false;
         }
         else if ( serializationResult == SerializationResult::Success )
         {
-                if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+                if ( ! persistSerialized( sSerialized ))
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+        }
+        else if ( serializationResult == SerializationResult::Skipped )
+        {
+                if ( pObject->IsChar())
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                        fResult = false;
+                        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
+                        Storage::Repository::WorldObjectMetaRepository repository( *this, sWorldObjects );
+
+                        bool metaExists = false;
+                        if ( ! repository.Exists( uid, metaExists ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize",
+                                        "failed to verify existing metadata" );
+                                fResult = false;
+                        }
+                        else if ( !metaExists )
+                        {
+                                CChar * pChar = dynamic_cast<CChar*>( pObject );
+                                bool originalSaveParity = false;
+                                bool parityModified = false;
+
+                                if ( pChar != NULL )
+                                {
+                                        originalSaveParity = pChar->IsStat( STATF_SaveParity );
+                                        pChar->ModStat( STATF_SaveParity, !originalSaveParity );
+                                        parityModified = ( pChar->IsStat( STATF_SaveParity ) != originalSaveParity );
+                                }
+
+                                CGString sReserialized;
+                                const SerializationResult retryResult = SerializeWorldObject( pObject, sReserialized );
+
+                                if ( retryResult == SerializationResult::Success )
+                                {
+                                        if ( parityModified && pChar != NULL )
+                                        {
+                                                pChar->ModStat( STATF_SaveParity, originalSaveParity );
+                                        }
+
+                                        if ( ! persistSerialized( sReserialized ))
+                                        {
+                                                fResult = false;
+                                        }
+                                }
+                                else
+                                {
+                                        const char * reason = ( retryResult == SerializationResult::Skipped ) ?
+                                                "retry after STATF_SaveParity toggle returned skipped" :
+                                                "retry after STATF_SaveParity toggle failed";
+
+                                        LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
+                                        fResult = false;
+                                }
+                        }
                 }
         }
 
@@ -3488,6 +3645,13 @@ bool MySqlStorageService::RefreshWorldObjectComponents( const CObjBase * pObject
         }
 
         const CGString sComponents = GetPrefixedTableName( "world_object_components" );
+
+        if ( !EnsureColumnExists( sComponents, "sequence",
+                "`sequence` INT NOT NULL DEFAULT 0 AFTER `name`" ))
+        {
+                return false;
+        }
+
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
 
         Storage::Repository::WorldObjectComponentRepository repository( *this, sComponents );
@@ -3565,6 +3729,13 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
         }
 
         const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+
+        if ( !EnsureColumnExists( sRelations, "sequence",
+                "`sequence` INT NOT NULL DEFAULT 0 AFTER `relation`" ))
+        {
+                return false;
+        }
+
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
 
         Storage::Repository::WorldObjectRelationRepository repository( *this, sRelations );
@@ -3635,12 +3806,25 @@ bool MySqlStorageService::ApplyMigration_2_3()
 
 bool MySqlStorageService::EnsureColumnExists(const CGString & table, const char * column, const char * definition)
 {
+#if defined(UNIT_TEST) && !defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
+        (void) table;
+        (void) column;
+        (void) definition;
+        return true;
+#else
         return m_SchemaManager.EnsureColumnExists(*this, table, column, definition);
+#endif
 }
 
 bool MySqlStorageService::ColumnExists(const CGString & table, const char * column) const
 {
+#if defined(UNIT_TEST) && !defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
+        (void) table;
+        (void) column;
+        return true;
+#else
         return m_SchemaManager.ColumnExists( const_cast<MySqlStorageService &>(*this), table, column );
+#endif
 }
 
 bool MySqlStorageService::InsertOrUpdateSchemaValue(int id, int value)
