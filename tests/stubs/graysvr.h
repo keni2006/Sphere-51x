@@ -95,7 +95,7 @@ struct CRealTime
 class CServer
 {
 public:
-        CServer() : m_iSavePeriod( 0 ), m_sWorldBaseDir(), m_loading( false ) {}
+        CServer() : m_loading( false ) {}
 
         bool IsLoading() const
         {
@@ -106,9 +106,6 @@ public:
         {
                 m_loading = loading;
         }
-
-        int m_iSavePeriod;
-        CGString m_sWorldBaseDir;
 
 private:
         bool m_loading;
@@ -154,41 +151,13 @@ enum StorageDirtyType : int
 extern CLog g_Log;
 extern CServer g_Serv;
 
-class CWorld
-{
-public:
-        CWorld() : m_fSaveParity( false ) {}
-
-        bool m_fSaveParity;
-};
-
-extern CWorld g_World;
-
 constexpr unsigned int PRIV_BLOCKED = 0x1u;
 constexpr unsigned int PRIV_JAILED = 0x2u;
-
-constexpr unsigned int STATF_SaveParity = 0x20000000u;
 
 constexpr unsigned int OF_WRITE   = 0x01u;
 constexpr unsigned int OF_READ    = 0x02u;
 constexpr unsigned int OF_TEXT    = 0x04u;
 constexpr unsigned int OF_NONCRIT = 0x08u;
-
-constexpr int TICK_PER_SEC = 1;
-
-inline CGString GetMergedFileName( const CGString & base, const char * name )
-{
-        CGString result( base );
-        if ( !result.IsEmpty())
-        {
-                result += '/';
-        }
-        if ( name != nullptr )
-        {
-                result += name;
-        }
-        return result;
-}
 
 class CUID
 {
@@ -628,10 +597,28 @@ private:
         CAccount * m_pAccount;
 };
 
+class CChar : public CObjBase
+{
+public:
+        CChar() : m_pPlayer( nullptr ) {}
+
+        bool IsChar() const override
+        {
+                return true;
+        }
+
+        void SetPlayer( CPlayer * player )
+        {
+                m_pPlayer = player;
+        }
+
+        CPlayer * m_pPlayer;
+};
+
 class CItem : public CObjBase
 {
 public:
-        CItem() : m_Equipped( false ), m_Next( nullptr ) {}
+        CItem() : m_Equipped( false ) {}
 
         bool IsItem() const override
         {
@@ -648,74 +635,8 @@ public:
                 m_Equipped = equipped;
         }
 
-        CItem * GetNext() const
-        {
-                return m_Next;
-        }
-
-        void SetNext( CItem * next )
-        {
-                m_Next = next;
-        }
-
 private:
         bool m_Equipped;
-        CItem * m_Next;
-};
-
-class CContainer
-{
-public:
-        CContainer() : m_ContentHead( nullptr ) {}
-        virtual ~CContainer() = default;
-
-        CItem * GetContentHead() const
-        {
-                return m_ContentHead;
-        }
-
-        void AddContent( CItem * item )
-        {
-                if ( item == nullptr )
-                {
-                        return;
-                }
-
-                item->SetNext( m_ContentHead );
-                m_ContentHead = item;
-
-                if ( const CObjBase * owner = dynamic_cast<const CObjBase *>( this ))
-                {
-                        item->SetContainer( owner );
-                        item->SetInContainer( true );
-                }
-        }
-
-protected:
-        CItem * m_ContentHead;
-};
-
-class CChar : public CObjBase, public CContainer
-{
-public:
-        CChar() : m_pPlayer( nullptr ) {}
-
-        bool IsChar() const override
-        {
-                return true;
-        }
-
-        void SetPlayer( CPlayer * player )
-        {
-                m_pPlayer = player;
-        }
-
-        bool IsStat( unsigned int ) const
-        {
-                return false;
-        }
-
-        CPlayer * m_pPlayer;
 };
 
 class CSector {};
