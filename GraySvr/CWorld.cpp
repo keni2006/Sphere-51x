@@ -7,6 +7,7 @@
 #include "MySqlStorageService.h"
 #include "Storage/MySql/MySqlLogging.h"
 
+#include <climits>
 #include <exception>
 
 bool World_fDeleteCycle = false;
@@ -445,6 +446,11 @@ bool CWorld::BeginStorageSave()
                 g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to clear MySQL server list before save.\n" );
                 return false;
         }
+        if ( ! pStorage->ClearTimers())
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to clear MySQL timers before save.\n" );
+                return false;
+        }
 
         m_fStorageSavePrepared = true;
         g_Log.Event( LOGM_SAVE, "MySQL world save transaction started.\n" );
@@ -743,6 +749,88 @@ bool CWorld::SaveStorageServers()
         return true;
 }
 
+bool CWorld::SaveStorageTimers()
+{
+        MySqlStorageService * pStorage = Storage();
+        if ( pStorage == NULL || ! pStorage->IsEnabled())
+        {
+                return false;
+        }
+
+        std::vector<MySqlStorageService::TimerRecord> timers;
+        timers.reserve( GetUIDCount() );
+
+        for ( int i = 1; i < GetUIDCount(); ++i )
+        {
+                CObjBase * pObj = m_UIDs[i];
+                if ( pObj == NULL || pObj == UID_PLACE_HOLDER )
+                        continue;
+                if ( ! pObj->IsTimerSet())
+                        continue;
+
+                MySqlStorageService::TimerRecord record;
+                const unsigned long long uid = (unsigned long long) (UINT) pObj->GetUID();
+
+                if ( pObj->IsChar())
+                {
+                        record.m_fHasCharacter = true;
+                        record.m_uCharacterUid = uid;
+                        record.m_eType = MySqlStorageService::TimerRecord::Type::Character;
+                }
+                else if ( pObj->IsItem())
+                {
+                        record.m_fHasItem = true;
+                        record.m_uItemUid = uid;
+                        record.m_eType = MySqlStorageService::TimerRecord::Type::Item;
+                }
+                else
+                {
+                        record.m_eType = MySqlStorageService::TimerRecord::Type::Unknown;
+                }
+
+                long long diff = static_cast<long long>( pObj->GetTimerDiff());
+                if ( diff < 0 )
+                {
+                        diff = 0;
+                }
+                record.m_iExpiresAt = diff;
+                record.m_sData = CGString();
+
+                timers.push_back( record );
+        }
+
+        try
+        {
+                if ( ! pStorage->SaveTimers( timers ))
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist timers to MySQL.\n" );
+                        return false;
+                }
+        }
+        catch ( const Storage::DatabaseError & ex )
+        {
+                LogDatabaseError( ex, LOGL_CRIT );
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Database error while persisting timers.\n" );
+                return false;
+        }
+        catch ( const std::exception & ex )
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Exception while persisting timers: %s\n", ex.what());
+                return false;
+        }
+        catch (...)
+        {
+                if ( g_Serv.m_fSecure )
+                {
+                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save timers exception!\n" );
+                        return false;
+                }
+                throw;
+        }
+
+        return true;
+}
+
 bool CWorld::FinalizeStorageSave()
 {
         MySqlStorageService * pStorage = Storage();
@@ -803,10 +891,12 @@ void CWorld::ResetStorageLoadState()
         m_StorageLoadSectors.clear();
         m_StorageLoadGMPages.clear();
         m_StorageLoadServers.clear();
+        m_StorageLoadTimers.clear();
         m_uStorageLoadObjectIndex = 0;
         m_uStorageLoadSectorIndex = 0;
         m_uStorageLoadGMPageIndex = 0;
         m_uStorageLoadServerIndex = 0;
+        m_uStorageLoadTimerIndex = 0;
         m_iStorageLoadStage = 0;
         m_fStorageLoadPrepared = false;
         m_fStorageLoadFailed = false;
@@ -860,6 +950,12 @@ bool CWorld::InitializeStorageLoad()
         if ( ! pStorage->LoadServers( m_StorageLoadServers ))
         {
                 g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load server list from MySQL.\n" );
+                m_fStorageLoadFailed = true;
+                return false;
+        }
+        if ( ! pStorage->LoadTimers( m_StorageLoadTimers ))
+        {
+                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to load timers from MySQL.\n" );
                 m_fStorageLoadFailed = true;
                 return false;
         }
@@ -922,7 +1018,7 @@ bool CWorld::SaveStageStorage()
                 }
                 else if ( m_iSaveStage == SECTOR_QTY + 2 )
                 {
-                        if ( ! SaveAccounts())
+                        if ( ! SaveStorageTimers())
                         {
                                 m_fSaveFailed = true;
                                 AbortStorageSave();
@@ -930,6 +1026,15 @@ bool CWorld::SaveStageStorage()
                         }
                 }
                 else if ( m_iSaveStage == SECTOR_QTY + 3 )
+                {
+                        if ( ! SaveAccounts())
+                        {
+                                m_fSaveFailed = true;
+                                AbortStorageSave();
+                                return false;
+                        }
+                }
+                else if ( m_iSaveStage == SECTOR_QTY + 4 )
                 {
                         if ( ! FinalizeStorageSave())
                         {
@@ -1013,8 +1118,31 @@ bool CWorld::LoadSectionFromStorage()
                                 const MySqlStorageService::WorldObjectRecord & record = m_StorageLoadObjects[m_uStorageLoadObjectIndex++];
                                 UINT uid = (UINT) record.m_uid;
                                 CObjBase * pObj = NULL;
+                                bool fReused = false;
 
-                                if ( record.m_fIsChar )
+                                CObjBase * pExisting = CObjUID( uid ).ObjFind();
+                                if ( pExisting != NULL )
+                                {
+                                        if ( record.m_fIsChar )
+                                        {
+                                                if ( ! pExisting->IsChar())
+                                                {
+                                                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Type mismatch for UID 0%llx while loading from MySQL.\n", record.m_uid );
+                                                        m_fStorageLoadFailed = true;
+                                                        return false;
+                                                }
+                                        }
+                                        else if ( ! pExisting->IsItem())
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Type mismatch for UID 0%llx while loading from MySQL.\n", record.m_uid );
+                                                m_fStorageLoadFailed = true;
+                                                return false;
+                                        }
+
+                                        pObj = pExisting;
+                                        fReused = true;
+                                }
+                                else if ( record.m_fIsChar )
                                 {
                                         CChar * pChar = CChar::CreateBasic( (CREID_TYPE) record.m_iBaseId );
                                         if ( pChar == NULL )
@@ -1039,13 +1167,22 @@ bool CWorld::LoadSectionFromStorage()
                                         pObj = pItem;
                                 }
 
-                                if ( ! pStorage->ApplyWorldObjectData( *pObj, record.m_sSerialized ))
+                                if ( pObj == NULL )
                                 {
-                                        g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to deserialize world object 0%llx from MySQL.\n", record.m_uid );
-                                        FreeUID( uid & UID_MASK );
-                                        delete pObj;
                                         m_fStorageLoadFailed = true;
                                         return false;
+                                }
+
+                                if ( ! fReused )
+                                {
+                                        if ( ! pStorage->ApplyWorldObjectData( *pObj, record.m_sSerialized ))
+                                        {
+                                                g_Log.Event( LOGM_INIT|LOGL_ERROR, "Failed to deserialize world object 0%llx from MySQL.\n", record.m_uid );
+                                                FreeUID( uid & UID_MASK );
+                                                delete pObj;
+                                                m_fStorageLoadFailed = true;
+                                                return false;
+                                        }
                                 }
 
                                 if ( record.m_fIsChar )
@@ -1099,6 +1236,52 @@ bool CWorld::LoadSectionFromStorage()
                         continue;
 
                 case 2:
+                        if ( m_uStorageLoadTimerIndex < m_StorageLoadTimers.size())
+                        {
+                                const MySqlStorageService::TimerRecord & timer = m_StorageLoadTimers[m_uStorageLoadTimerIndex++];
+                                CObjBase * pTarget = NULL;
+
+                                if ( timer.m_fHasCharacter )
+                                {
+                                        pTarget = CObjUID((DWORD) timer.m_uCharacterUid ).ObjFind();
+                                        if ( pTarget != NULL && ! pTarget->IsChar())
+                                        {
+                                                pTarget = NULL;
+                                        }
+                                }
+
+                                if ( pTarget == NULL && timer.m_fHasItem )
+                                {
+                                        pTarget = CObjUID((DWORD) timer.m_uItemUid ).ObjFind();
+                                        if ( pTarget != NULL && ! pTarget->IsItem())
+                                        {
+                                                pTarget = NULL;
+                                        }
+                                }
+
+                                if ( pTarget == NULL )
+                                {
+                                        g_Log.Event( LOGM_INIT|LOGL_WARN, "Unable to resolve timer target while loading MySQL timer entry %llu.\n", timer.m_id );
+                                        return true;
+                                }
+
+                                long long expires = timer.m_iExpiresAt;
+                                if ( expires <= 0 )
+                                {
+                                        pTarget->SetTimeout( 1 );
+                                }
+                                else
+                                {
+                                        if ( expires > INT_MAX )
+                                                expires = INT_MAX;
+                                        pTarget->SetTimeout( static_cast<int>( expires ));
+                                }
+                                return true;
+                        }
+                        m_iStorageLoadStage = 3;
+                        continue;
+
+                case 3:
                         if ( m_uStorageLoadGMPageIndex < m_StorageLoadGMPages.size())
                         {
                                 const MySqlStorageService::GMPageRecord & record = m_StorageLoadGMPages[m_uStorageLoadGMPageIndex++];
@@ -1110,10 +1293,10 @@ bool CWorld::LoadSectionFromStorage()
 pPage->m_p.m_z = record.m_iPosZ;
                                 return true;
                         }
-                        m_iStorageLoadStage = 3;
+                        m_iStorageLoadStage = 4;
                         continue;
 
-                case 3:
+                case 4:
                         if ( m_uStorageLoadServerIndex < m_StorageLoadServers.size())
                         {
                                 const MySqlStorageService::ServerRecord & record = m_StorageLoadServers[m_uStorageLoadServerIndex++];
@@ -1141,7 +1324,7 @@ pPage->m_p.m_z = record.m_iPosZ;
                                 }
                                 return true;
                         }
-                        m_iStorageLoadStage = 4;
+                        m_iStorageLoadStage = 5;
                         continue;
 
                 default:
@@ -1168,7 +1351,7 @@ bool CWorld::LoadFromStorage()
         m_GMPages.DeleteAll();
         g_Serv.m_Servers.RemoveAll();
 
-        size_t uTotal = m_StorageLoadSectors.size() + m_StorageLoadObjects.size() + m_StorageLoadGMPages.size() + m_StorageLoadServers.size();
+        size_t uTotal = m_StorageLoadSectors.size() + m_StorageLoadObjects.size() + m_StorageLoadTimers.size() + m_StorageLoadGMPages.size() + m_StorageLoadServers.size();
         size_t uLastReported = 0;
 
         while ( true )
@@ -1203,7 +1386,7 @@ bool CWorld::LoadFromStorage()
 
                 if ( uTotal > 0 )
                 {
-                        size_t uProcessed = m_uStorageLoadSectorIndex + m_uStorageLoadObjectIndex + m_uStorageLoadGMPageIndex + m_uStorageLoadServerIndex;
+                        size_t uProcessed = m_uStorageLoadSectorIndex + m_uStorageLoadObjectIndex + m_uStorageLoadTimerIndex + m_uStorageLoadGMPageIndex + m_uStorageLoadServerIndex;
                         if (( uProcessed != uLastReported ) && !( uProcessed & 0xFF ))
                         {
                                 g_Serv.PrintPercent( static_cast<int>( uProcessed ), static_cast<int>( uTotal ));
@@ -1257,7 +1440,7 @@ void CWorld::SaveForce() // Save world state
                 {
                         if (! ( m_iSaveStage & 0xFF ))
                         {
-                                g_Serv.PrintPercent( m_iSaveStage, SECTOR_QTY+3 );
+                                g_Serv.PrintPercent( m_iSaveStage, SECTOR_QTY+4 );
 #ifdef _WIN32
                                 if ( g_Service.IsServiceStopPending())
                                 {
@@ -1290,7 +1473,8 @@ void CWorld::SaveForce() // Save world state
         {
                 if (! ( m_iSaveStage & 0xFF ))
                 {
-                        g_Serv.PrintPercent( m_iSaveStage, SECTOR_QTY+3 );
+                        const int iTotalStages = m_fSavingStorage ? (SECTOR_QTY + 4) : (SECTOR_QTY + 3);
+                        g_Serv.PrintPercent( m_iSaveStage, iTotalStages );
 #ifdef _WIN32
                         // Linux doesn't need to know about this
                         if ( g_Service.IsServiceStopPending())

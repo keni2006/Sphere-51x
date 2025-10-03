@@ -496,15 +496,41 @@ void CObjBase::SetTimeout( int iDelayInTicks )
 	}
 #endif
 
-	if ( iDelayInTicks < 0 )
-	{
-		m_timeout = 0;
-	}
-	else
-	{
-		m_timeout = g_World.GetTime() + iDelayInTicks;
-	}
-	MarkDirty( StorageDirtyType_Save );
+        if ( iDelayInTicks < 0 )
+        {
+                m_timeout = 0;
+        }
+        else
+        {
+                m_timeout = g_World.GetTime() + iDelayInTicks;
+        }
+
+        if ( ! g_Serv.IsLoading())
+        {
+                MySqlStorageService * pStorage = g_World.Storage();
+                if ( pStorage != NULL && pStorage->IsEnabled() && IsValidUID())
+                {
+                        if ( m_timeout == 0 )
+                        {
+                                if ( ! pStorage->DeleteTimersForObject( *this ))
+                                {
+                                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to delete timer for object 0%lx while updating timeout.\n", (unsigned long) GetUID());
+                                }
+                        }
+                        else
+                        {
+                                long long expiresInTicks = static_cast<long long>( GetTimerDiff());
+                                if ( expiresInTicks < 0 )
+                                        expiresInTicks = 0;
+                                if ( ! pStorage->UpsertTimerForObject( *this, expiresInTicks ))
+                                {
+                                        g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist timer for object 0%lx in MySQL.\n", (unsigned long) GetUID());
+                                }
+                        }
+                }
+        }
+
+        MarkDirty( StorageDirtyType_Save );
 }
 
 void CObjBase::Sound( SOUND_TYPE id, int iOnce ) const // Play sound effect for player

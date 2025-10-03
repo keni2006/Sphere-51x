@@ -16,7 +16,7 @@ schema manager that centralises migrations.
 - **Repository layer** – consolidates SQL used for accounts, world objects,
   timers and GM pages. Each repository owns its prepared statements, reducing
   duplication and improving error reporting.
-- **Schema manager** – applies migrations up to schema version **4**, extends
+- **Schema manager** – applies migrations up to schema version **5**, extends
   legacy tables when new columns are required and records world-save status in
   dedicated rows of `<prefix>schema_version`.
 

@@ -179,11 +179,11 @@ CREATE TABLE IF NOT EXISTS `sphere_timers` (
   PRIMARY KEY (`id`),
   KEY `ix_timers_character` (`character_uid`),
   KEY `ix_timers_item` (`item_uid`),
-  CONSTRAINT `fk_timers_character`
-    FOREIGN KEY (`character_uid`) REFERENCES `sphere_characters`(`uid`)
+  CONSTRAINT `fk_timers_character_world`
+    FOREIGN KEY (`character_uid`) REFERENCES `sphere_world_objects`(`uid`)
     ON DELETE CASCADE,
-  CONSTRAINT `fk_timers_item`
-    FOREIGN KEY (`item_uid`) REFERENCES `sphere_items`(`uid`)
+  CONSTRAINT `fk_timers_item_world`
+    FOREIGN KEY (`item_uid`) REFERENCES `sphere_world_objects`(`uid`)
     ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
