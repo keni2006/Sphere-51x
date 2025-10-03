@@ -3178,18 +3178,39 @@ bool MySqlStorageService::SaveWorldObjectInternal( CObjBase * pObject, std::unor
                 pCurrent = pParent;
         }
 
+        auto shouldPersistContents = []( CObjBase * pCandidate ) -> bool
+        {
+                if ( pCandidate == NULL )
+                {
+                        return false;
+                }
+
+                if ( pCandidate->IsChar())
+                {
+                        return true;
+                }
+
+                if ( pCandidate->IsItem())
+                {
+                        const CContainer * pContainer = dynamic_cast<const CContainer *>( pCandidate );
+                        return ( pContainer != NULL );
+                }
+
+                return false;
+        };
+
         for ( auto it = ancestors.rbegin(); it != ancestors.rend(); ++it )
         {
-                if ( ! PersistWorldObject( *it, visited ))
+                if ( ! PersistWorldObject( *it, visited, false ))
                 {
                         return false;
                 }
         }
 
-        return PersistWorldObject( pObject, visited );
+        return PersistWorldObject( pObject, visited, shouldPersistContents( pObject ));
 }
 
-bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited )
+bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited, bool includeContents )
 {
         if ( pObject == NULL )
         {
@@ -3210,27 +3231,83 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         {
                 fResult = false;
         }
-        else if ( serializationResult == SerializationResult::Success )
+        else
         {
                 if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+
+                if ( fResult && serializationResult == SerializationResult::Success )
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
-                        fResult = false;
+                        if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
+                                fResult = false;
+                        }
                 }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
+
+                if ( fResult )
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                        fResult = false;
+                        if ( ! RefreshWorldObjectComponents( pObject ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                                fResult = false;
+                        }
+                        else if ( ! RefreshWorldObjectRelations( pObject ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                                fResult = false;
+                        }
                 }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
+        }
+
+        if ( includeContents && fResult )
+        {
+                const CContainer * pContainer = dynamic_cast<const CContainer *>( pObject );
+                if ( pContainer != NULL )
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                        fResult = false;
+                        std::vector<CObjBase *> children;
+                        for ( CItem * pItem = pContainer->GetContentHead(); pItem != NULL; pItem = pItem->GetNext())
+                        {
+                                if ( pItem == NULL )
+                                {
+                                        continue;
+                                }
+
+                                const UINT uid = static_cast<UINT>( pItem->GetUID());
+                                if ( uid == 0 )
+                                {
+                                        continue;
+                                }
+
+                                children.push_back( pItem );
+                        }
+
+                        for ( CObjBase * pChild : children )
+                        {
+                                if ( pChild == NULL )
+                                {
+                                        continue;
+                                }
+
+                                bool childIncludeContents = false;
+                                if ( pChild->IsChar())
+                                {
+                                        childIncludeContents = true;
+                                }
+                                else if ( pChild->IsItem())
+                                {
+                                        const CContainer * pChildContainer = dynamic_cast<const CContainer *>( pChild );
+                                        childIncludeContents = ( pChildContainer != NULL );
+                                }
+
+                                if ( ! PersistWorldObject( pChild, visited, childIncludeContents ))
+                                {
+                                        fResult = false;
+                                }
+                        }
                 }
         }
 
@@ -3589,6 +3666,23 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
                                 record.m_Relation = pItem->IsEquipped() ? "equipped" : "container";
                                 record.m_Sequence = 0;
                                 records.push_back( std::move( record ));
+                        }
+
+                        const CObjBaseTemplate * pTopTemplate = pItem->GetTopLevelObj();
+                        const CObjBase * pTopObject = dynamic_cast<const CObjBase*>( pTopTemplate );
+                        const CChar * pTopChar = dynamic_cast<const CChar*>( pTopObject );
+                        if ( pTopChar != NULL && pTopObject != NULL )
+                        {
+                                const unsigned long long parentUid = (unsigned long long) (UINT) pTopChar->GetUID();
+                                if ( parentUid != 0 && parentUid != uid )
+                                {
+                                        Storage::Repository::WorldObjectRelationRecord ownerRecord;
+                                        ownerRecord.m_ParentUid = parentUid;
+                                        ownerRecord.m_ChildUid = uid;
+                                        ownerRecord.m_Relation = "owner";
+                                        ownerRecord.m_Sequence = 0;
+                                        records.push_back( std::move( ownerRecord ));
+                                }
                         }
                 }
         }
