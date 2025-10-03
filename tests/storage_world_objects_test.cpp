@@ -315,7 +315,7 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         {
                 throw std::runtime_error( "World object relation insert missing" );
         }
-        if ( relationStmt->parameters.size() != 4 )
+        if ( relationStmt->parameters.size() != 3 && relationStmt->parameters.size() != 4 )
         {
                 throw std::runtime_error( "Unexpected relation parameter count" );
         }
@@ -326,6 +326,130 @@ TEST_CASE( TestSaveItemPersistsContainerRelations )
         if ( relationStmt->parameters[2] != "container" )
         {
                 throw std::runtime_error( "Relation type not recorded as container" );
+        }
+        if ( relationStmt->parameters.size() == 4 && relationStmt->parameters[3] != "0" )
+        {
+                throw std::runtime_error( "Relation sequence not defaulted to zero" );
+        }
+}
+
+TEST_CASE( TestMissingRelationColumnIsCreatedAutomatically )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: relation missing
+        PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: type missing
+        PushMysqlResultSet({ { "1" } }); // EnsureWorldRelationColumn: relation present after ALTER
+        PushMysqlResultSet({ { "1" } }); // Update cache: parent_uid exists
+        PushMysqlResultSet({ { "1" } }); // Update cache: relation exists
+        PushMysqlResultSet({ { "1" } }); // Update cache: sequence exists
+
+        if ( !storage.Service().DebugInitializeWorldRelationSchema())
+        {
+                throw std::runtime_error( "InitializeWorldRelationSchema returned false" );
+        }
+
+        const auto & queries = storage.ExecutedQueries();
+        bool fAlterIssued = false;
+        bool fPopulateIssued = false;
+        for ( const auto & query : queries )
+        {
+                if ( query.find( "ALTER TABLE" ) != std::string::npos &&
+                        query.find( "`test_world_object_relations`" ) != std::string::npos &&
+                        query.find( "ADD COLUMN `relation`" ) != std::string::npos )
+                {
+                        fAlterIssued = true;
+                }
+
+                if ( query.find( "UPDATE" ) != std::string::npos &&
+                        query.find( "`test_world_object_relations`" ) != std::string::npos &&
+                        query.find( "SET `relation` = 'container'" ) != std::string::npos )
+                {
+                        fPopulateIssued = true;
+                }
+        }
+
+        if ( !fAlterIssued )
+        {
+                throw std::runtime_error( "ALTER TABLE to add relation column was not issued" );
+        }
+
+        if ( !fPopulateIssued )
+        {
+                throw std::runtime_error( "Relation backfill UPDATE was not executed" );
+        }
+
+        if ( storage.Service().GetWorldRelationColumnName().CompareNoCase( "relation" ) != 0 )
+        {
+                throw std::runtime_error( "Relation column cache was not refreshed to `relation`" );
+        }
+}
+
+TEST_CASE( TestLegacyTypeColumnIsRenamedToRelation )
+{
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        PushMysqlResultSet({ { "0" } }); // EnsureWorldRelationColumn: relation missing
+        PushMysqlResultSet({ { "1" } }); // EnsureWorldRelationColumn: legacy type present
+        PushMysqlResultSet({ { "1" } }); // EnsureWorldRelationColumn: relation present after rename
+        PushMysqlResultSet({ { "1" } }); // Update cache: parent_uid exists
+        PushMysqlResultSet({ { "1" } }); // Update cache: relation exists
+        PushMysqlResultSet({ { "1" } }); // Update cache: sequence exists
+
+        if ( !storage.Service().DebugInitializeWorldRelationSchema())
+        {
+                throw std::runtime_error( "InitializeWorldRelationSchema returned false" );
+        }
+
+        const auto & queries = storage.ExecutedQueries();
+        bool fRenameIssued = false;
+        bool fBackfillIssued = false;
+        for ( const auto & query : queries )
+        {
+                if ( query.find( "ALTER TABLE" ) != std::string::npos &&
+                        query.find( "`test_world_object_relations`" ) != std::string::npos &&
+                        query.find( "CHANGE COLUMN `type` `relation`" ) != std::string::npos )
+                {
+                        fRenameIssued = true;
+                }
+
+                if ( query.find( "UPDATE" ) != std::string::npos &&
+                        query.find( "`test_world_object_relations`" ) != std::string::npos &&
+                        query.find( "SET `relation`" ) != std::string::npos )
+                {
+                        fBackfillIssued = true;
+                }
+        }
+
+        if ( !fRenameIssued )
+        {
+                throw std::runtime_error( "Expected legacy `type` column to be renamed to `relation`" );
+        }
+
+        if ( fBackfillIssued )
+        {
+                throw std::runtime_error( "Relation rename path should not issue backfill updates" );
+        }
+
+        if ( storage.Service().GetWorldRelationColumnName().CompareNoCase( "relation" ) != 0 )
+        {
+                throw std::runtime_error( "Relation column cache was not refreshed to `relation`" );
         }
 }
 
