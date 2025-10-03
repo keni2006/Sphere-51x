@@ -18,7 +18,7 @@ namespace
         static const int SCHEMA_IMPORT_ROW = 2;
         static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
-        static const int CURRENT_SCHEMA_VERSION = 3;
+        static const int CURRENT_SCHEMA_VERSION = 4;
 }
 
 namespace Storage
@@ -526,6 +526,56 @@ bool SchemaManager::ApplyMigration_2_3( MySqlStorageService & storage )
         return true;
 }
 
+bool SchemaManager::ApplyMigration_3_4( MySqlStorageService & storage )
+{
+        const CGString sWorldSavepoints = storage.GetPrefixedTableName( "world_savepoints" );
+
+        CGString sQuery;
+        CGString sCollationSuffix = storage.GetDefaultTableCollationSuffix();
+        sQuery.Format(
+                "CREATE TABLE IF NOT EXISTS `%s` (\n"
+                "`id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,\n"
+                "`label` VARCHAR(64) NULL,\n"
+                "`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,\n"
+                "`objects_count` INT NOT NULL DEFAULT 0,\n"
+                "`checksum` VARCHAR(64) NULL,\n"
+                "PRIMARY KEY (`id`)\n"
+                ") ENGINE=InnoDB DEFAULT CHARSET=%s%s;",
+                (const char *) sWorldSavepoints,
+                storage.GetDefaultTableCharset(),
+                (const char *) sCollationSuffix );
+        if ( ! storage.ExecuteQuery( sQuery ))
+        {
+                return false;
+        }
+
+        if ( ColumnExists( storage, sWorldSavepoints, "save_reason" ) && ! ColumnExists( storage, sWorldSavepoints, "label" ))
+        {
+                CGString sRenameQuery;
+                sRenameQuery.Format(
+                        "ALTER TABLE `%s` CHANGE COLUMN `save_reason` `label` VARCHAR(64) NULL;",
+                        (const char *) sWorldSavepoints );
+                if ( ! storage.ExecuteQuery( sRenameQuery ))
+                {
+                        return false;
+                }
+        }
+
+        if ( ! EnsureColumnExists( storage, sWorldSavepoints, "label",
+                "`label` VARCHAR(64) NULL AFTER `id`" ))
+        {
+                return false;
+        }
+
+        if ( ! EnsureColumnExists( storage, sWorldSavepoints, "objects_count",
+                "`objects_count` INT NOT NULL DEFAULT 0 AFTER `created_at`" ))
+        {
+                return false;
+        }
+
+        return true;
+}
+
 bool SchemaManager::EnsureColumnExists( MySqlStorageService & storage, const CGString & table, const char * column, const char * definition )
 {
         if ( ColumnExists( storage, table, column ))
@@ -782,6 +832,17 @@ bool SchemaManager::ApplyMigration( MySqlStorageService & storage, int fromVersi
                         return false;
                 }
                 if ( ! SetSchemaVersion( storage, 3 ))
+                {
+                        return false;
+                }
+                break;
+
+        case 3:
+                if ( ! ApplyMigration_3_4( storage ))
+                {
+                        return false;
+                }
+                if ( ! SetSchemaVersion( storage, 4 ))
                 {
                         return false;
                 }

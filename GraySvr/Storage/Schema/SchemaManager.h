@@ -37,6 +37,7 @@ namespace Schema
                 bool ApplyMigration_0_1( MySqlStorageService & storage );
                 bool ApplyMigration_1_2( MySqlStorageService & storage );
                 bool ApplyMigration_2_3( MySqlStorageService & storage );
+                bool ApplyMigration_3_4( MySqlStorageService & storage );
                 bool EnsureColumnExists( MySqlStorageService & storage, const CGString & table, const char * column, const char * definition );
                 bool ColumnExists( MySqlStorageService & storage, const CGString & table, const char * column ) const;
                 bool InsertOrUpdateSchemaValue( MySqlStorageService & storage, int id, int value );

@@ -62,7 +62,7 @@ namespace
         static const int SCHEMA_IMPORT_ROW = 2;       // Tracks legacy import state
         static const int SCHEMA_WORLD_SAVECOUNT_ROW = 3;
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
-        static const int CURRENT_SCHEMA_VERSION = 3;
+        static const int CURRENT_SCHEMA_VERSION = 4;
 
         std::string FormatWorldObjectContext( const CObjBase & object )
         {

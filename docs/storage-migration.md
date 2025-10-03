@@ -16,7 +16,7 @@ schema manager that centralises migrations.
 - **Repository layer** – consolidates SQL used for accounts, world objects,
   timers and GM pages. Each repository owns its prepared statements, reducing
   duplication and improving error reporting.
-- **Schema manager** – applies migrations up to schema version **3**, extends
+- **Schema manager** – applies migrations up to schema version **4**, extends
   legacy tables when new columns are required and records world-save status in
   dedicated rows of `<prefix>schema_version`.
 
@@ -73,13 +73,16 @@ lives across `GraySvr/MySqlStorageService.cpp`,
      `<prefix>world_object_relations` are automatically migrated. The schema
      manager renames the legacy column to `relation` so existing relationship
      data continues to load before the first save touches the table.
+   - Older `world_savepoints` tables gain a `label` column (renamed from
+     `save_reason`) and the new `objects_count` field so snapshot metadata can be
+     recorded without errors.
 5. Inspect the migration status:
 
    ```sql
    SELECT id, version FROM `<prefix>schema_version` ORDER BY id;
    ```
 
-   - `id = 1` should equal `3`.
+   - `id = 1` should equal `4`.
    - `id = 2` becomes `1` after the legacy import finishes.
    - `id = 3` increments with every save.
    - `id = 4` reports whether the most recent save completed successfully.

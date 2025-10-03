@@ -63,7 +63,7 @@ schema bookkeeping:
 
 - Ensures that `<prefix>schema_version` exists and seeds the rows used for
   metadata tracking.
-- Applies incremental migrations (`ApplyMigration_0_1`, `_1_2`, `_2_3`, …) until
+- Applies incremental migrations (`ApplyMigration_0_1`, `_1_2`, `_2_3`, `_3_4`, …) until
   the current revision (`CURRENT_SCHEMA_VERSION`) is reached.
 - Extends existing tables with the helper routines `Ensure*Columns`. The logic
   checks for column existence before issuing `ALTER TABLE` statements, which
@@ -95,7 +95,7 @@ managed by the connection manager, so they can freely execute DDL and DML using
 
 ## Schema reference
 
-The current schema version is **3**. Table names below omit the optional prefix
+The current schema version is **4**. Table names below omit the optional prefix
 configured through `MYSQLPREFIX`.
 
 ### `schema_version`
@@ -104,7 +104,7 @@ Tracks migration and operational metadata. Seeded by the schema manager.
 
 | `id` | Purpose | Typical values |
 | ---- | ------- | -------------- |
-| 1 | Schema revision (`CURRENT_SCHEMA_VERSION`). | `3` |
+| 1 | Schema revision (`CURRENT_SCHEMA_VERSION`). | `4` |
 | 2 | Legacy account import flag (`0` pending, `1` complete). | `0` or `1` |
 | 3 | World save counter (incremented for every completed save). | `0+` |
 | 4 | World save completion flag (`0` = interrupted, `1` = success). | `0` or `1` |
@@ -154,7 +154,7 @@ Tracks migration and operational metadata. Seeded by the schema manager.
 `timers`
 : Auxiliary timers that back scheduled operations from the classic scripts.
 
-### World persistence (`schema` version ≥ 3)
+### World persistence (`schema` version ≥ 3, current version 4)
 
 `world_objects`
 : Metadata for every persisted object (characters and items). Stores the base
