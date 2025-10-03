@@ -35,8 +35,34 @@ inline char * my_strupr( char * value )
 
 #include "common_stub.h"
 
+inline CGString GetMergedFileName( const TCHAR * pszBase, const TCHAR * pszName )
+{
+        std::string base = ( pszBase != nullptr ) ? pszBase : "";
+        std::string name = ( pszName != nullptr ) ? pszName : "";
+
+        if ( base.empty())
+        {
+                return CGString( name.c_str());
+        }
+
+        if ( name.empty())
+        {
+                return CGString( base.c_str());
+        }
+
+        std::string result = base;
+        if ( result.back() != '/' && result.back() != '\\' )
+        {
+                result.push_back( '/' );
+        }
+        result += name;
+        return CGString( result.c_str());
+}
+
 constexpr WORD LOGM_INIT = 0x0100;
 constexpr WORD LOGM_SAVE = 0x0200;
+
+constexpr unsigned int STATF_SaveParity = 0x20000000u;
 
 struct LogEventEntry
 {
@@ -95,7 +121,7 @@ struct CRealTime
 class CServer
 {
 public:
-        CServer() : m_loading( false ) {}
+        CServer() : m_loading( false ), m_iSavePeriod( 0 ) {}
 
         bool IsLoading() const
         {
@@ -109,6 +135,10 @@ public:
 
 private:
         bool m_loading;
+
+public:
+        int m_iSavePeriod;
+        CGString m_sWorldBaseDir;
 };
 
 struct CServerMySQLConfig
@@ -150,6 +180,13 @@ enum StorageDirtyType : int
 
 extern CLog g_Log;
 extern CServer g_Serv;
+
+struct WorldStub
+{
+        bool m_fSaveParity = false;
+};
+
+extern WorldStub g_World;
 
 constexpr unsigned int PRIV_BLOCKED = 0x1u;
 constexpr unsigned int PRIV_JAILED = 0x2u;
@@ -471,6 +508,10 @@ public:
                 return true;
         }
 
+        virtual void MarkDirty( StorageDirtyType )
+        {
+        }
+
 private:
         unsigned int m_UID;
         int m_BaseID;
@@ -600,11 +641,45 @@ private:
 class CChar : public CObjBase
 {
 public:
-        CChar() : m_pPlayer( nullptr ) {}
+        CChar() : m_pPlayer( nullptr ), m_StatFlags( 0 ) {}
 
         bool IsChar() const override
         {
                 return true;
+        }
+
+        bool IsStat( unsigned int flag ) const
+        {
+                return ( m_StatFlags & flag ) != 0;
+        }
+
+        void SetStat( unsigned int flag )
+        {
+                m_StatFlags |= flag;
+        }
+
+        void ClearStat( unsigned int flag )
+        {
+                m_StatFlags &= ~flag;
+        }
+
+        void ModStat( unsigned int flag, bool enable )
+        {
+                unsigned int newFlags = m_StatFlags;
+                if ( enable )
+                {
+                        newFlags |= flag;
+                }
+                else
+                {
+                        newFlags &= ~flag;
+                }
+
+                if ( newFlags != m_StatFlags )
+                {
+                        m_StatFlags = newFlags;
+                        MarkDirty( StorageDirtyType_Save );
+                }
         }
 
         void SetPlayer( CPlayer * player )
@@ -613,6 +688,9 @@ public:
         }
 
         CPlayer * m_pPlayer;
+
+private:
+        unsigned int m_StatFlags;
 };
 
 class CItem : public CObjBase
