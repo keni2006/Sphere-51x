@@ -1088,12 +1088,28 @@ namespace Repository
         public:
                 WorldObjectRelationRepository( MySqlStorageService & storage, const CGString & table ) :
                         PreparedStatementRepository( storage ),
-                        m_Table( static_cast<const char *>( table ))
+                        m_Table( static_cast<const char *>( table )),
+                        m_RelationColumn( static_cast<const char *>( storage.GetWorldRelationColumnName())),
+                        m_HasSequence( storage.HasWorldRelationSequenceColumn())
                 {
+                        if ( m_RelationColumn.empty())
+                        {
+                                m_RelationColumn = "relation";
+                        }
+
                         const std::string quoted = "`" + m_Table + "`";
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `child_uid` = ?;";
-                        m_InsertQuery =
-                                "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?);";
+                        const std::string relationColumn = "`" + m_RelationColumn + "`";
+                        if ( m_HasSequence )
+                        {
+                                m_InsertQuery =
+                                        "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`," + relationColumn + ",`sequence`) VALUES (?,?,?,?);";
+                        }
+                        else
+                        {
+                                m_InsertQuery =
+                                        "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`," + relationColumn + ") VALUES (?,?,?);";
+                        }
                 }
 
                 bool DeleteForObject( unsigned long long uid )
@@ -1113,7 +1129,10 @@ namespace Repository
                                 statement.BindUInt64( 0, record.m_ParentUid );
                                 statement.BindUInt64( 1, record.m_ChildUid );
                                 statement.BindString( 2, record.m_Relation );
-                                statement.BindInt64( 3, record.m_Sequence );
+                                if ( m_HasSequence )
+                                {
+                                        statement.BindInt64( 3, record.m_Sequence );
+                                }
                         });
                 }
 
@@ -1121,6 +1140,8 @@ namespace Repository
                 std::string m_Table;
                 std::string m_DeleteQuery;
                 std::string m_InsertQuery;
+                std::string m_RelationColumn;
+                bool m_HasSequence;
         };
 }
 }
@@ -1393,12 +1414,14 @@ CGString MySqlStorageService::UniversalRecord::BuildUpdate( const CGString & whe
 #endif // !UNIT_TEST || UNIT_TEST_MYSQL_IMPLEMENTATION
 
 MySqlStorageService::MySqlStorageService() :
-        m_tLastAccountSync( 0 )
+        m_tLastAccountSync( 0 ),
+        m_fWorldRelationHasSequenceColumn( true )
 {
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
+        m_sWorldRelationColumnName = "relation";
 }
 
 MySqlStorageService::~MySqlStorageService()
@@ -1473,6 +1496,8 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
                 return false;
         }
 
+        UpdateWorldRelationSchemaCache();
+
 #ifndef UNIT_TEST
         m_DirtyProcessor = std::make_unique<Storage::DirtyQueueProcessor>( *this );
         m_SnapshotProcessor = std::make_unique<Storage::SnapshotQueueProcessor>( *this );
@@ -1493,6 +1518,8 @@ void MySqlStorageService::Stop()
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
         m_tLastAccountSync = 0;
+        m_sWorldRelationColumnName = "relation";
+        m_fWorldRelationHasSequenceColumn = true;
 }
 
 CGString MySqlStorageService::BuildSchemaVersionCreateQuery() const
@@ -1518,6 +1545,40 @@ CGString MySqlStorageService::BuildSchemaVersionCreateQuery() const
                 pszCharset,
                 (const char *) sCollationSuffix );
         return sQuery;
+}
+
+void MySqlStorageService::UpdateWorldRelationSchemaCache()
+{
+        m_sWorldRelationColumnName = "relation";
+        m_fWorldRelationHasSequenceColumn = true;
+
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        if ( sRelations.IsEmpty())
+        {
+                return;
+        }
+
+        if ( !ColumnExists( sRelations, "parent_uid" ))
+        {
+                return;
+        }
+
+        bool fRelationColumnExists = ColumnExists( sRelations, "relation" );
+        if ( !fRelationColumnExists )
+        {
+                if ( ColumnExists( sRelations, "type" ))
+                {
+                        m_sWorldRelationColumnName = "type";
+                        fRelationColumnExists = true;
+                }
+        }
+
+        if ( !fRelationColumnExists )
+        {
+                m_sWorldRelationColumnName.Empty();
+        }
+
+        m_fWorldRelationHasSequenceColumn = ColumnExists( sRelations, "sequence" );
 }
 
 #ifdef UNIT_TEST

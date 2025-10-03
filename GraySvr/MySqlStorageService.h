@@ -20,6 +20,7 @@ namespace Storage
 namespace Repository
 {
         class PreparedStatementRepository;
+        class WorldObjectRelationRepository;
 }
 }
 
@@ -278,6 +279,7 @@ private:
         friend class UniversalRecord;
         friend class Storage::Schema::SchemaManager;
         friend class Storage::Repository::PreparedStatementRepository;
+        friend class Storage::Repository::WorldObjectRelationRepository;
 
         bool Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult = NULL );
         bool ExecuteQuery( const CGString & query );
@@ -311,6 +313,7 @@ private:
         const char * GetDefaultTableCollation() const;
         CGString GetDefaultTableCollationSuffix() const;
         CGString BuildSchemaVersionCreateQuery() const;
+        void UpdateWorldRelationSchemaCache();
 
         bool SaveWorldObjectInternal( CObjBase * pObject );
         bool SaveWorldObjectInternal( CObjBase * pObject, std::unordered_set<unsigned long long> & visited );
@@ -327,6 +330,14 @@ private:
         bool UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized );
         bool RefreshWorldObjectComponents( const CObjBase * pObject );
         bool RefreshWorldObjectRelations( const CObjBase * pObject );
+        const CGString & GetWorldRelationColumnName() const
+        {
+                return m_sWorldRelationColumnName;
+        }
+        bool HasWorldRelationSequenceColumn() const
+        {
+                return m_fWorldRelationHasSequenceColumn;
+        }
         CGString ComputeSerializedChecksum( const CGString & serialized ) const;
         bool ExecuteRecordsInsert( const std::vector<UniversalRecord> & records );
         bool ClearTable( const CGString & table );
@@ -342,6 +353,8 @@ private:
         CGString m_sTableCharset;
         CGString m_sTableCollation;
         time_t m_tLastAccountSync;
+        CGString m_sWorldRelationColumnName;
+        bool m_fWorldRelationHasSequenceColumn;
 };
 
 #endif // _MYSQL_STORAGE_SERVICE_H_
