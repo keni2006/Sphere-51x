@@ -5,6 +5,9 @@
 
 #include "graysvr.h"	// predef header.
 #include "MySqlStorageService.h"
+#include "Storage/MySql/MySqlLogging.h"
+
+#include <exception>
 
 bool World_fDeleteCycle = false;
 
@@ -536,29 +539,33 @@ bool CWorld::SaveObjectToStorage( CObjBase * pObj )
                 return false;
         };
 
-        if ( g_Serv.m_fSecure )
-        {
-                try
-                {
-                        if ( ! saveObject( pObj ))
-                        {
-                                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist object 0%lx.\n", (unsigned long) pObj->GetUID());
-                                return false;
-                        }
-                }
-                catch (...)     // catch all
-                {
-                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save Object Exception!\n" );
-                        return false;
-                }
-        }
-        else
+        try
         {
                 if ( ! saveObject( pObj ))
                 {
                         g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist object 0%lx.\n", (unsigned long) pObj->GetUID());
                         return false;
                 }
+        }
+        catch ( const Storage::DatabaseError & ex )
+        {
+                LogDatabaseError( ex, LOGL_CRIT );
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Database error while persisting object 0%lx.\n", (unsigned long) pObj->GetUID());
+                return false;
+        }
+        catch ( const std::exception & ex )
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Exception while persisting object 0%lx: %s\n", (unsigned long) pObj->GetUID(), ex.what());
+                return false;
+        }
+        catch (...)
+        {
+                if ( g_Serv.m_fSecure )
+                {
+                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save Object Exception!\n" );
+                        return false;
+                }
+                throw;
         }
         return true;
 }
@@ -574,11 +581,36 @@ bool CWorld::SaveStorageSector( CSector & sector )
                 return false;
         }
 
-        if ( ! pStorage->SaveSector( sector ))
+        try
+        {
+                if ( ! pStorage->SaveSector( sector ))
+                {
+                        CPointMap base = sector.GetBase();
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist sector %d,%d.\n", base.m_x, base.m_y );
+                        return false;
+                }
+        }
+        catch ( const Storage::DatabaseError & ex )
         {
                 CPointMap base = sector.GetBase();
-                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist sector %d,%d.\n", base.m_x, base.m_y );
+                LogDatabaseError( ex, LOGL_CRIT );
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Database error while persisting sector %d,%d.\n", base.m_x, base.m_y );
                 return false;
+        }
+        catch ( const std::exception & ex )
+        {
+                CPointMap base = sector.GetBase();
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Exception while persisting sector %d,%d: %s\n", base.m_x, base.m_y, ex.what());
+                return false;
+        }
+        catch (...)
+        {
+                if ( g_Serv.m_fSecure )
+                {
+                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save sector exception!\n" );
+                        return false;
+                }
+                throw;
         }
 
         CChar * pCharNext;
@@ -626,14 +658,37 @@ bool CWorld::SaveStorageGMPages()
                 return false;
         }
 
-        CGMPage * pPage = dynamic_cast<CGMPage*>( m_GMPages.GetHead());
-        for ( ; pPage != NULL; pPage = pPage->GetNext())
+        try
         {
-                if ( ! pStorage->SaveGMPage( *pPage ))
+                CGMPage * pPage = dynamic_cast<CGMPage*>( m_GMPages.GetHead());
+                for ( ; pPage != NULL; pPage = pPage->GetNext())
                 {
-                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist GM page for account '%s'.\n", pPage->GetName());
+                        if ( ! pStorage->SaveGMPage( *pPage ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist GM page for account '%s'.\n", pPage->GetName());
+                                return false;
+                        }
+                }
+        }
+        catch ( const Storage::DatabaseError & ex )
+        {
+                LogDatabaseError( ex, LOGL_CRIT );
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Database error while persisting GM pages.\n" );
+                return false;
+        }
+        catch ( const std::exception & ex )
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Exception while persisting GM pages: %s\n", ex.what());
+                return false;
+        }
+        catch (...)
+        {
+                if ( g_Serv.m_fSecure )
+                {
+                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save GM pages exception!\n" );
                         return false;
                 }
+                throw;
         }
         return true;
 }
@@ -651,16 +706,39 @@ bool CWorld::SaveStorageServers()
                 return true;
         }
 
-        for ( int i = 0; i < g_Serv.m_Servers.GetCount(); ++i )
+        try
         {
-                CServRef * pServ = g_Serv.m_Servers[i];
-                if ( pServ == NULL )
-                        continue;
-                if ( ! pStorage->SaveServer( *pServ ))
+                for ( int i = 0; i < g_Serv.m_Servers.GetCount(); ++i )
                 {
-                        g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist linked server '%s'.\n", pServ->GetName());
+                        CServRef * pServ = g_Serv.m_Servers[i];
+                        if ( pServ == NULL )
+                                continue;
+                        if ( ! pStorage->SaveServer( *pServ ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR, "Failed to persist linked server '%s'.\n", pServ->GetName());
+                                return false;
+                        }
+                }
+        }
+        catch ( const Storage::DatabaseError & ex )
+        {
+                LogDatabaseError( ex, LOGL_CRIT );
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Database error while persisting linked servers.\n" );
+                return false;
+        }
+        catch ( const std::exception & ex )
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_CRIT, "Exception while persisting linked servers: %s\n", ex.what());
+                return false;
+        }
+        catch (...)
+        {
+                if ( g_Serv.m_fSecure )
+                {
+                        g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save servers exception!\n" );
                         return false;
                 }
+                throw;
         }
         return true;
 }
@@ -1340,30 +1418,57 @@ void CWorld::Save( bool fForceImmediate ) // Save world state
 	MySqlStorageService * pStorage = Storage();
 	const bool fStorageEnabled = ( pStorage != NULL && pStorage->IsEnabled());
 
-	if ( g_Serv.m_fSecure ) // enable the try code.
-	{
-		try
-		{
-			SaveTry(fForceImmediate);
-		}
-		catch (...) // catch all
-		{
-			g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED. " GRAY_TITLE " is UNSTABLE!\n" );
-			Broadcast( "Save FAILED. " GRAY_TITLE " is UNSTABLE!" );
-			if ( fStorageEnabled )
-			{
-				AbortStorageSave();
-			}
-			else
-			{
-				m_File.Close(); // close if not already closed.
-			}
-		}
-	}
-	else
-	{
-		SaveTry(fForceImmediate); // Save world state
-	}
+    auto ReportSaveFailure = [this, fStorageEnabled]()
+    {
+            g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED. " GRAY_TITLE " is UNSTABLE!\n" );
+            Broadcast( "Save FAILED. " GRAY_TITLE " is UNSTABLE!" );
+            m_fSaveFailed = true;
+            if ( fStorageEnabled )
+            {
+                    AbortStorageSave();
+            }
+            else
+            {
+                    m_File.Close(); // close if not already closed.
+            }
+    };
+
+    const auto HandleUnknownException = [&]()
+    {
+            g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED due to unexpected exception.\n" );
+            ReportSaveFailure();
+    };
+
+    try
+    {
+            SaveTry( fForceImmediate );
+    }
+    catch ( const Storage::DatabaseError & ex )
+    {
+            LogDatabaseError( ex, LOGL_CRIT );
+            ReportSaveFailure();
+    }
+    catch ( const CGrayError & ex )
+    {
+            g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED: %s (0x%lx).\n", ex.GetDescription(), static_cast<unsigned long>( ex.GetErrorCode()));
+            ReportSaveFailure();
+    }
+    catch ( const std::exception & ex )
+    {
+            g_Log.Event( LOGL_CRIT|LOGM_SAVE, "Save FAILED: %s\n", ex.what());
+            ReportSaveFailure();
+    }
+    catch (...)
+    {
+            if ( fStorageEnabled || g_Serv.m_fSecure )
+            {
+                    HandleUnknownException();
+            }
+            else
+            {
+                    throw;
+            }
+    }
 }
 
 /////////////////////////////////////////////////////////////////////
