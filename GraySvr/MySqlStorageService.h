@@ -287,6 +287,26 @@ public:
         {
                 return HandleMissingWorldRelationColumn();
         }
+
+        const CGString & DebugGetWorldRelationColumnName() const
+        {
+                return m_sWorldRelationColumnName;
+        }
+
+        bool DebugHasWorldRelationSequenceColumn() const
+        {
+                return m_fWorldRelationHasSequenceColumn;
+        }
+
+        bool DebugShouldPopulateWorldRelationTypeColumn() const
+        {
+                return m_fWorldRelationPopulateTypeColumn;
+        }
+
+        bool DebugShouldPopulateWorldRelationRelationTypeColumn() const
+        {
+                return m_fWorldRelationPopulateRelationTypeColumn;
+        }
 #endif
 
 private:
@@ -356,6 +376,14 @@ private:
         {
                 return m_fWorldRelationHasSequenceColumn;
         }
+        bool ShouldPopulateWorldRelationTypeColumn() const
+        {
+                return m_fWorldRelationPopulateTypeColumn;
+        }
+        bool ShouldPopulateWorldRelationRelationTypeColumn() const
+        {
+                return m_fWorldRelationPopulateRelationTypeColumn;
+        }
         CGString ComputeSerializedChecksum( const CGString & serialized ) const;
         bool ExecuteRecordsInsert( const std::vector<UniversalRecord> & records );
         bool ClearTable( const CGString & table );
@@ -373,6 +401,8 @@ private:
         time_t m_tLastAccountSync;
         CGString m_sWorldRelationColumnName;
         bool m_fWorldRelationHasSequenceColumn;
+        bool m_fWorldRelationPopulateTypeColumn;
+        bool m_fWorldRelationPopulateRelationTypeColumn;
 };
 
 #endif // _MYSQL_STORAGE_SERVICE_H_
