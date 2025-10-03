@@ -841,6 +841,50 @@ namespace Repository
                 MySqlStorageService & m_Storage;
         };
 
+        class TimerRepository : public PreparedStatementRepository
+        {
+        public:
+                TimerRepository( MySqlStorageService & storage, const CGString & table ) :
+                        PreparedStatementRepository( storage ),
+                        m_Table( static_cast<const char *>( table ))
+                {
+                        const std::string quoted = "`" + m_Table + "`";
+                        m_DeleteByCharacterQuery = "DELETE FROM " + quoted + " WHERE `character_uid` = ?;";
+                        m_DeleteByItemQuery = "DELETE FROM " + quoted + " WHERE `item_uid` = ?;";
+                }
+
+                bool DeleteByCharacter( unsigned long long uid )
+                {
+                        if ( uid == 0 )
+                        {
+                                return true;
+                        }
+
+                        return ExecuteBatch( m_DeleteByCharacterQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, uid );
+                        });
+                }
+
+                bool DeleteByItem( unsigned long long uid )
+                {
+                        if ( uid == 0 )
+                        {
+                                return true;
+                        }
+
+                        return ExecuteBatch( m_DeleteByItemQuery, 1, [&]( Storage::IDatabaseStatement & statement, size_t )
+                        {
+                                statement.BindUInt64( 0, uid );
+                        });
+                }
+
+        private:
+                std::string m_Table;
+                std::string m_DeleteByCharacterQuery;
+                std::string m_DeleteByItemQuery;
+        };
+
         struct WorldObjectMetaRecord
         {
                 unsigned long long m_Uid = 0;
@@ -2273,18 +2317,16 @@ bool MySqlStorageService::DeleteTimersForObject( const CObjBase & object )
         const CGString sTimers = GetPrefixedTableName( "timers" );
         const unsigned long long uid = (unsigned long long) (UINT) object.GetUID();
 
+        Storage::Repository::TimerRepository repository( *this, sTimers );
+
         if ( object.IsChar())
         {
-                CGString sQuery;
-                sQuery.Format( "DELETE FROM `%s` WHERE `character_uid` = %llu;", (const char *) sTimers, uid );
-                return ExecuteQuery( sQuery );
+                return repository.DeleteByCharacter( uid );
         }
 
         if ( object.IsItem())
         {
-                CGString sQuery;
-                sQuery.Format( "DELETE FROM `%s` WHERE `item_uid` = %llu;", (const char *) sTimers, uid );
-                return ExecuteQuery( sQuery );
+                return repository.DeleteByItem( uid );
         }
 
         return true;
