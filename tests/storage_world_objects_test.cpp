@@ -468,6 +468,114 @@ TEST_CASE( TestSavingContainerDoesNotRemoveChildRelations )
         }
 }
 
+TEST_CASE( TestSkippedCharacterStillPersistsMetaAndInventory )
+{
+        class SkippingChar : public CChar
+        {
+        public:
+                void r_Write( CScript & script ) override
+                {
+                        (void) script;
+                        // Skip writing any data to simulate parity-matched save skipping
+                }
+
+                void AddInventoryItem( CItem * item )
+                {
+                        AppendContent( item );
+                }
+        };
+
+        StorageServiceFacade storage;
+        if ( !storage.Connect())
+        {
+                throw std::runtime_error( "Unable to initialize storage" );
+        }
+
+        storage.ResetQueryLog();
+        g_Log.Clear();
+        ClearMysqlResults();
+
+        SkippingChar character;
+        character.SetUID( 0x01020304u );
+        character.SetBaseID( 0x200 );
+        character.SetName( "ParityHero" );
+        character.SetTopLevel( true );
+        character.SetTopPoint( CPointMap( 10, 20, 0 ));
+        character.SetTopLevelObj( &character );
+
+        const bool previousParity = g_World.m_fSaveParity;
+        struct WorldParityRestorer
+        {
+                explicit WorldParityRestorer( bool value ) : m_Previous( value ) {}
+                ~WorldParityRestorer()
+                {
+                        g_World.m_fSaveParity = m_Previous;
+                }
+
+                bool m_Previous;
+        } parityGuard( previousParity );
+
+        g_World.m_fSaveParity = character.IsStat( STATF_SaveParity );
+
+        CItem inventoryItem;
+        inventoryItem.SetUID( 0x01020305u );
+        inventoryItem.SetBaseID( 0x400 );
+        inventoryItem.SetName( "ParitySword" );
+        inventoryItem.SetContainer( &character );
+        inventoryItem.SetInContainer( true );
+        inventoryItem.SetTopLevel( false );
+        inventoryItem.SetTopLevelObj( &character );
+        inventoryItem.SetContainedPoint( CPointMap( 1, 2, 3 ));
+        character.AddInventoryItem( &inventoryItem );
+
+        if ( !storage.Service().SaveWorldObject( &character ))
+        {
+                throw std::runtime_error( "SaveWorldObject returned false for skipped parity character" );
+        }
+
+        const auto & statements = storage.ExecutedStatements();
+        const std::string characterUid = std::to_string( static_cast<unsigned long long>( character.GetUID()));
+        const std::string itemUid = std::to_string( static_cast<unsigned long long>( inventoryItem.GetUID()));
+
+        const auto charMetaIt = std::find_if( statements.begin(), statements.end(), [&]( const ExecutedPreparedStatement & stmt )
+        {
+                return stmt.query.find( "`test_world_objects`" ) != std::string::npos &&
+                        !stmt.parameters.empty() &&
+                        stmt.parameters[0] == characterUid;
+        });
+
+        if ( charMetaIt == statements.end())
+        {
+                throw std::runtime_error( "Skipped character metadata was not persisted" );
+        }
+
+        const auto charDataIt = std::find_if( statements.begin(), statements.end(), [&]( const ExecutedPreparedStatement & stmt )
+        {
+                return stmt.query.find( "`test_world_object_data`" ) != std::string::npos &&
+                        !stmt.parameters.empty() &&
+                        stmt.parameters[0] == characterUid;
+        });
+
+        if ( charDataIt != statements.end())
+        {
+                throw std::runtime_error( "Skipped character unexpectedly persisted serialized data" );
+        }
+
+        const auto relationIt = std::find_if( statements.begin(), statements.end(), [&]( const ExecutedPreparedStatement & stmt )
+        {
+                return stmt.query.find( "`test_world_object_relations`" ) != std::string::npos &&
+                        stmt.query.find( "INSERT INTO" ) != std::string::npos &&
+                        stmt.parameters.size() >= 2 &&
+                        stmt.parameters[0] == characterUid &&
+                        stmt.parameters[1] == itemUid;
+        });
+
+        if ( relationIt == statements.end())
+        {
+                throw std::runtime_error( "Inventory relation insert missing for skipped character" );
+        }
+}
+
 TEST_CASE( TestDeleteWorldObjectUsesPreparedStatement )
 {
         StorageServiceFacade storage;
