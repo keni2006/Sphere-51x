@@ -36,7 +36,7 @@ Every snapshot folder contains one SQL dump per world table plus a metadata file
 All SQL files include the table definition retrieved via `SHOW CREATE TABLE` so they can be replayed on a clean schema without additional migrations.
 
 ## Database bookkeeping
-- The snapshot transaction also inserts a row into `<prefix>world_savepoints` using the generated label and timestamp. This mirrors the previous behaviour that recorded save metadata directly inside MySQL.
+- The snapshot transaction also inserts a row into `<prefix>world_savepoints` using the generated label, timestamp and object count. This mirrors the previous behaviour that recorded save metadata directly inside MySQL.
 - The metadata row is written even though the data lives on disk, letting operators track when the latest snapshot finished and how many objects it contained.
 
 ## Failure handling
@@ -81,7 +81,7 @@ All SQL files include the table definition retrieved via `SHOW CREATE TABLE` so 
 Каждый SQL‑файл начинается с определения таблицы (`SHOW CREATE TABLE`), поэтому дамп можно восстановить на чистой базе без дополнительных миграций.
 
 ## Учёт в базе данных
-- Транзакция снимка добавляет запись в `<prefix>world_savepoints`, используя сгенерированную метку и метку времени. Это сохраняет прежнюю возможность отслеживать сохранения прямо в MySQL.
+- Транзакция снимка добавляет запись в `<prefix>world_savepoints`, используя сгенерированную метку, метку времени и число объектов. Это сохраняет прежнюю возможность отслеживать сохранения прямо в MySQL.
 - Строка с метаданными создаётся, даже если данные лежат на диске, что позволяет операторам видеть дату и объём последнего снимка.
 
 ## Обработка ошибок
