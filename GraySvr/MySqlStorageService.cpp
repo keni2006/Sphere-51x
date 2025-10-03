@@ -3178,18 +3178,70 @@ bool MySqlStorageService::SaveWorldObjectInternal( CObjBase * pObject, std::unor
                 pCurrent = pParent;
         }
 
+        auto shouldPersistContents = []( CObjBase * pCandidate ) -> bool
+        {
+                if ( pCandidate == NULL )
+                {
+                        return false;
+                }
+
+                if ( pCandidate->IsChar())
+                {
+                        return true;
+                }
+
+                if ( pCandidate->IsItem())
+                {
+                        const CContainer * pContainer = dynamic_cast<const CContainer *>( pCandidate );
+                        return ( pContainer != NULL );
+                }
+
+                return false;
+        };
+
         for ( auto it = ancestors.rbegin(); it != ancestors.rend(); ++it )
         {
-                if ( ! PersistWorldObject( *it, visited ))
+                if ( ! this->PersistWorldObjectInternal( *it, visited, false ))
                 {
                         return false;
                 }
         }
 
-        return PersistWorldObject( pObject, visited );
+        return this->PersistWorldObjectInternal( pObject, visited, shouldPersistContents( pObject ));
 }
 
 bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited )
+{
+        if ( pObject == NULL )
+        {
+                return false;
+        }
+
+        auto shouldPersistContents = []( CObjBase * pCandidate ) -> bool
+        {
+                if ( pCandidate == NULL )
+                {
+                        return false;
+                }
+
+                if ( pCandidate->IsChar())
+                {
+                        return true;
+                }
+
+                if ( pCandidate->IsItem())
+                {
+                        const CContainer * pContainer = dynamic_cast<const CContainer *>( pCandidate );
+                        return ( pContainer != NULL );
+                }
+
+                return false;
+        };
+
+        return this->PersistWorldObjectInternal( pObject, visited, shouldPersistContents( pObject ));
+}
+
+bool MySqlStorageService::PersistWorldObjectInternal( CObjBase * pObject, std::unordered_set<unsigned long long> & visited, bool includeContents )
 {
         if ( pObject == NULL )
         {
@@ -3205,32 +3257,80 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
 
         bool fResult = true;
         CGString sSerialized;
-        const SerializationResult serializationResult = SerializeWorldObject( pObject, sSerialized );
-        if ( serializationResult == SerializationResult::Failed )
+        const MySqlStorageService::SerializationResult serializationResult = this->SerializeWorldObject( pObject, sSerialized );
+        if ( serializationResult == MySqlStorageService::SerializationResult::Failed )
         {
                 fResult = false;
         }
-        else if ( serializationResult == SerializationResult::Success )
+        else if ( serializationResult == MySqlStorageService::SerializationResult::Success )
         {
-                if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+                if ( ! this->UpsertWorldObjectMeta( pObject, sSerialized ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                else if ( ! this->UpsertWorldObjectData( pObject, sSerialized ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
                         fResult = false;
                 }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
+                else if ( ! this->RefreshWorldObjectComponents( pObject ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
                         fResult = false;
                 }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
+                else if ( ! this->RefreshWorldObjectRelations( pObject ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
                         fResult = false;
+                }
+        }
+
+        if ( includeContents && fResult )
+        {
+                const CContainer * pContainer = dynamic_cast<const CContainer *>( pObject );
+                if ( pContainer != NULL )
+                {
+                        std::vector<CObjBase *> children;
+                        for ( CItem * pItem = pContainer->GetContentHead(); pItem != NULL; pItem = pItem->GetNext())
+                        {
+                                if ( pItem == NULL )
+                                {
+                                        continue;
+                                }
+
+                                const UINT childUid = static_cast<UINT>( pItem->GetUID());
+                                if ( childUid == 0 )
+                                {
+                                        continue;
+                                }
+
+                                children.push_back( pItem );
+                        }
+
+                        for ( CObjBase * pChild : children )
+                        {
+                                if ( pChild == NULL )
+                                {
+                                        continue;
+                                }
+
+                                bool childIncludeContents = false;
+                                if ( pChild->IsChar())
+                                {
+                                        childIncludeContents = true;
+                                }
+                                else if ( pChild->IsItem())
+                                {
+                                        const CContainer * pChildContainer = dynamic_cast<const CContainer *>( pChild );
+                                        childIncludeContents = ( pChildContainer != NULL );
+                                }
+
+                                if ( ! this->PersistWorldObjectInternal( pChild, visited, childIncludeContents ))
+                                {
+                                        fResult = false;
+                                }
+                        }
                 }
         }
 
@@ -3337,9 +3437,84 @@ bool MySqlStorageService::ApplyWorldObjectData( CObjBase & object, const CGStrin
         }
 
         bool fResult = false;
-        if ( script.FindNextSection())
+        bool fLoadedRoot = false;
+        const std::string context = FormatWorldObjectContext( object );
+
+        while ( script.FindNextSection())
         {
-                fResult = object.r_Load( script );
+                if ( ! fLoadedRoot )
+                {
+                        fLoadedRoot = true;
+                        fResult = object.r_Load( script );
+                        if ( ! fResult )
+                        {
+                                LogPersistenceFailure( object, LOGL_ERROR, "deserialize", "r_Load failed for root section" );
+                                break;
+                        }
+                        continue;
+                }
+
+                if ( script.IsSectionType( "WORLDITEM" ))
+                {
+                        CItem * pItem = CItem::CreateScript((ITEMID_TYPE) script.GetArgHex());
+                        if ( pItem == NULL )
+                        {
+                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to instantiate item section while applying data for %s.\n", context.c_str());
+                                fResult = false;
+                                break;
+                        }
+
+                        if ( ! pItem->r_Load( script ))
+                        {
+                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to load WORLDITEM section while applying data for %s.\n", context.c_str());
+                                pItem->Delete();
+#ifdef UNIT_TEST
+                                delete pItem;
+#endif
+                                fResult = false;
+                                break;
+                        }
+
+                        continue;
+                }
+
+                if ( script.IsSectionType( "WORLDCHAR" ))
+                {
+                        CChar * pChar = CChar::CreateBasic((CREID_TYPE) script.GetArgHex());
+                        if ( pChar == NULL )
+                        {
+                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to instantiate character section while applying data for %s.\n", context.c_str());
+                                fResult = false;
+                                break;
+                        }
+
+                        if ( ! pChar->r_Load( script ))
+                        {
+                                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Failed to load WORLDCHAR section while applying data for %s.\n", context.c_str());
+                                pChar->Delete();
+#ifdef UNIT_TEST
+                                delete pChar;
+#endif
+                                fResult = false;
+                                break;
+                        }
+
+                        continue;
+                }
+
+                if ( script.IsSectionType( "EOF" ))
+                {
+                        continue;
+                }
+
+                g_Log.Event( LOGM_SAVE | LOGL_ERROR, "Unexpected section '%s' while applying data for %s.\n", script.GetKey(), context.c_str());
+                fResult = false;
+                break;
+        }
+
+        if ( ! fLoadedRoot )
+        {
+                fResult = false;
         }
 
         script.Close();
