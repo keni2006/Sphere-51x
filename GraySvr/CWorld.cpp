@@ -696,6 +696,13 @@ bool CWorld::FinalizeStorageSave()
                 m_pSaveTransaction.reset();
         }
 
+        CGString sSnapshotLabel;
+        sSnapshotLabel.Format( "World save #%d", m_iSaveCount + 1 );
+        if ( ! pStorage->ScheduleWorldSnapshot( sSnapshotLabel ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to create MySQL world snapshot after save. Live tables were persisted without a snapshot.\n" );
+        }
+
         m_iSaveCount++;
         m_Clock_Save = GetTime() + g_Serv.m_iSavePeriod;
 
