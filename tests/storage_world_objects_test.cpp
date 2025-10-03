@@ -511,7 +511,7 @@ TEST_CASE( TestLoadWorldObjectsIncludesAccountMetadata )
         ClearMysqlResults();
 
         PushMysqlResultSet({
-                { "16909060", "char", "0x200", "77", "hero_account", "UID=16909060\n", "", "" }
+                { "16909060", "char", "0x200", "77", "hero_account", "UID=16909060\n" }
         });
 
         std::vector<MySqlStorageService::WorldObjectRecord> records;
