@@ -77,6 +77,7 @@
 // ADDNPC from scripts, "CONT" keyword
 
 #include "graysvr.h"	// predef header.
+#include <cstring>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -704,7 +705,13 @@ int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 	{
 		g_Serv.PrintStr(sScriptContext);
 	}
+	size_t messageLength = strlen(pszMsg);
+	bool hasTrailingNewLine = (messageLength > 0) && (pszMsg[messageLength - 1] == '\n');
 	g_Serv.PrintStr(pszMsg);
+	if ( !hasTrailingNewLine )
+	{
+		g_Serv.PrintStr("\n");
+	}
 
 	
 	// Print to log file.
@@ -715,6 +722,10 @@ int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 		WriteStr( sScriptContext );
 	}
 	WriteStr( pszMsg );
+	if ( !hasTrailingNewLine )
+	{
+		WriteStr("\n");
+	}
 
 	}
 	catch (...)
