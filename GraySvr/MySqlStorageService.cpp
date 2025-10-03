@@ -65,6 +65,25 @@ namespace
         static const int SCHEMA_WORLD_SAVEFLAG_ROW = 4;
         static const int CURRENT_SCHEMA_VERSION = 4;
 
+        bool EqualsNoCase( const std::string & lhs, const std::string & rhs )
+        {
+                if ( lhs.size() != rhs.size())
+                {
+                        return false;
+                }
+
+                for ( size_t i = 0; i < lhs.size(); ++i )
+                {
+                        if ( std::tolower( static_cast<unsigned char>( lhs[i] )) !=
+                                std::tolower( static_cast<unsigned char>( rhs[i] )))
+                        {
+                                return false;
+                        }
+                }
+
+                return true;
+        }
+
         std::string FormatWorldObjectContext( const CObjBase & object )
         {
                 std::ostringstream ss;
@@ -1139,12 +1158,18 @@ namespace Repository
                                         [&]( Storage::IDatabaseStatement & statement, size_t index )
                                 {
                                         const WorldObjectRelationRecord & record = records[index];
-                                        statement.BindUInt64( 0, record.m_ParentUid );
-                                        statement.BindUInt64( 1, record.m_ChildUid );
-                                        statement.BindString( 2, record.m_Relation );
+                                        size_t parameterIndex = 0;
+                                        statement.BindUInt64( parameterIndex++, record.m_ParentUid );
+                                        statement.BindUInt64( parameterIndex++, record.m_ChildUid );
+
+                                        for ( size_t columnIndex = 0; columnIndex < m_RelationColumns.size(); ++columnIndex )
+                                        {
+                                                statement.BindString( parameterIndex++, record.m_Relation );
+                                        }
+
                                         if ( m_HasSequence )
                                         {
-                                                statement.BindInt64( 3, record.m_Sequence );
+                                                statement.BindInt64( parameterIndex++, record.m_Sequence );
                                         }
                                 },
                                         [&]( const Storage::DatabaseError & ex )
@@ -1189,24 +1214,59 @@ namespace Repository
                                 m_RelationColumn = "relation";
                         }
                         m_HasSequence = m_Storage.HasWorldRelationSequenceColumn();
+
+                        m_RelationColumns.clear();
+                        m_RelationColumns.push_back( m_RelationColumn );
+
+                        if ( m_Storage.ShouldPopulateWorldRelationTypeColumn() &&
+                                !EqualsNoCase( m_RelationColumn, "type" ))
+                        {
+                                m_RelationColumns.push_back( "type" );
+                        }
+
+                        if ( m_Storage.ShouldPopulateWorldRelationRelationTypeColumn() &&
+                                !EqualsNoCase( m_RelationColumn, "relation_type" ))
+                        {
+                                if ( std::none_of( m_RelationColumns.begin(), m_RelationColumns.end(),
+                                        [&]( const std::string & existing )
+                                {
+                                        return EqualsNoCase( existing, "relation_type" );
+                                }))
+                                {
+                                        m_RelationColumns.push_back( "relation_type" );
+                                }
+                        }
                 }
 
                 std::string BuildInsertQuery() const
                 {
                         const std::string quoted = "`" + m_Table + "`";
-                        const std::string relationColumn = "`" + m_RelationColumn + "`";
-                        if ( m_HasSequence )
+                        std::ostringstream columns;
+                        std::ostringstream values;
+
+                        columns << "`parent_uid`,`child_uid`";
+                        values << "?,?";
+
+                        for ( const std::string & column : m_RelationColumns )
                         {
-                                return "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`," + relationColumn + ",`sequence`) VALUES (?,?,?,?);";
+                                columns << ",`" << column << "`";
+                                values << ",?";
                         }
 
-                        return "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`," + relationColumn + ") VALUES (?,?,?);";
+                        if ( m_HasSequence )
+                        {
+                                columns << ",`sequence`";
+                                values << ",?";
+                        }
+
+                        return "INSERT INTO " + quoted + " (" + columns.str() + ") VALUES (" + values.str() + ");";
                 }
 
                 std::string m_Table;
                 std::string m_DeleteQuery;
                 std::string m_RelationColumn;
                 bool m_HasSequence;
+                std::vector<std::string> m_RelationColumns;
         };
 }
 }
@@ -1480,13 +1540,17 @@ CGString MySqlStorageService::UniversalRecord::BuildUpdate( const CGString & whe
 
 MySqlStorageService::MySqlStorageService() :
         m_tLastAccountSync( 0 ),
-        m_fWorldRelationHasSequenceColumn( true )
+        m_fWorldRelationHasSequenceColumn( true ),
+        m_fWorldRelationPopulateTypeColumn( false ),
+        m_fWorldRelationPopulateRelationTypeColumn( false )
 {
         m_sTablePrefix.Empty();
         m_sDatabaseName.Empty();
         m_sTableCharset.Empty();
         m_sTableCollation.Empty();
         m_sWorldRelationColumnName = "relation";
+        m_fWorldRelationPopulateTypeColumn = false;
+        m_fWorldRelationPopulateRelationTypeColumn = false;
 }
 
 MySqlStorageService::~MySqlStorageService()
@@ -1620,6 +1684,8 @@ void MySqlStorageService::UpdateWorldRelationSchemaCache()
 {
         m_sWorldRelationColumnName = "relation";
         m_fWorldRelationHasSequenceColumn = true;
+        m_fWorldRelationPopulateTypeColumn = false;
+        m_fWorldRelationPopulateRelationTypeColumn = false;
 
         const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
         if ( sRelations.IsEmpty())
@@ -1632,10 +1698,18 @@ void MySqlStorageService::UpdateWorldRelationSchemaCache()
                 return;
         }
 
+        const bool fHasTypeColumn = ColumnExists( sRelations, "type" );
+        const bool fHasRelationTypeColumn = ColumnExists( sRelations, "relation_type" );
+
         bool fRelationColumnExists = ColumnExists( sRelations, "relation" );
         if ( !fRelationColumnExists )
         {
-                if ( ColumnExists( sRelations, "type" ))
+                if ( fHasRelationTypeColumn )
+                {
+                        m_sWorldRelationColumnName = "relation_type";
+                        fRelationColumnExists = true;
+                }
+                else if ( fHasTypeColumn )
                 {
                         m_sWorldRelationColumnName = "type";
                         fRelationColumnExists = true;
@@ -1645,6 +1719,18 @@ void MySqlStorageService::UpdateWorldRelationSchemaCache()
         if ( !fRelationColumnExists )
         {
                 m_sWorldRelationColumnName.Empty();
+                m_fWorldRelationHasSequenceColumn = ColumnExists( sRelations, "sequence" );
+                return;
+        }
+
+        if ( fHasTypeColumn && ( m_sWorldRelationColumnName.CompareNoCase( "type" ) != 0 ))
+        {
+                m_fWorldRelationPopulateTypeColumn = true;
+        }
+
+        if ( fHasRelationTypeColumn && ( m_sWorldRelationColumnName.CompareNoCase( "relation_type" ) != 0 ))
+        {
+                m_fWorldRelationPopulateRelationTypeColumn = true;
         }
 
         m_fWorldRelationHasSequenceColumn = ColumnExists( sRelations, "sequence" );
@@ -1682,6 +1768,16 @@ bool MySqlStorageService::InitializeWorldRelationSchema()
                 return true;
         }
 
+        if ( m_sWorldRelationColumnName.CompareNoCase( "relation_type" ) == 0 )
+        {
+                if ( !fEnsuredRelationColumn )
+                {
+                        g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                                "world_object_relations table is missing the `relation` column; continuing with legacy `relation_type` data." );
+                }
+                return true;
+        }
+
         return true;
 }
 
@@ -1699,16 +1795,30 @@ bool MySqlStorageService::EnsureWorldRelationColumn()
         }
 
         const bool fHasLegacyTypeColumn = ColumnExists( sRelations, "type" );
+        const bool fHasLegacyRelationTypeColumn = ColumnExists( sRelations, "relation_type" );
+        const char * pszLegacyColumn = NULL;
+
         if ( fHasLegacyTypeColumn )
+        {
+                pszLegacyColumn = "type";
+        }
+        else if ( fHasLegacyRelationTypeColumn )
+        {
+                pszLegacyColumn = "relation_type";
+        }
+
+        if ( pszLegacyColumn != NULL )
         {
                 CGString sRenameQuery;
                 sRenameQuery.Format(
-                        "ALTER TABLE `%s` CHANGE COLUMN `type` `relation` VARCHAR(32) NOT NULL;",
-                        (const char *) sRelations );
+                        "ALTER TABLE `%s` CHANGE COLUMN `%s` `relation` VARCHAR(32) NOT NULL;",
+                        (const char *) sRelations,
+                        pszLegacyColumn );
                 if ( ExecuteQuery( sRenameQuery ))
                 {
                         g_Log.Event( LOGM_SAVE | LOGL_WARN,
-                                "Renamed legacy `type` column to `relation` in world_object_relations table." );
+                                "Renamed legacy `%s` column to `relation` in world_object_relations table.",
+                                pszLegacyColumn );
                         if ( ColumnExists( sRelations, "relation" ))
                         {
                                 return true;
@@ -1717,7 +1827,9 @@ bool MySqlStorageService::EnsureWorldRelationColumn()
                 else
                 {
                         g_Log.Event( LOGM_SAVE | LOGL_WARN,
-                                "Failed to rename legacy `type` column to `relation` in world_object_relations table; attempting to add new column instead." );
+                                "Failed to rename legacy `%s` column to `relation` in world_object_relations table; continuing with legacy schema.",
+                                pszLegacyColumn );
+                        return false;
                 }
         }
 
@@ -1731,18 +1843,9 @@ bool MySqlStorageService::EnsureWorldRelationColumn()
                         "Added missing `relation` column to world_object_relations table automatically." );
 
                 CGString sPopulateRelation;
-                if ( fHasLegacyTypeColumn )
-                {
-                        sPopulateRelation.Format(
-                                "UPDATE `%s` SET `relation` = `type` WHERE `relation` IS NULL OR `relation` = '';",
-                                (const char *) sRelations );
-                }
-                else
-                {
-                        sPopulateRelation.Format(
-                                "UPDATE `%s` SET `relation` = 'container' WHERE `relation` IS NULL OR `relation` = '';",
-                                (const char *) sRelations );
-                }
+                sPopulateRelation.Format(
+                        "UPDATE `%s` SET `relation` = 'container' WHERE `relation` IS NULL OR `relation` = '';",
+                        (const char *) sRelations );
                 ExecuteQuery( sPopulateRelation );
 
                 return ColumnExists( sRelations, "relation" );
@@ -1779,8 +1882,22 @@ bool MySqlStorageService::HandleMissingWorldRelationColumn()
 
         if ( !fEnsuredRelationColumn )
         {
-                g_Log.Event( LOGM_SAVE | LOGL_WARN,
-                        "Falling back to legacy `type` column for world_object_relations after insert failure." );
+                const char * pszColumn = NULL;
+                if ( m_sWorldRelationColumnName.CompareNoCase( "type" ) == 0 )
+                {
+                        pszColumn = "type";
+                }
+                else if ( m_sWorldRelationColumnName.CompareNoCase( "relation_type" ) == 0 )
+                {
+                        pszColumn = "relation_type";
+                }
+
+                if ( pszColumn != NULL )
+                {
+                        g_Log.Event( LOGM_SAVE | LOGL_WARN,
+                                "Falling back to legacy `%s` column for world_object_relations after insert failure.",
+                                pszColumn );
+                }
         }
 
         return true;
@@ -3476,27 +3593,32 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         {
                 fResult = false;
         }
-        else if ( serializationResult == SerializationResult::Success )
+        else
         {
                 if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+                else if (( serializationResult == SerializationResult::Success ) &&
+                        ( ! UpsertWorldObjectData( pObject, sSerialized )))
                 {
                         LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
                         fResult = false;
                 }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
+
+                if ( fResult )
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                        fResult = false;
+                        if ( ! RefreshWorldObjectComponents( pObject ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                                fResult = false;
+                        }
+                        else if ( ! RefreshWorldObjectRelations( pObject ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                                fResult = false;
+                        }
                 }
         }
 
