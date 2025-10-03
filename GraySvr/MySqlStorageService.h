@@ -322,7 +322,6 @@ private:
         };
 
         bool PersistWorldObject( CObjBase * pObject, std::unordered_set<unsigned long long> & visited );
-        bool PersistWorldObjectInternal( CObjBase * pObject, std::unordered_set<unsigned long long> & visited, bool includeContents );
         SerializationResult SerializeWorldObject( CObjBase * pObject, CGString & outSerialized ) const;
         bool UpsertWorldObjectMeta( CObjBase * pObject, const CGString & serialized );
         bool UpsertWorldObjectData( const CObjBase * pObject, const CGString & serialized );
