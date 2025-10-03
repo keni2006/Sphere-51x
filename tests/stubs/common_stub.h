@@ -31,10 +31,6 @@
 #define COUNTOF(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
-#ifndef TICK_PER_SEC
-#define TICK_PER_SEC 1
-#endif
-
 enum LOGL_TYPE : unsigned short
 {
         LOGL_FATAL = 1,
