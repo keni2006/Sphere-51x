@@ -838,6 +838,88 @@ namespace Repository
                         return false;
                 }
 
+                bool ExecuteExistsQuery( const std::string & query,
+                        const std::function<void(Storage::IDatabaseStatement &)> & binder,
+                        bool & outExists ) const
+                {
+                        outExists = false;
+
+                        try
+                        {
+                                Storage::MySql::MySqlConnectionPool::ScopedConnection scoped;
+                                Storage::MySql::MySqlConnection * connection = m_Storage.GetActiveConnection( scoped );
+                                if ( connection == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "MySQL prepared statement attempted without an active connection." );
+                                        return false;
+                                }
+
+                                std::unique_ptr<Storage::IDatabaseStatement> statement = connection->Prepare( query );
+                                if ( binder )
+                                {
+                                        binder( *statement );
+                                }
+                                statement->Execute();
+
+                                Storage::MySql::MySqlStatement * mysqlStatement =
+                                        dynamic_cast<Storage::MySql::MySqlStatement *>( statement.get());
+                                if ( mysqlStatement == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "Prepared statement execution did not return a MySQL statement handle." );
+                                        return false;
+                                }
+
+                                MYSQL_STMT * handle = mysqlStatement->GetHandle();
+                                if ( handle == NULL )
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                                "MySQL prepared statement handle was null." );
+                                        return false;
+                                }
+
+                                if ( mysql_stmt_store_result( handle ) != 0 )
+                                {
+                                        unsigned int code = mysql_stmt_errno( handle );
+                                        const char * message = mysql_stmt_error( handle );
+                                        throw Storage::DatabaseError( "mysql_stmt_store_result", code,
+                                                message != NULL ? message : "" );
+                                }
+
+                                const int fetchResult = mysql_stmt_fetch( handle );
+                                if ( fetchResult == 0 )
+                                {
+                                        mysql_stmt_free_result( handle );
+                                        outExists = true;
+                                        return true;
+                                }
+
+                                if ( fetchResult == MYSQL_NO_DATA )
+                                {
+                                        mysql_stmt_free_result( handle );
+                                        outExists = false;
+                                        return true;
+                                }
+
+                                unsigned int code = mysql_stmt_errno( handle );
+                                const char * message = mysql_stmt_error( handle );
+                                mysql_stmt_free_result( handle );
+                                throw Storage::DatabaseError( "mysql_stmt_fetch", code, message != NULL ? message : "" );
+                        }
+                        catch ( const Storage::DatabaseError & ex )
+                        {
+                                LogDatabaseError( ex, LOGL_ERROR );
+                        }
+                        catch ( const std::bad_alloc & )
+                        {
+                                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                        "Out of memory while preparing MySQL statement." );
+                        }
+
+                        return false;
+                }
+
                 MySqlStorageService & m_Storage;
         };
 
@@ -870,6 +952,7 @@ namespace Repository
                         m_Table( static_cast<const char *>( table ))
                 {
                         const std::string quoted = "`" + m_Table + "`";
+                        m_ExistsQuery = "SELECT 1 FROM " + quoted + " WHERE `uid` = ? LIMIT 1;";
                         m_UpsertQuery =
                                 "INSERT INTO " + quoted +
                                 " (`uid`,`object_type`,`object_subtype`,`name`,`account_id`,`container_uid`,`top_level_uid`,`position_x`,`position_y`,`position_z`)";
@@ -885,6 +968,15 @@ namespace Repository
                         m_UpsertQuery += "`position_z`=VALUES(`position_z`);";
 
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `uid` = ?;";
+                }
+
+                bool Exists( unsigned long long uid, bool & outExists )
+                {
+                        return ExecuteExistsQuery( m_ExistsQuery,
+                                [&]( Storage::IDatabaseStatement & statement )
+                                {
+                                        statement.BindUInt64( 0, uid );
+                                }, outExists );
                 }
 
                 bool Upsert( const WorldObjectMetaRecord & record )
@@ -970,6 +1062,7 @@ namespace Repository
 
         private:
                 std::string m_Table;
+                std::string m_ExistsQuery;
                 std::string m_UpsertQuery;
                 std::string m_DeleteQuery;
         };
@@ -1029,14 +1122,27 @@ namespace Repository
         class WorldObjectComponentRepository : public PreparedStatementRepository
         {
         public:
-                WorldObjectComponentRepository( MySqlStorageService & storage, const CGString & table ) :
+                WorldObjectComponentRepository( MySqlStorageService & storage, const CGString & table,
+                        bool hasSequenceColumn ) :
                         PreparedStatementRepository( storage ),
-                        m_Table( static_cast<const char *>( table ))
+                        m_Table( static_cast<const char *>( table )),
+                        m_HasSequenceColumn( hasSequenceColumn )
                 {
                         const std::string quoted = "`" + m_Table + "`";
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `object_uid` = ?;";
-                        m_InsertQuery =
-                                "INSERT INTO " + quoted + " (`object_uid`,`component`,`name`,`sequence`,`value`) VALUES (?,?,?,?,?);";
+
+                        if ( m_HasSequenceColumn )
+                        {
+                                m_InsertQuery =
+                                        "INSERT INTO " + quoted +
+                                        " (`object_uid`,`component`,`name`,`sequence`,`value`) VALUES (?,?,?,?,?);";
+                        }
+                        else
+                        {
+                                m_InsertQuery =
+                                        "INSERT INTO " + quoted +
+                                        " (`object_uid`,`component`,`name`,`value`) VALUES (?,?,?,?);";
+                        }
                 }
 
                 bool DeleteForObject( unsigned long long uid )
@@ -1053,26 +1159,37 @@ namespace Repository
                                 [&]( Storage::IDatabaseStatement & statement, size_t index )
                         {
                                 const WorldObjectComponentRecord & record = records[index];
-                                statement.BindUInt64( 0, record.m_ObjectUid );
-                                statement.BindString( 1, record.m_Component );
-                                statement.BindString( 2, record.m_Name );
-                                statement.BindInt64( 3, record.m_Sequence );
+                                size_t paramIndex = 0;
+                                statement.BindUInt64( paramIndex++, record.m_ObjectUid );
+                                statement.BindString( paramIndex++, record.m_Component );
+                                statement.BindString( paramIndex++, record.m_Name );
+
+                                if ( m_HasSequenceColumn )
+                                {
+                                        statement.BindInt64( paramIndex++, record.m_Sequence );
+                                }
 
                                 if ( record.m_HasValue )
                                 {
-                                        statement.BindString( 4, record.m_Value );
+                                        statement.BindString( paramIndex++, record.m_Value );
                                 }
                                 else
                                 {
-                                        statement.BindNull( 4 );
+                                        statement.BindNull( paramIndex++ );
                                 }
                         });
+                }
+
+                bool HasSequenceColumn() const
+                {
+                        return m_HasSequenceColumn;
                 }
 
         private:
                 std::string m_Table;
                 std::string m_DeleteQuery;
                 std::string m_InsertQuery;
+                bool m_HasSequenceColumn;
         };
 
         struct WorldObjectRelationRecord
@@ -1086,14 +1203,31 @@ namespace Repository
         class WorldObjectRelationRepository : public PreparedStatementRepository
         {
         public:
-                WorldObjectRelationRepository( MySqlStorageService & storage, const CGString & table ) :
+                WorldObjectRelationRepository( MySqlStorageService & storage, const CGString & table,
+                        const std::string & relationColumn, bool hasSequenceColumn ) :
                         PreparedStatementRepository( storage ),
-                        m_Table( static_cast<const char *>( table ))
+                        m_Table( static_cast<const char *>( table )),
+                        m_RelationColumn( relationColumn ),
+                        m_HasSequenceColumn( hasSequenceColumn )
                 {
                         const std::string quoted = "`" + m_Table + "`";
                         m_DeleteQuery = "DELETE FROM " + quoted + " WHERE `child_uid` = ?;";
-                        m_InsertQuery =
-                                "INSERT INTO " + quoted + " (`parent_uid`,`child_uid`,`relation`,`sequence`) VALUES (?,?,?,?);";
+
+                        std::string insertColumns = "(`parent_uid`,`child_uid`,`" + m_RelationColumn + "`";
+                        std::string insertValues = "VALUES (?,?,?";
+
+                        if ( m_HasSequenceColumn )
+                        {
+                                insertColumns += ",`sequence`)";
+                                insertValues += ",?)";
+                        }
+                        else
+                        {
+                                insertColumns += ")";
+                                insertValues += ")";
+                        }
+
+                        m_InsertQuery = "INSERT INTO " + quoted + " " + insertColumns + " " + insertValues + ";";
                 }
 
                 bool DeleteForObject( unsigned long long uid )
@@ -1110,17 +1244,34 @@ namespace Repository
                                 [&]( Storage::IDatabaseStatement & statement, size_t index )
                         {
                                 const WorldObjectRelationRecord & record = records[index];
-                                statement.BindUInt64( 0, record.m_ParentUid );
-                                statement.BindUInt64( 1, record.m_ChildUid );
-                                statement.BindString( 2, record.m_Relation );
-                                statement.BindInt64( 3, record.m_Sequence );
+                                size_t paramIndex = 0;
+                                statement.BindUInt64( paramIndex++, record.m_ParentUid );
+                                statement.BindUInt64( paramIndex++, record.m_ChildUid );
+                                statement.BindString( paramIndex++, record.m_Relation );
+
+                                if ( m_HasSequenceColumn )
+                                {
+                                        statement.BindInt64( paramIndex++, record.m_Sequence );
+                                }
                         });
+                }
+
+                const std::string & GetRelationColumn() const
+                {
+                        return m_RelationColumn;
+                }
+
+                bool HasSequenceColumn() const
+                {
+                        return m_HasSequenceColumn;
                 }
 
         private:
                 std::string m_Table;
                 std::string m_DeleteQuery;
                 std::string m_InsertQuery;
+                std::string m_RelationColumn;
+                bool m_HasSequenceColumn;
         };
 }
 }
@@ -3206,31 +3357,128 @@ bool MySqlStorageService::PersistWorldObject( CObjBase * pObject, std::unordered
         bool fResult = true;
         CGString sSerialized;
         const SerializationResult serializationResult = SerializeWorldObject( pObject, sSerialized );
+
+        auto persistSerialized = [&]( const CGString & serializedData ) -> bool
+        {
+                if ( ! UpsertWorldObjectMeta( pObject, serializedData ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
+                        return false;
+                }
+                if ( ! UpsertWorldObjectData( pObject, serializedData ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
+                        return false;
+                }
+                if ( ! RefreshWorldObjectComponents( pObject ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
+                        return false;
+                }
+                if ( ! RefreshWorldObjectRelations( pObject ))
+                {
+                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
+                        return false;
+                }
+                return true;
+        };
+
         if ( serializationResult == SerializationResult::Failed )
         {
                 fResult = false;
         }
         else if ( serializationResult == SerializationResult::Success )
         {
-                if ( ! UpsertWorldObjectMeta( pObject, sSerialized ))
+                if ( ! persistSerialized( sSerialized ))
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "metadata upsert", "UpsertWorldObjectMeta returned false" );
                         fResult = false;
                 }
-                else if ( ! UpsertWorldObjectData( pObject, sSerialized ))
+        }
+        else if ( serializationResult == SerializationResult::Skipped )
+        {
+                if ( pObject->IsChar())
                 {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "data upsert", "UpsertWorldObjectData returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectComponents( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "component refresh", "RefreshWorldObjectComponents returned false" );
-                        fResult = false;
-                }
-                else if ( ! RefreshWorldObjectRelations( pObject ))
-                {
-                        LogPersistenceFailure( *pObject, LOGL_ERROR, "relation refresh", "RefreshWorldObjectRelations returned false" );
-                        fResult = false;
+                        const CGString sWorldObjects = GetPrefixedTableName( "world_objects" );
+                        Storage::Repository::WorldObjectMetaRepository repository( *this, sWorldObjects );
+
+                        bool metaExists = false;
+                        if ( ! repository.Exists( uid, metaExists ))
+                        {
+                                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize",
+                                        "failed to verify existing metadata" );
+                                fResult = false;
+                        }
+                        else if ( !metaExists )
+                        {
+                                CChar * pChar = dynamic_cast<CChar*>( pObject );
+                                bool originalSaveParity = false;
+                                bool parityModified = false;
+                                const bool originalWorldParity = g_World.m_fSaveParity;
+                                bool worldParityModified = false;
+
+                                if ( pChar != NULL )
+                                {
+                                        originalSaveParity = pChar->IsStat( STATF_SaveParity );
+                                        pChar->ModStat( STATF_SaveParity, !originalSaveParity );
+                                        parityModified = ( pChar->IsStat( STATF_SaveParity ) != originalSaveParity );
+                                }
+
+                                auto restoreParity = [&]()
+                                {
+                                        if ( pChar != NULL )
+                                        {
+                                                if ( pChar->IsStat( STATF_SaveParity ) != originalSaveParity )
+                                                {
+                                                        pChar->ModStat( STATF_SaveParity, originalSaveParity );
+                                                }
+                                                parityModified = false;
+                                        }
+
+                                        if ( worldParityModified )
+                                        {
+                                                g_World.m_fSaveParity = originalWorldParity;
+                                                worldParityModified = false;
+                                        }
+                                };
+
+                                CGString sReserialized;
+                                SerializationResult retryResult = SerializeWorldObject( pObject, sReserialized );
+
+                                if ( retryResult == SerializationResult::Skipped && pChar != NULL )
+                                {
+                                        if ( g_World.m_fSaveParity == pChar->IsStat( STATF_SaveParity ))
+                                        {
+                                                g_World.m_fSaveParity = !originalWorldParity;
+                                                worldParityModified = ( g_World.m_fSaveParity != originalWorldParity );
+
+                                                pChar->ModStat( STATF_SaveParity, !g_World.m_fSaveParity );
+                                                parityModified = ( pChar->IsStat( STATF_SaveParity ) != originalSaveParity );
+
+                                                retryResult = SerializeWorldObject( pObject, sReserialized );
+                                        }
+                                }
+
+                                if ( retryResult == SerializationResult::Success )
+                                {
+                                        restoreParity();
+
+                                        if ( ! persistSerialized( sReserialized ))
+                                        {
+                                                fResult = false;
+                                        }
+                                }
+                                else
+                                {
+                                        restoreParity();
+
+                                        const char * reason = ( retryResult == SerializationResult::Skipped ) ?
+                                                "retry after STATF_SaveParity toggle returned skipped" :
+                                                "retry after STATF_SaveParity toggle failed";
+
+                                        LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
+                                        fResult = false;
+                                }
+                        }
                 }
         }
 
@@ -3488,9 +3736,18 @@ bool MySqlStorageService::RefreshWorldObjectComponents( const CObjBase * pObject
         }
 
         const CGString sComponents = GetPrefixedTableName( "world_object_components" );
+
+        bool hasSequenceColumn = ColumnExists( sComponents, "sequence" );
+        if ( !hasSequenceColumn )
+        {
+                EnsureColumnExists( sComponents, "sequence",
+                        "`sequence` INT NOT NULL DEFAULT 0 AFTER `name`" );
+                hasSequenceColumn = ColumnExists( sComponents, "sequence" );
+        }
+
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
 
-        Storage::Repository::WorldObjectComponentRepository repository( *this, sComponents );
+        Storage::Repository::WorldObjectComponentRepository repository( *this, sComponents, hasSequenceColumn );
         if ( !repository.DeleteForObject( uid ))
         {
                 return false;
@@ -3565,9 +3822,43 @@ bool MySqlStorageService::RefreshWorldObjectRelations( const CObjBase * pObject 
         }
 
         const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+
+        std::string relationColumn( "relation" );
+        if ( !ColumnExists( sRelations, relationColumn.c_str()))
+        {
+                if ( ColumnExists( sRelations, "relation_type" ))
+                {
+                        relationColumn = "relation_type";
+                }
+                else if ( ColumnExists( sRelations, "type" ))
+                {
+                        relationColumn = "type";
+                }
+                else if ( EnsureColumnExists( sRelations, "relation",
+                        "`relation` VARCHAR(32) NOT NULL DEFAULT 'container' AFTER `child_uid`" ))
+                {
+                        relationColumn = "relation";
+                }
+                else
+                {
+                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                "World object relations table is missing a relation column and could not be upgraded." );
+                        return false;
+                }
+        }
+
+        bool hasSequenceColumn = ColumnExists( sRelations, "sequence" );
+        if ( !hasSequenceColumn )
+        {
+                std::string definition = "`sequence` INT NOT NULL DEFAULT 0 AFTER `" + relationColumn + "`";
+                EnsureColumnExists( sRelations, "sequence", definition.c_str());
+                hasSequenceColumn = ColumnExists( sRelations, "sequence" );
+        }
+
         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
 
-        Storage::Repository::WorldObjectRelationRepository repository( *this, sRelations );
+        Storage::Repository::WorldObjectRelationRepository repository( *this, sRelations,
+                relationColumn, hasSequenceColumn );
         if ( !repository.DeleteForObject( uid ))
         {
                 return false;
@@ -3635,12 +3926,25 @@ bool MySqlStorageService::ApplyMigration_2_3()
 
 bool MySqlStorageService::EnsureColumnExists(const CGString & table, const char * column, const char * definition)
 {
+#if defined(UNIT_TEST) && !defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
+        (void) table;
+        (void) column;
+        (void) definition;
+        return true;
+#else
         return m_SchemaManager.EnsureColumnExists(*this, table, column, definition);
+#endif
 }
 
 bool MySqlStorageService::ColumnExists(const CGString & table, const char * column) const
 {
+#if defined(UNIT_TEST) && !defined(UNIT_TEST_MYSQL_IMPLEMENTATION)
+        (void) table;
+        (void) column;
+        return true;
+#else
         return m_SchemaManager.ColumnExists( const_cast<MySqlStorageService &>(*this), table, column );
+#endif
 }
 
 bool MySqlStorageService::InsertOrUpdateSchemaValue(int id, int value)
