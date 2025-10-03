@@ -26,6 +26,7 @@ namespace MySql
                 ~ConnectionManager();
 
                 bool Connect( const CServerMySQLConfig & config, ConnectionDetails & outDetails );
+                bool Reconnect( ConnectionDetails & outDetails );
                 void Disconnect();
 
                 bool IsConnected() const;

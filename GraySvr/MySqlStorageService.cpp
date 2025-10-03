@@ -1840,34 +1840,111 @@ bool MySqlStorageService::Query( const CGString & query, std::unique_ptr<Storage
                 return false;
         }
 
-        try
+        for ( int attempt = 0; attempt < 2; ++attempt )
         {
-                Storage::MySql::MySqlConnectionPool::ScopedConnection scopedConnection;
-                Storage::MySql::MySqlConnection * connection = GetActiveConnection( scopedConnection );
-                if ( connection == NULL )
+                try
                 {
-                        return false;
-                }
+                        Storage::MySql::MySqlConnectionPool::ScopedConnection scopedConnection;
+                        Storage::MySql::MySqlConnection * connection = GetActiveConnection( scopedConnection );
+                        if ( connection == NULL )
+                        {
+                                return false;
+                        }
 
-                const char * pszQuery = (const char *) query;
-                if ( pResult != NULL )
-                {
-                        std::unique_ptr<Storage::IDatabaseResult> result = connection->Query( pszQuery );
+                        const char * pszQuery = (const char *) query;
                         if ( pResult != NULL )
                         {
-                                *pResult = std::move( result );
+                                std::unique_ptr<Storage::IDatabaseResult> result = connection->Query( pszQuery );
+                                if ( pResult != NULL )
+                                {
+                                        *pResult = std::move( result );
+                                }
                         }
+                        else
+                        {
+                                connection->Execute( pszQuery );
+                        }
+                        return true;
                 }
-                else
+                catch ( const Storage::DatabaseError & ex )
                 {
-                        connection->Execute( pszQuery );
+                        LogDatabaseError( ex, LOGL_ERROR );
+
+                        if (( attempt == 0 ) && ShouldAttemptReconnect( ex.GetCode()))
+                        {
+                                g_Log.Event( GetMySQLErrorLogMask( LOGL_WARN ),
+                                        "Attempting to reconnect to MySQL server after error %u.",
+                                        ex.GetCode());
+
+                                if ( TryReconnect())
+                                {
+                                        g_Log.Event( GetMySQLErrorLogMask( LOGL_WARN ),
+                                                "MySQL reconnection succeeded; retrying query." );
+                                        continue;
+                                }
+
+                                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ),
+                                        "MySQL reconnection failed; query will not be retried." );
+                        }
+
+                        g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s", (const char *) query );
+                        return false;
                 }
-                return true;
         }
-        catch ( const Storage::DatabaseError & ex )
+
+        return false;
+}
+
+bool MySqlStorageService::TryReconnect()
+{
+        const Storage::DatabaseConfig & config = m_ConnectionManager.GetConfig();
+        if ( !config.m_Enable )
         {
-                LogDatabaseError( ex, LOGL_ERROR );
-                g_Log.Event( GetMySQLErrorLogMask( LOGL_ERROR ), "Failed query: %s", (const char *) query );
+                return false;
+        }
+
+        Storage::MySql::ConnectionManager::ConnectionDetails details;
+        if ( !m_ConnectionManager.Reconnect( details ))
+        {
+                return false;
+        }
+
+        if ( !details.m_TableCharset.empty())
+        {
+                m_sTableCharset = details.m_TableCharset.c_str();
+        }
+        else
+        {
+                m_sTableCharset.Empty();
+        }
+
+        if ( !details.m_TableCollation.empty())
+        {
+                m_sTableCollation = details.m_TableCollation.c_str();
+        }
+        else
+        {
+                m_sTableCollation.Empty();
+        }
+
+        return true;
+}
+
+bool MySqlStorageService::ShouldAttemptReconnect( unsigned int errorCode ) const
+{
+        switch ( errorCode )
+        {
+                case 0:
+                case CR_UNKNOWN_ERROR:
+                case CR_SERVER_GONE_ERROR:
+                case CR_SERVER_LOST:
+                case CR_SERVER_LOST_EXTENDED:
+                case CR_CONNECTION_ERROR:
+                case CR_CONN_HOST_ERROR:
+                case CR_MALFORMED_PACKET:
+                        return true;
+                default:
+                        break;
         }
         return false;
 }

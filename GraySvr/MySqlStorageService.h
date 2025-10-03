@@ -319,6 +319,8 @@ private:
 
         bool Query( const CGString & query, std::unique_ptr<Storage::IDatabaseResult> * pResult = NULL );
         bool ExecuteQuery( const CGString & query );
+        bool TryReconnect();
+        bool ShouldAttemptReconnect( unsigned int errorCode ) const;
         bool EnsureSchemaVersionTable();
         bool SetSchemaVersion( int version );
         bool ApplyMigration( int fromVersion );
