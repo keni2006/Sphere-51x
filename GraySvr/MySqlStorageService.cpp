@@ -23,6 +23,7 @@
 #include <cstring>
 #include <ctime>
 #include <atomic>
+#include <condition_variable>
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -31,6 +32,8 @@
 #endif
 #include <fstream>
 #include <iomanip>
+#include <mutex>
+#include <deque>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,9 +45,13 @@
 #include <string>
 #include <new>
 #include <stdexcept>
-
+#include <cerrno>
+#include <sys/types.h>
 #ifndef _WIN32
+#include <sys/stat.h>
 #include <unistd.h>
+#else
+#include <direct.h>
 #endif
 
 #include "Storage/MySql/MySqlConnection.h"
@@ -109,6 +116,48 @@ namespace
         private:
                 std::string m_Path;
         };
+
+        bool EnsureDirectoryExists( const CGString & path )
+        {
+                if ( path.IsEmpty())
+                {
+                        return false;
+                }
+
+                std::string normalized( (const char *) path );
+                while ( !normalized.empty())
+                {
+                        char ch = normalized.back();
+                        if ( ch == '\\' || ch == '/' )
+                        {
+                                normalized.pop_back();
+                                continue;
+                        }
+                        break;
+                }
+
+                if ( normalized.empty())
+                {
+                        return false;
+                }
+
+#ifdef _WIN32
+                int result = _mkdir( normalized.c_str());
+#else
+                int result = mkdir( normalized.c_str(), 0777 );
+#endif
+                if ( result == 0 )
+                {
+                        return true;
+                }
+
+                if ( errno == EEXIST )
+                {
+                        return true;
+                }
+
+                return false;
+        }
 
 bool GenerateTempScriptPath( std::string & outPath )
 {
@@ -505,6 +554,120 @@ namespace Storage
 
                         const unsigned long long uid = (unsigned long long) (UINT) pObject->GetUID();
                         g_Log.Event( LOGM_SAVE|LOGL_WARN, "Failed to persist object 0%llx to MySQL.", uid );
+                }
+        }
+
+        class SnapshotQueueProcessor
+        {
+        public:
+                explicit SnapshotQueueProcessor( MySqlStorageService & storage );
+                ~SnapshotQueueProcessor();
+
+                SnapshotQueueProcessor( const SnapshotQueueProcessor & ) = delete;
+                SnapshotQueueProcessor & operator=( const SnapshotQueueProcessor & ) = delete;
+
+                bool Schedule( const CGString & label );
+
+        private:
+                struct Request
+                {
+                        CGString m_Label;
+                };
+
+                void Run();
+
+                MySqlStorageService & m_Storage;
+                std::mutex m_Mutex;
+                std::condition_variable m_Condition;
+                std::deque<Request> m_Queue;
+                std::atomic_bool m_StopRequested;
+                std::thread m_Worker;
+        };
+
+        SnapshotQueueProcessor::SnapshotQueueProcessor( MySqlStorageService & storage ) :
+                m_Storage( storage ),
+                m_StopRequested( false ),
+                m_Worker( [this]()
+                {
+                        Run();
+                })
+        {
+        }
+
+        SnapshotQueueProcessor::~SnapshotQueueProcessor()
+        {
+                m_StopRequested.store( true, std::memory_order_release );
+                m_Condition.notify_all();
+                if ( m_Worker.joinable())
+                {
+                        m_Worker.join();
+                }
+        }
+
+        bool SnapshotQueueProcessor::Schedule( const CGString & label )
+        {
+                if ( m_StopRequested.load( std::memory_order_acquire ))
+                {
+                        return false;
+                }
+
+                Request request;
+                request.m_Label = label;
+
+                {
+                        std::lock_guard<std::mutex> guard( m_Mutex );
+                        if ( m_StopRequested.load( std::memory_order_acquire ))
+                        {
+                                return false;
+                        }
+                        m_Queue.push_back( std::move( request ));
+                }
+
+                m_Condition.notify_one();
+                return true;
+        }
+
+        void SnapshotQueueProcessor::Run()
+        {
+                while ( true )
+                {
+                        Request request;
+                        {
+                                std::unique_lock<std::mutex> lock( m_Mutex );
+                                m_Condition.wait( lock, [this]() -> bool
+                                {
+                                        return m_StopRequested.load( std::memory_order_acquire ) || !m_Queue.empty();
+                                });
+
+                                if ( m_Queue.empty())
+                                {
+                                        if ( m_StopRequested.load( std::memory_order_acquire ))
+                                        {
+                                                return;
+                                        }
+                                        continue;
+                                }
+
+                                request = std::move( m_Queue.front());
+                                m_Queue.pop_front();
+                        }
+
+                        bool fSuccess = false;
+                        try
+                        {
+                                fSuccess = m_Storage.CreateWorldSnapshot( request.m_Label );
+                        }
+                        catch ( ... )
+                        {
+                                fSuccess = false;
+                        }
+
+                        if ( !fSuccess )
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_WARN,
+                                        "Failed to create MySQL world snapshot asynchronously for label '%s'.\n",
+                                        static_cast<const char *>( request.m_Label ));
+                        }
                 }
         }
 #endif // !UNIT_TEST
@@ -1201,6 +1364,7 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
 
 #ifndef UNIT_TEST
         m_DirtyProcessor = std::make_unique<Storage::DirtyQueueProcessor>( *this );
+        m_SnapshotProcessor = std::make_unique<Storage::SnapshotQueueProcessor>( *this );
 #endif
 
         return true;
@@ -1209,6 +1373,7 @@ bool MySqlStorageService::Start( const CServerMySQLConfig & config )
 void MySqlStorageService::Stop()
 {
 #ifndef UNIT_TEST
+        m_SnapshotProcessor.reset();
         m_DirtyProcessor.reset();
 #endif
         m_ConnectionManager.Disconnect();
@@ -2181,6 +2346,362 @@ bool MySqlStorageService::ClearServers()
         }
         const CGString sServers = GetPrefixedTableName( "servers" );
         return ClearTable( sServers );
+}
+
+bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
+{
+        if ( ! IsConnected())
+        {
+                return false;
+        }
+
+        const int savePeriodTicks = g_Serv.m_iSavePeriod;
+        int savePeriodSeconds = 0;
+        if ( savePeriodTicks > 0 )
+        {
+                savePeriodSeconds = savePeriodTicks / TICK_PER_SEC;
+        }
+        if ( savePeriodSeconds <= 0 )
+        {
+                savePeriodSeconds = 60;
+        }
+
+        time_t currentTime = ::time( NULL );
+        time_t alignedTime = currentTime;
+        if ( savePeriodSeconds > 0 )
+        {
+                alignedTime = ( currentTime / savePeriodSeconds ) * savePeriodSeconds;
+        }
+
+        struct tm timeInfo;
+#ifdef _WIN32
+        localtime_s( &timeInfo, &alignedTime );
+#else
+        localtime_r( &alignedTime, &timeInfo );
+#endif
+
+        CRealTime snapshotTime;
+        snapshotTime.m_Year = static_cast<BYTE>( timeInfo.tm_year );
+        snapshotTime.m_Month = static_cast<BYTE>( timeInfo.tm_mon );
+        snapshotTime.m_Day = static_cast<BYTE>( timeInfo.tm_mday );
+        snapshotTime.m_Hour = static_cast<BYTE>( timeInfo.tm_hour );
+        snapshotTime.m_Min = static_cast<BYTE>( timeInfo.tm_min );
+        snapshotTime.m_Sec = static_cast<BYTE>( timeInfo.tm_sec );
+
+        CGString sTimestampReadable;
+        sTimestampReadable.Format( "%04d-%02d-%02d %02d:%02d:%02d",
+                1900 + snapshotTime.m_Year, snapshotTime.m_Month + 1, snapshotTime.m_Day,
+                snapshotTime.m_Hour, snapshotTime.m_Min, snapshotTime.m_Sec );
+        CGString sTimestampSuffix;
+        sTimestampSuffix.Format( "%04d%02d%02d_%02d%02d%02d",
+                1900 + snapshotTime.m_Year, snapshotTime.m_Month + 1, snapshotTime.m_Day,
+                snapshotTime.m_Hour, snapshotTime.m_Min, snapshotTime.m_Sec );
+
+        std::string rawSuffix = (const char *) sTimestampSuffix;
+        if ( ! label.IsEmpty())
+        {
+                rawSuffix.push_back( '_' );
+                rawSuffix.append((const char *) label );
+        }
+
+        std::string sanitizedSuffix = SanitizeIdentifierToken( rawSuffix );
+        if ( sanitizedSuffix.empty())
+        {
+                sanitizedSuffix = SanitizeIdentifierToken( std::string((const char *) sTimestampSuffix ));
+        }
+        if ( sanitizedSuffix.empty())
+        {
+                sanitizedSuffix = "snapshot";
+        }
+
+        CGString sSuffix = sanitizedSuffix.c_str();
+
+        const CGString sAudit = GetPrefixedTableName( "world_object_audit" );
+        const CGString sRelations = GetPrefixedTableName( "world_object_relations" );
+        const CGString sComponents = GetPrefixedTableName( "world_object_components" );
+        const CGString sData = GetPrefixedTableName( "world_object_data" );
+        const CGString sObjects = GetPrefixedTableName( "world_objects" );
+        const CGString sGMPages = GetPrefixedTableName( "gm_pages" );
+        const CGString sServers = GetPrefixedTableName( "servers" );
+        const CGString sSectors = GetPrefixedTableName( "sectors" );
+        const CGString sSavepoints = GetPrefixedTableName( "world_savepoints" );
+
+        if ( ! g_Serv.m_sWorldBaseDir.IsEmpty())
+        {
+                if ( ! EnsureDirectoryExists( g_Serv.m_sWorldBaseDir ))
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                "World save base directory '%s' is not accessible for MySQL snapshots.\n",
+                                (const char *) g_Serv.m_sWorldBaseDir );
+                        return false;
+                }
+        }
+
+        CGString sSnapshotsBase = GetMergedFileName( g_Serv.m_sWorldBaseDir, "mysqlsnapshots" );
+        if ( ! EnsureDirectoryExists( sSnapshotsBase ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                        "Failed to ensure MySQL snapshot base directory '%s'.\n",
+                        (const char *) sSnapshotsBase );
+                return false;
+        }
+
+        CGString sSnapshotDir = GetMergedFileName( sSnapshotsBase, (const char *) sSuffix );
+        if ( ! EnsureDirectoryExists( sSnapshotDir ))
+        {
+                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                        "Failed to create MySQL snapshot directory '%s'.\n",
+                        (const char *) sSnapshotDir );
+                return false;
+        }
+
+        CGString sMetadataPath = GetMergedFileName( sSnapshotDir, "metadata.txt" );
+
+        struct SnapshotEntry
+        {
+                CGString m_Source;
+                const char * m_FileName;
+        };
+
+        std::vector<SnapshotEntry> tables;
+        tables.reserve( 8 );
+        tables.push_back({ sObjects, "world_objects.sql" });
+        tables.push_back({ sData, "world_object_data.sql" });
+        tables.push_back({ sComponents, "world_object_components.sql" });
+        tables.push_back({ sRelations, "world_object_relations.sql" });
+        tables.push_back({ sAudit, "world_object_audit.sql" });
+        tables.push_back({ sGMPages, "gm_pages.sql" });
+        tables.push_back({ sServers, "servers.sql" });
+        tables.push_back({ sSectors, "sectors.sql" });
+
+        CGString sSnapshotLabel;
+        if ( label.IsEmpty())
+        {
+                sSnapshotLabel.Format( "Snapshot %s", (const char *) sTimestampReadable );
+        }
+        else
+        {
+                sSnapshotLabel.Format( "%s (%s)", (const char *) label, (const char *) sTimestampReadable );
+        }
+
+        CGString sLabelValue = FormatStringValue( sSnapshotLabel );
+        CGString sCreatedAtValue = FormatDateTimeValue( snapshotTime );
+        CGString sChecksumValue( "NULL" );
+
+        return WithTransaction( [this, tables, sSavepoints, sLabelValue, sCreatedAtValue, sChecksumValue, sObjects, sSnapshotLabel,
+                sSnapshotDir, sMetadataPath, sTimestampReadable, savePeriodSeconds]() -> bool
+        {
+                auto dumpTableToFile = [this, &sSnapshotLabel, &sSnapshotDir]( const SnapshotEntry & entry ) -> bool
+                {
+                        CGString sFilePath = GetMergedFileName( sSnapshotDir, entry.m_FileName );
+                        std::ofstream out( (const char *) sFilePath, std::ios::out | std::ios::trunc );
+                        if ( ! out.is_open())
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Failed to open MySQL snapshot file '%s' for table '%s'.\n",
+                                        (const char *) sFilePath, (const char *) entry.m_Source );
+                                return false;
+                        }
+
+                        CGString sShow;
+                        sShow.Format( "SHOW CREATE TABLE `%s`;", (const char *) entry.m_Source );
+                        std::unique_ptr<Storage::IDatabaseResult> result;
+                        if ( ! Query( sShow, &result ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Failed to read schema for MySQL snapshot table '%s'.\n",
+                                        (const char *) entry.m_Source );
+                                return false;
+                        }
+
+                        if ( !result || !result->IsValid())
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Invalid schema result for MySQL snapshot table '%s'.\n",
+                                        (const char *) entry.m_Source );
+                                return false;
+                        }
+
+                        Storage::IDatabaseResult::Row schemaRow = result->FetchRow();
+                        if ( schemaRow == NULL || schemaRow[1] == NULL )
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Incomplete schema result for MySQL snapshot table '%s'.\n",
+                                        (const char *) entry.m_Source );
+                                return false;
+                        }
+
+                        out << "DROP TABLE IF EXISTS `" << (const char *) entry.m_Source << "`;\n";
+                        out << schemaRow[1] << ";\n\n";
+
+                        CGString sSelect;
+                        sSelect.Format( "SELECT * FROM `%s`;", (const char *) entry.m_Source );
+                        result.reset();
+                        if ( ! Query( sSelect, &result ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Failed to stream data for MySQL snapshot table '%s'.\n",
+                                        (const char *) entry.m_Source );
+                                return false;
+                        }
+
+                        if ( result && result->IsValid())
+                        {
+                                const unsigned int fieldCount = result->GetFieldCount();
+                                Storage::IDatabaseResult::Row row = NULL;
+                                while (( row = result->FetchRow()) != NULL )
+                                {
+                                        out << "INSERT INTO `" << (const char *) entry.m_Source << "` VALUES (";
+                                        for ( unsigned int i = 0; i < fieldCount; ++i )
+                                        {
+                                                if ( i > 0 )
+                                                {
+                                                        out << ',';
+                                                }
+                                                if ( row[i] == NULL )
+                                                {
+                                                        out << "NULL";
+                                                }
+                                                else
+                                                {
+                                                        CGString sValue( row[i] );
+                                                        CGString sEscaped = FormatStringValue( sValue );
+                                                        out << (const char *) sEscaped;
+                                                }
+                                        }
+                                        out << ");\n";
+                                }
+                        }
+
+                        out.flush();
+                        if ( !out.good())
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Failed while writing MySQL snapshot file '%s'.\n",
+                                        (const char *) sFilePath );
+                                return false;
+                        }
+
+                        return true;
+                };
+
+                for ( const SnapshotEntry & entry : tables )
+                {
+                        if ( ! dumpTableToFile( entry ))
+                        {
+                                return false;
+                        }
+                }
+
+                unsigned long long objectsCount = 0;
+                {
+                        CGString sCountQuery;
+                        sCountQuery.Format( "SELECT COUNT(*) FROM `%s`;", (const char *) sObjects );
+                        std::unique_ptr<Storage::IDatabaseResult> result;
+                        if ( ! Query( sCountQuery, &result ))
+                        {
+                                g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                        "Failed to count world objects for MySQL snapshot '%s'.\n",
+                                        (const char *) sSnapshotLabel );
+                                return false;
+                        }
+
+                        if ( result && result->IsValid())
+                        {
+                                Storage::IDatabaseResult::Row row = result->FetchRow();
+                                if ( row != NULL && row[0] != NULL )
+                                {
+#ifdef _WIN32
+                                        objectsCount = static_cast<unsigned long long>( _strtoui64( row[0], NULL, 10 ));
+#else
+                                        objectsCount = strtoull( row[0], NULL, 10 );
+#endif
+                                }
+                        }
+                }
+
+                auto sanitizeMetadataValue = []( const char * value ) -> std::string
+                {
+                        std::string sanitized = value ? value : "";
+                        for ( char & ch : sanitized )
+                        {
+                                if ( ch == '\r' || ch == '\n' )
+                                {
+                                        ch = ' ';
+                                }
+                        }
+                        return sanitized;
+                };
+
+                std::ofstream metadata( (const char *) sMetadataPath, std::ios::out | std::ios::trunc );
+                if ( ! metadata.is_open())
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                "Failed to open MySQL snapshot metadata file '%s'.\n",
+                                (const char *) sMetadataPath );
+                        return false;
+                }
+
+                metadata << "Label=" << sanitizeMetadataValue((const char *) sSnapshotLabel) << '\n';
+                metadata << "CreatedAt=" << sanitizeMetadataValue((const char *) sTimestampReadable) << '\n';
+                metadata << "ObjectsCount=" << objectsCount << '\n';
+                metadata << "SavePeriodSeconds=" << savePeriodSeconds << '\n';
+                metadata << "Directory=" << sanitizeMetadataValue((const char *) sSnapshotDir) << '\n';
+                metadata.flush();
+                if ( !metadata.good())
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                "Failed to write MySQL snapshot metadata file '%s'.\n",
+                                (const char *) sMetadataPath );
+                        return false;
+                }
+
+#ifdef _WIN32
+                CGString sInsertSavepoint;
+                sInsertSavepoint.Format(
+                        "INSERT INTO `%s` (`label`,`created_at`,`objects_count`,`checksum`) VALUES (%s,%s,%I64u,%s);",
+                        (const char *) sSavepoints, (const char *) sLabelValue, (const char *) sCreatedAtValue,
+                        objectsCount, (const char *) sChecksumValue );
+#else
+                CGString sInsertSavepoint;
+                sInsertSavepoint.Format(
+                        "INSERT INTO `%s` (`label`,`created_at`,`objects_count`,`checksum`) VALUES (%s,%s,%llu,%s);",
+                        (const char *) sSavepoints, (const char *) sLabelValue, (const char *) sCreatedAtValue,
+                        objectsCount, (const char *) sChecksumValue );
+#endif
+
+                if ( ! ExecuteQuery( sInsertSavepoint ))
+                {
+                        g_Log.Event( LOGM_SAVE|LOGL_ERROR,
+                                "Failed to record MySQL world snapshot metadata '%s'.\n",
+                                (const char *) sSnapshotLabel );
+                        return false;
+                }
+
+                g_Log.Event( LOGM_SAVE,
+                        "MySQL world snapshot '%s' written to '%s'.\n",
+                        (const char *) sSnapshotLabel, (const char *) sSnapshotDir );
+                return true;
+        });
+}
+
+bool MySqlStorageService::ScheduleWorldSnapshot( const CGString & label )
+{
+#ifndef UNIT_TEST
+        if ( m_SnapshotProcessor )
+        {
+                if ( m_SnapshotProcessor->Schedule( label ))
+                {
+                        return true;
+                }
+
+                g_Log.Event( LOGM_SAVE|LOGL_WARN,
+                        "Failed to queue MySQL world snapshot '%s' for asynchronous creation; running inline instead.\n",
+                        static_cast<const char *>( label ));
+        }
+#endif
+
+        return CreateWorldSnapshot( label );
 }
 
 bool MySqlStorageService::ClearWorldData()

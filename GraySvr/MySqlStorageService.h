@@ -16,6 +16,7 @@
 namespace Storage
 {
         class DirtyQueueProcessor;
+        class SnapshotQueueProcessor;
 namespace Repository
 {
         class PreparedStatementRepository;
@@ -232,6 +233,8 @@ public:
         bool DeleteObject( const CObjBase * pObject );
         void ScheduleSave( ObjectHandle handle, StorageDirtyType type );
         bool ClearWorldData();
+        bool CreateWorldSnapshot( const CGString & label );
+        bool ScheduleWorldSnapshot( const CGString & label );
 
         bool SaveSector( const CSector & sector );
         bool SaveChar( CChar & character );
@@ -325,6 +328,7 @@ private:
         Storage::Schema::SchemaManager m_SchemaManager;
 #ifndef UNIT_TEST
         std::unique_ptr<Storage::DirtyQueueProcessor> m_DirtyProcessor;
+        std::unique_ptr<Storage::SnapshotQueueProcessor> m_SnapshotProcessor;
 #endif
         CGString m_sTablePrefix;
         CGString m_sDatabaseName;
