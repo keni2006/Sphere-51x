@@ -21,6 +21,15 @@
 #define OF_TEXT				0x2000
 #define OF_BINARY			0x8000
 
+class IScriptTextStream
+{
+public:
+	virtual ~IScriptTextStream() {}
+	virtual TCHAR * ReadLine( TCHAR FAR * pBuffer, size_t sizemax ) = 0;
+	virtual bool Write( const void FAR * pData, size_t iLen ) = 0;
+	virtual bool Seek( long offset = 0, int origin = SEEK_SET ) = 0;
+};
+
 class CGFile	// try to be compatible with MFC CFile class.
 {
 private:

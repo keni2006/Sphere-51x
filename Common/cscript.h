@@ -12,12 +12,28 @@
 #include "cstring.h"
 #include "cfile.h"
 #include "carray.h"
+#include <stdarg.h>
 
 class CScriptLink;
 
 class CScript : public CFileText
 {
 private:
+	class CFileTextStreamAdapter : public IScriptTextStream
+	{
+	private:
+		CScript & m_Script;
+	public:
+		explicit CFileTextStreamAdapter( CScript & script ) : m_Script( script ) {}
+		virtual TCHAR * ReadLine( TCHAR FAR * pBuffer, size_t sizemax );
+		virtual bool Write( const void FAR * pData, size_t iLen );
+		virtual bool Seek( long offset = 0, int origin = SEEK_SET );
+	};
+
+	CFileTextStreamAdapter m_DefaultStream;
+	IScriptTextStream * m_pStream;
+	bool m_fOwnStream;
+
 	CGString m_Buffer;		// the buffer to hold data read.
 
 	long m_lSectionHead;	// File Offset to section header.
@@ -43,6 +59,11 @@ private:
 	DWORD ReadBinLength();
 	int CompressBin( int iLen );
 	int DeCompressBin( int iLen );
+	size_t StreamVPrintf( const TCHAR * pFormat, va_list args );
+	size_t _cdecl StreamPrintf( const TCHAR * pFormat, ... );
+	bool StreamWrite( const void FAR * pData, size_t iLen );
+	TCHAR * StreamReadLine( TCHAR FAR * pBuffer, size_t sizemax );
+	bool StreamSeek( long offset = 0, int origin = SEEK_SET );
 
 public:
 	// text only functions:
@@ -52,18 +73,17 @@ public:
 	bool WriteProfileString( const TCHAR * pszSection, const TCHAR * pszKey, const TCHAR * pszVal );
 
 public:
-	CScript()
-	{
-		Init();
-	}
-	CScript( const TCHAR * pKey )
-	{
-		Init();
-		m_Buffer.Copy( pKey );
-		m_pArg = m_Buffer.GetBuffer(MAX_SCRIPT_LINE_LEN);
-		GetArgNextStr();
-	}
+	CScript();
+	CScript( const TCHAR * pKey );
 	CScript( const TCHAR * pKey, const TCHAR * pVal );
+	explicit CScript( IScriptTextStream * pStream, bool fTakeOwnership = false );
+	~CScript();
+
+	void AttachStream( IScriptTextStream * pStream, bool fTakeOwnership = false );
+	IScriptTextStream * GetStream() const
+	{
+		return( m_pStream );
+	}
 
 #ifdef GRAY_SVR
 	bool OpenFind( const TCHAR *pszFilename, WORD Flags = OF_READ );
