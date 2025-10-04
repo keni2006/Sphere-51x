@@ -16,7 +16,41 @@ int CScriptObj::sm_iTrigArg;			// a modifying arg to the current trigger.
 ///////////////////////////////////////////////////////////////
 // -CScript
 
-CScript::CScript( const TCHAR * pszKey, const TCHAR * pVal )
+TCHAR * CScript::CFileTextStreamAdapter::ReadLine( TCHAR FAR * pBuffer, size_t sizemax )
+{
+	return m_Script.CFileText::ReadLine( pBuffer, sizemax );
+}
+
+bool CScript::CFileTextStreamAdapter::Write( const void FAR * pData, size_t iLen )
+{
+	return m_Script.CFileText::Write( pData, iLen );
+}
+
+bool CScript::CFileTextStreamAdapter::Seek( long offset, int origin )
+{
+	return m_Script.CFileText::Seek( offset, origin );
+}
+
+CScript::CScript() : m_DefaultStream( *this ), m_pStream( &m_DefaultStream ), m_fOwnStream( false )
+{
+	Init();
+}
+
+CScript::CScript( const TCHAR * pKey ) : m_DefaultStream( *this ), m_pStream( &m_DefaultStream ), m_fOwnStream( false )
+{
+	Init();
+	m_Buffer.Copy( pKey );
+	m_pArg = m_Buffer.GetBuffer(MAX_SCRIPT_LINE_LEN);
+	GetArgNextStr();
+}
+
+CScript::CScript( IScriptTextStream * pStream, bool fTakeOwnership ) : m_DefaultStream( *this ), m_pStream( &m_DefaultStream ), m_fOwnStream( false )
+{
+	Init();
+	AttachStream( pStream, fTakeOwnership );
+}
+
+CScript::CScript( const TCHAR * pszKey, const TCHAR * pVal ) : m_DefaultStream( *this ), m_pStream( &m_DefaultStream ), m_fOwnStream( false )
 {
 	Init();
 	int lenkey = strlen( pszKey );
@@ -26,6 +60,73 @@ CScript::CScript( const TCHAR * pszKey, const TCHAR * pVal )
 	strcpy( m_pArg, pszKey );
 	m_pArg += lenkey+1;
 	if ( pVal ) strcpy( m_pArg, pVal );
+}
+
+CScript::~CScript()
+{
+	AttachStream( NULL );
+}
+
+void CScript::AttachStream( IScriptTextStream * pStream, bool fTakeOwnership )
+{
+	if ( pStream == NULL )
+	{
+		pStream = &m_DefaultStream;
+		fTakeOwnership = false;
+	}
+
+	if ( m_pStream != pStream )
+	{
+		if ( m_fOwnStream && m_pStream != &m_DefaultStream )
+		{
+			delete m_pStream;
+		}
+	}
+
+	m_pStream = pStream;
+	m_fOwnStream = fTakeOwnership && ( m_pStream != &m_DefaultStream );
+}
+
+size_t CScript::StreamVPrintf( const TCHAR * pFormat, va_list args )
+{
+	if ( m_pStream == NULL )
+		return( static_cast<size_t>(-1) );
+
+	TCHAR szTemp[ MAX_SCRIPT_LINE_LEN ];
+	int len = vsprintf( szTemp, pFormat, args );
+	if ( len < 0 )
+		return( static_cast<size_t>(-1) );
+	if ( len == 0 )
+		return( 0 );
+	if ( ! m_pStream->Write( szTemp, static_cast<size_t>( len )))
+		return( static_cast<size_t>(-1) );
+	return( static_cast<size_t>( len ));
+}
+
+size_t _cdecl CScript::StreamPrintf( const TCHAR * pFormat, ... )
+{
+	va_list args;
+	va_start( args, pFormat );
+	size_t len = StreamVPrintf( pFormat, args );
+	va_end( args );
+	return( len );
+}
+
+bool CScript::StreamWrite( const void FAR * pData, size_t iLen )
+{
+	return( m_pStream != NULL && m_pStream->Write( pData, iLen ));
+}
+
+TCHAR * CScript::StreamReadLine( TCHAR FAR * pBuffer, size_t sizemax )
+{
+	if ( m_pStream == NULL )
+		return( NULL );
+	return( m_pStream->ReadLine( pBuffer, sizemax ));
+}
+
+bool CScript::StreamSeek( long offset, int origin )
+{
+	return( m_pStream != NULL && m_pStream->Seek( offset, origin ));
 }
 
 #if defined(GRAY_SVR)
@@ -56,6 +157,7 @@ bool CScript::OpenCopy( const CScript & s, WORD wFlags )
 {
 	DEBUG_CHECK( s.IsFileOpen());
 	Init();
+	AttachStream( NULL );
 	if ( ! CGFile::OpenCopy( s, wFlags ))
 		return( false );
 	m_Buffer.SetLength( MAX_SCRIPT_LINE_LEN );
@@ -69,6 +171,7 @@ bool CScript::Open( const TCHAR *pszFilename, WORD wFlags )
 	// RETURN: true = success.
 
 	Init();
+	AttachStream( NULL );
 	m_Buffer.SetLength( MAX_SCRIPT_LINE_LEN );
 
 	if ( pszFilename == NULL )
@@ -111,7 +214,7 @@ bool CScript::ReadTextLine( bool fRemoveBlanks ) // Read a line from the opened 
 	{
 		TCHAR * pData = m_Buffer.GetBuffer(MAX_SCRIPT_LINE_LEN);
 		ASSERT(pData);
-		if ( CFileText::ReadLine( pData, MAX_SCRIPT_LINE_LEN ) == NULL )
+		if ( StreamReadLine( pData, MAX_SCRIPT_LINE_LEN ) == NULL )
 		{
 			pData[0] = '\0';
 			return( false );
@@ -184,7 +287,7 @@ bool CScript::Seek( long offset, int origin )
 	// RETURN: 0 = success
 	m_lSectionHead = 0;		// unknown
 	m_lSectionData = offset;
-	return( CFileText::Seek(offset,origin));
+	return( StreamSeek( offset, origin ));
 }
 
 void CScript::WriteBinLength( DWORD dwLen )
@@ -195,7 +298,7 @@ void CScript::WriteBinLength( DWORD dwLen )
 		dwLen >>= 7;
 		if ( dwLen )
 			bLen |= 0x80;
-		Write( &bLen, 1 );
+		StreamWrite( &bLen, 1 );
 	} while ( dwLen );
 }
 
@@ -263,7 +366,7 @@ bool CScript::FindNextSection( void )
 					return( false );
 				if ( dwLen & 0x80000000 )
 					break;
-				if ( ! CFileText::Seek( dwLen, SEEK_CUR ))	// skip key.
+				if ( ! StreamSeek( dwLen, SEEK_CUR ))	// skip key.
 					return( false );
 			}
 		}
@@ -500,7 +603,7 @@ bool CScript::WriteProfileString( CScript * pDst, const TCHAR * pszSection, cons
 	while ( 1 )
 	{
 		TCHAR * pData = m_Buffer.GetBuffer(MAX_SCRIPT_LINE_LEN);
-		if ( CFileText::ReadLine( pData, MAX_SCRIPT_LINE_LEN ) == NULL )
+		if ( StreamReadLine( pData, MAX_SCRIPT_LINE_LEN ) == NULL )
 		{
 			break;
 		}
@@ -523,10 +626,10 @@ bool CScript::WriteProfileString( CScript * pDst, const TCHAR * pszSection, cons
 							ASSERT( fSeek );
 						}
 						fFoundKey = true;
-						pDst->Printf( "%s=%s\n", pszKey, pszVal );
+						pDst->StreamPrintf( "%s=%s\n", pszKey, pszVal );
 						if ( lOffsetWhiteSpace )
 						{
-							pDst->Printf( "\n" );
+							pDst->StreamPrintf( "\n" );
 						}
 					}
 				}
@@ -541,7 +644,7 @@ bool CScript::WriteProfileString( CScript * pDst, const TCHAR * pszSection, cons
 					fFoundKey = true;
 					if ( pszVal == NULL ) 
 						continue;	// just lose this key
-					pDst->Printf( "%s=%s\n", pszKey, pszVal );
+					pDst->StreamPrintf( "%s=%s\n", pszKey, pszVal );
 					continue;	// replace this key.
 				}
 	
@@ -560,7 +663,7 @@ bool CScript::WriteProfileString( CScript * pDst, const TCHAR * pszSection, cons
 		}
 
 		// Just copy the old stuff.
-		if ( ! pDst->WriteStr( pData ))
+		if ( ! pDst->StreamWrite( pData, strlen( pData )))
 		{
 			DEBUG_ERR(( "Profile Failed to write line\n" ));
 			return false;
@@ -578,10 +681,10 @@ bool CScript::WriteProfileString( CScript * pDst, const TCHAR * pszSection, cons
 	{
 		if ( ! fInSection )	// Create the section ?
 		{
-			if ( pDst->Printf( "[%s]\n", pszSection ) <= 0 )
+			if ( pDst->StreamPrintf( "[%s]\n", pszSection ) <= 0 )
 				goto cantwrite;
 		}
-		if ( pDst->Printf( "%s=%s\n", pszKey, pszVal ) <= 0 )
+		if ( pDst->StreamPrintf( "%s=%s\n", pszKey, pszVal ) <= 0 )
 		{
 cantwrite:
 			DEBUG_ERR(( "Profile Failed to write new line\n" ));
@@ -695,6 +798,7 @@ void CScript::EndSection()
 bool CScript::Close()
 {
 	EndSection();
+	AttachStream( NULL );
 	return CFileText::Close();
 }
 
@@ -725,14 +829,14 @@ bool _cdecl CScript::WriteSection( const TCHAR * pszSection, ... )
 			return( false );
 
 		BYTE bLenSection = iLen;
-		Write( &bLenSection, 1 );
-		Write( m_pArg, bLenSection );
+		StreamWrite( &bLenSection, 1 );
+		StreamWrite( m_pArg, bLenSection );
 	}
 	else
 	{
-		Printf( "\n[");
-		VPrintf( pszSection, args );
-		Printf( "]\n" );
+		StreamPrintf( "\n[" );
+		StreamVPrintf( pszSection, args );
+		StreamPrintf( "]\n" );
 	}
 	return( true );
 }
@@ -752,18 +856,18 @@ bool CScript::WriteKey( const TCHAR * pszKey, const TCHAR * pszVal )
 			return( false );
 
 		WriteBinLength( iLen );
-		Write( m_pArg, iLen );
+		StreamWrite( m_pArg, iLen );
 	}
 	else
 	{
 		if ( pszVal == NULL || pszVal[0] == '\0' )
 		{
 			// Books are like this. No real keys.
-			Printf( "%s\n", pszKey );
+			StreamPrintf( "%s\n", pszKey );
 		}
 		else
 		{
-			Printf( "%s=%s\n", pszKey, pszVal );
+			StreamPrintf( "%s=%s\n", pszKey, pszVal );
 		}
 	}
 	return( true );
