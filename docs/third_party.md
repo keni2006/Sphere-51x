@@ -1,5 +1,8 @@
 # Third-party components
 
+> 🇷🇺 For Russian, see [`docs/ru/third_party.md`](docs/ru/third_party.md).
+
+
 SphereServer relies on the MariaDB/MySQL client libraries for its optional
 database backend. The repository keeps the legacy Oracle headers checked in for
 compatibility and ships a helper script that downloads the current MariaDB

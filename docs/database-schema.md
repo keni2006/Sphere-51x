@@ -1,5 +1,8 @@
 # MySQL Storage Architecture and Schema
 
+> 🇷🇺 For Russian, see [`docs/ru/database-schema.md`](docs/ru/database-schema.md).
+
+
 SphereServer 0.51x ships with an integrated MySQL storage layer that replaces
 most legacy `*.scp` persistence. The implementation is split into focused
 modules that keep connections, schema evolution and data access logic separate.
