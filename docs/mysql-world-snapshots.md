@@ -15,6 +15,7 @@
 ## Output location
 - Set the `WORLDSAVE` key in `spheredef.ini` to the directory where SphereServer should keep flat-file saves and exported snapshots. The server creates a `mysqlsnapshots/` subdirectory under this path when MySQL snapshots run for the first time.
 - Each snapshot is written to `WORLDSAVE/mysqlsnapshots/<timestamp_or_label>/`. The folder name contains the aligned timestamp (`YYYYMMDD_HHMMSS`) followed by an optional sanitized label suffix (for example, `20240314_210000_World_save_12`).
+- Dumps stream directly into that directory; there is no temporary working folder or helper script to clean up.
 - The Sphere process must be able to create directories and write files under the configured `WORLDSAVE` path. Permission issues are reported in the server log and abort the snapshot.
 
 ## Files that are generated
