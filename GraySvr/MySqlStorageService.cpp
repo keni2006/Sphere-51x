@@ -55,7 +55,7 @@
 #endif
 
 #include "Storage/MySql/MySqlConnection.h"
-#include "Common/cmemoryscriptstream.h"
+#include "cmemoryscriptstream.h"
 
 namespace
 {
