@@ -78,6 +78,9 @@
 
 #include "graysvr.h"	// predef header.
 #include <cstring>
+#include <algorithm>
+#include <string>
+#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -913,15 +916,62 @@ int _cdecl main(int argc, char * argv[])
 	ASSERT( sizeof(CUOItemTypeRec) == 37 );	// byte pack working ?
 
 #ifdef _WIN32
-	SetConsoleTitle( GRAY_TITLE " V" GRAY_VERSION );
+	SetConsoleTitle( g_szServerDescription );
 	_set_se_translator( Exception_Win32 );
 	SetConsoleCtrlHandler( ConsoleHandlerRoutine, TRUE );
 #endif
 
-	g_Log.Event( LOGM_INIT, "\n%s\n"
-		"Compiled at " __DATE__ " (" __TIME__ ")\n"
-		"\n",
-		g_szServerDescription );
+	// Compose a modern startup banner similar to SphereX.
+	const std::string compileInfo = "Compiled at " __DATE__ " (" __TIME__ ")";
+	const std::string poweredInfo = std::string("Powered by ") + GRAY_URL;
+	std::vector<std::string> headerLines = {
+		std::string(g_szServerDescription),
+		compileInfo,
+		poweredInfo
+	};
+
+	size_t innerWidth = 0;
+	for (const auto & line : headerLines)
+	{
+		innerWidth = std::max(innerWidth, line.length());
+	}
+
+	const size_t kMinInnerWidth = 48;
+	if (innerWidth < kMinInnerWidth)
+	{
+		innerWidth = kMinInnerWidth;
+	}
+
+	auto makeSeparator = [innerWidth]()
+	{
+		return std::string("╟─") + std::string(innerWidth, '─') + "─╢\n";
+	};
+
+	auto makeLine = [innerWidth](const std::string & text)
+	{
+		std::string line = "║ ";
+		line += text;
+		if (text.length() < innerWidth)
+		{
+			line += std::string(innerWidth - text.length(), ' ');
+		}
+		line += " ║\n";
+		return line;
+	};
+
+	std::string header;
+	header.reserve((innerWidth + 6) * (headerLines.size() + 4));
+	header += "\n";
+	header += std::string("╔═") + std::string(innerWidth, '═') + "═╗\n";
+	header += makeLine("SphereServer 51.x");
+	header += makeSeparator();
+	for (const auto & line : headerLines)
+	{
+		header += makeLine(line);
+	}
+	header += std::string("╚═") + std::string(innerWidth, '═') + "═╝\n\n";
+
+	g_Log.Event( LOGM_INIT, "%s", header.c_str() );
 
 	if ( ! g_Serv.Load())
 	{
