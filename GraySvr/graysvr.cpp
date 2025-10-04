@@ -78,8 +78,6 @@
 
 #include "graysvr.h"	// predef header.
 #include <cstring>
-#include <cstdio>
-#include <string>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -593,53 +591,11 @@ namespace
         constexpr WORD kNoConsoleColor = 0;
 }
 
-void SetConsoleColor(WORD color)
+void SetConsoleColor(WORD)
 {
-        const bool intensity = ((color & FOREGROUND_INTENSITY) != 0);
-        const bool red = ((color & FOREGROUND_RED) != 0);
-        const bool green = ((color & FOREGROUND_GREEN) != 0);
-        const bool blue = ((color & FOREGROUND_BLUE) != 0);
-
-        if ( !red && !green && !blue )
-        {
-                fputs("\033[0m", stdout);
-                return;
-        }
-
-        int ansiCode = 37;    // default to white
-
-        if ( red && green && blue )
-        {
-                ansiCode = intensity ? 97 : 37;
-        }
-        else if ( red && green )
-        {
-                ansiCode = intensity ? 93 : 33;
-        }
-        else if ( red && blue )
-        {
-                ansiCode = intensity ? 95 : 35;
-        }
-        else if ( green && blue )
-        {
-                ansiCode = intensity ? 96 : 36;
-        }
-        else if ( red )
-        {
-                ansiCode = intensity ? 91 : 31;
-        }
-        else if ( green )
-        {
-                ansiCode = intensity ? 92 : 32;
-        }
-        else if ( blue )
-        {
-                ansiCode = intensity ? 94 : 34;
-        }
-
-        char sequence[16];
-        snprintf( sequence, sizeof( sequence ), "\033[%dm", ansiCode );
-        fputs( sequence, stdout );
+        // Colorized console output is a Windows-specific feature.  On
+        // POSIX terminals we simply skip the attribute change and leave
+        // the text in the default color.
 }
 
 #ifndef FOREGROUND_RED
@@ -655,53 +611,6 @@ void SetConsoleColor(WORD color)
 #define FOREGROUND_INTENSITY     kNoConsoleColor
 #endif
 #endif
-
-namespace
-{
-	constexpr size_t kBannerInnerWidth = 64;
-	constexpr size_t kBannerContentWidth = kBannerInnerWidth - 2;
-
-	std::string FormatBannerLine( std::string text )
-	{
-		if ( text.size() > kBannerContentWidth )
-		{
-			text.resize( kBannerContentWidth );
-		}
-
-		if ( text.size() < kBannerContentWidth )
-		{
-			text.append( kBannerContentWidth - text.size(), ' ' );
-		}
-
-		return std::string( "║ " ) + text + " ║";
-	}
-
-	void PrintStartupBanner()
-	{
-		const std::string top = "╔" + std::string( kBannerInnerWidth, '═' ) + "╗";
-		const std::string bottom = "╚" + std::string( kBannerInnerWidth, '═' ) + "╝";
-
-		const std::string buildInfo = std::string( "Build: " ) + __DATE__ + " " + __TIME__;
-		const std::string docsInfo = "Docs: docs/README.md";
-		const std::string sourceInfo = "Source: github.com/keni2006/Sphere-51x";
-		const std::string consoleInfo = "Console: '?' help · 'S' status · 'X' shutdown";
-
-		const std::string descriptionLine = FormatBannerLine( g_szServerDescription );
-		const std::string buildLine = FormatBannerLine( buildInfo );
-		const std::string docsLine = FormatBannerLine( docsInfo );
-		const std::string sourceLine = FormatBannerLine( sourceInfo );
-		const std::string consoleLine = FormatBannerLine( consoleInfo );
-
-		g_Log.Event( LOGM_INIT, "\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
-			top.c_str(),
-			descriptionLine.c_str(),
-			buildLine.c_str(),
-			docsLine.c_str(),
-			sourceLine.c_str(),
-			consoleLine.c_str(),
-			bottom.c_str());
-	}
-}
 
 int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 {
@@ -740,147 +649,83 @@ int CLog::EventStr(WORD wMask, const TCHAR* pszMsg)
 		}
 
 		CGString sTime;
-		sTime.Format("[%02d:%02d]", NewStamp.m_Hour, NewStamp.m_Min);
+		sTime.Format("%02d:%02d:", NewStamp.m_Hour, NewStamp.m_Min);
 		m_Stamp = NewStamp;
 
-		const WORD kDefaultColor = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE;
-		WORD labelColor = kDefaultColor;
-		const TCHAR * pszLabel = NULL;
+		const TCHAR* pszLabel = NULL;
 
-		const WORD severity = ( wMask & 0x0f );
-
-		switch ( severity )
+		switch (wMask & 0x07)
 		{
-		case LOGL_FATAL:	// fatal error!
-			pszLabel = "[FATAL]";
-			labelColor = FOREGROUND_RED | FOREGROUND_INTENSITY;
+		case LOGL_FATAL:   // fatal error!
+			pszLabel = "FATAL:";
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_INTENSITY); //red
 			break;
-		case LOGL_CRIT:	// critical.
-			pszLabel = "[CRITICAL]";
-			labelColor = FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+		case LOGL_CRIT:    // critical.
+			pszLabel = "CRITICAL:";
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_INTENSITY); //red
 			break;
-		case LOGL_ERROR:	// non-fatal errors.
-			pszLabel = "[ERROR]";
-			labelColor = FOREGROUND_RED | FOREGROUND_INTENSITY;
+		case LOGL_ERROR:   // non-fatal errors.
+			pszLabel = "ERROR:";
+			SetConsoleColor(FOREGROUND_RED); // 
 			break;
 		case LOGL_WARN:
-			pszLabel = "[WARN]";
-			labelColor = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			break;
-		case LOGL_EVENT:
-			pszLabel = "[INFO]";
-			labelColor = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			break;
-		case LOGL_TRACE:
-			pszLabel = "[TRACE]";
-			labelColor = FOREGROUND_BLUE | FOREGROUND_INTENSITY;
+			pszLabel = "WARNING:";
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN); // yellow
 			break;
 		default:
-			if (( wMask & LOGM_INIT ) == 0 )
-			{
-				pszLabel = "[INFO]";
-				labelColor = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
-			}
+			SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);//white
+			
 			break;
 		}
+	
 
-		static const struct
-		{
-			WORD mask;
-			const char * name;
-		} kLogCategories[] =
-		{
-			{ LOGM_INIT, "INIT" },
-			{ LOGM_SAVE, "SAVE" },
-			{ LOGM_ACCOUNTS, "ACCT" },
-			{ LOGM_CLIENTS_LOG, "CLIENT" },
-			{ LOGM_GM_PAGE, "GM_PAGE" },
-			{ LOGM_PLAYER_SPEAK, "CHAT" },
-			{ LOGM_GM_CMDS, "GM_CMD" },
-			{ LOGM_CHEAT, "CHEAT" },
-			{ LOGM_KILLS, "KILL" },
-		};
+		//SHOULD BE REWRITTEN KINGA SLOWLY BUT WORK//
+		/////////////////////////////////////////////
+	
+	// Get the script context. (if there is one)
+	CGString sScriptContext;
+	if ( m_pScriptContext )
+	{
+		sScriptContext.Format( "(%s,%d)", m_pScriptContext->GetFileTitle(), m_pScriptContext->GetLineNumber());
+	}
 
-		std::string categoryBuffer[COUNTOF(kLogCategories)];
-		size_t categoryCount = 0;
-		for ( size_t i = 0; i < COUNTOF(kLogCategories); ++i )
-		{
-			if (( wMask & kLogCategories[i].mask ) != 0 )
-			{
-				categoryBuffer[categoryCount++] = "[" + std::string( kLogCategories[i].name ) + "]";
-			}
-		}
+	// Print to screen.
+	if (!(wMask & LOGM_INIT) && !g_Serv.IsLoading())
+	{
+	//	SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE); // white for time
+		g_Serv.PrintStr(sTime);
+	}
+	if (pszLabel)
+	{
+		g_Serv.PrintStr(pszLabel);
+		SetConsoleColor(FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE); // white after printing label
+	}
 
-		// Get the script context. (if there is one)
-		CGString sScriptContext;
-		if ( m_pScriptContext )
-		{
-			sScriptContext.Format( "(%s,%d)", m_pScriptContext->GetFileTitle(), m_pScriptContext->GetLineNumber());
-		}
+	if (!sScriptContext.IsEmpty())
+	{
+		g_Serv.PrintStr(sScriptContext);
+	}
+	size_t messageLength = strlen(pszMsg);
+	bool hasTrailingNewLine = (messageLength > 0) && (pszMsg[messageLength - 1] == '\n');
+	g_Serv.PrintStr(pszMsg);
+	if ( !hasTrailingNewLine )
+	{
+		g_Serv.PrintStr("\n");
+	}
 
-               if (!(wMask & LOGM_INIT) && !g_Serv.IsLoading())
-               {
-                       SetConsoleColor( FOREGROUND_GREEN | FOREGROUND_BLUE );
-                       g_Serv.PrintStr(sTime);
-                       g_Serv.PrintStr(" ");
-                       SetConsoleColor(kDefaultColor);
-               }
-
-		if (pszLabel)
-		{
-			SetConsoleColor(labelColor);
-			g_Serv.PrintStr(pszLabel);
-			SetConsoleColor(kDefaultColor);
-			g_Serv.PrintStr(" ");
-		}
-
-		for ( size_t i = 0; i < categoryCount; ++i )
-		{
-			SetConsoleColor( FOREGROUND_GREEN | FOREGROUND_BLUE );
-			g_Serv.PrintStr( categoryBuffer[i].c_str());
-			SetConsoleColor( kDefaultColor );
-			g_Serv.PrintStr( " " );
-		}
-
-		if (!sScriptContext.IsEmpty())
-		{
-			SetConsoleColor( FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY );
-			g_Serv.PrintStr(sScriptContext);
-			SetConsoleColor(kDefaultColor);
-			g_Serv.PrintStr(" ");
-		}
-		size_t messageLength = strlen(pszMsg);
-		bool hasTrailingNewLine = (messageLength > 0) && (pszMsg[messageLength - 1] == '\n');
-		g_Serv.PrintStr(pszMsg);
-		if ( !hasTrailingNewLine )
-		{
-			g_Serv.PrintStr("\n");
-		}
-		SetConsoleColor(kDefaultColor);
-
-		// Print to log file.
-		WriteStr( sTime );
-		WriteStr( " ");
-		if ( pszLabel )
-		{
-			WriteStr( pszLabel );
-			WriteStr( " ");
-		}
-		for ( size_t i = 0; i < categoryCount; ++i )
-		{
-			WriteStr( categoryBuffer[i].c_str());
-			WriteStr( " ");
-		}
-		if ( ! sScriptContext.IsEmpty())
-		{
-			WriteStr( sScriptContext );
-			WriteStr( " ");
-		}
-		WriteStr( pszMsg );
-		if ( !hasTrailingNewLine )
-		{
-			WriteStr("\n");
-		}
+	
+	// Print to log file.
+	WriteStr( sTime );
+	if ( pszLabel )	WriteStr( pszLabel );
+	if ( ! sScriptContext.IsEmpty())
+	{
+		WriteStr( sScriptContext );
+	}
+	WriteStr( pszMsg );
+	if ( !hasTrailingNewLine )
+	{
+		WriteStr("\n");
+	}
 
 	}
 	catch (...)
@@ -1073,7 +918,10 @@ int _cdecl main(int argc, char * argv[])
 	SetConsoleCtrlHandler( ConsoleHandlerRoutine, TRUE );
 #endif
 
-        PrintStartupBanner();
+	g_Log.Event( LOGM_INIT, "\n%s\n"
+		"Compiled at " __DATE__ " (" __TIME__ ")\n"
+		"\n",
+		g_szServerDescription );
 
 	if ( ! g_Serv.Load())
 	{
@@ -1109,6 +957,7 @@ int _cdecl main(int argc, char * argv[])
 	g_Log.Event( LOGM_INIT, _TEXT("Startup complete. items=%d, chars=%d\n"), g_Serv.StatGet(SERV_STAT_ITEMS), g_Serv.StatGet(SERV_STAT_CHARS));
 
 #ifdef _WIN32
+	g_Log.Event( LOGM_INIT, "Press '?' for console commands\n" );
 
 	if ( g_osInfo.dwPlatformId == VER_PLATFORM_WIN32_NT &&
 		g_Serv.m_iFreezeRestartTime )
