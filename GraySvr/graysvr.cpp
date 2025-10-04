@@ -78,130 +78,9 @@
 
 #include "graysvr.h"	// predef header.
 #include <cstring>
-#include <algorithm>
-#include <string>
-#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #endif
-
-#ifdef _WIN32
-namespace
-{
-void ApplyModernConsoleTheme()
-{
-        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-        if ((hConsole == INVALID_HANDLE_VALUE) || (hConsole == nullptr))
-        {
-                return;
-        }
-
-        DWORD outputMode = 0;
-        if (GetConsoleMode(hConsole, &outputMode))
-        {
-#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
-#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
-#endif
-#ifndef DISABLE_NEWLINE_AUTO_RETURN
-#define DISABLE_NEWLINE_AUTO_RETURN 0x0008
-#endif
-                DWORD desiredMode = outputMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-                desiredMode &= ~DISABLE_NEWLINE_AUTO_RETURN;
-                SetConsoleMode(hConsole, desiredMode);
-        }
-
-        CONSOLE_SCREEN_BUFFER_INFO screenInfo;
-        if (!GetConsoleScreenBufferInfo(hConsole, &screenInfo))
-        {
-                return;
-        }
-
-        const SHORT currentWidth = static_cast<SHORT>(screenInfo.srWindow.Right - screenInfo.srWindow.Left + 1);
-        const SHORT currentHeight = static_cast<SHORT>(screenInfo.srWindow.Bottom - screenInfo.srWindow.Top + 1);
-        const SHORT desiredWidth = static_cast<SHORT>(std::max<LONG>(120, static_cast<LONG>(currentWidth)));
-        const SHORT desiredHeight = static_cast<SHORT>(std::max<LONG>(38, static_cast<LONG>(currentHeight)));
-
-        COORD bufferSize = screenInfo.dwSize;
-        bufferSize.X = static_cast<SHORT>(std::max<LONG>(static_cast<LONG>(bufferSize.X), static_cast<LONG>(desiredWidth)));
-        bufferSize.Y = static_cast<SHORT>(std::max<LONG>(static_cast<LONG>(bufferSize.Y), static_cast<LONG>(desiredHeight)));
-
-        if (SetConsoleScreenBufferSize(hConsole, bufferSize))
-        {
-                SMALL_RECT windowRect = { 0, 0, static_cast<SHORT>(desiredWidth - 1), static_cast<SHORT>(desiredHeight - 1) };
-                SetConsoleWindowInfo(hConsole, TRUE, &windowRect);
-        }
-
-        if (GetConsoleScreenBufferInfo(hConsole, &screenInfo))
-        {
-                bufferSize = screenInfo.dwSize;
-        }
-
-        COORD origin = { 0, 0 };
-        DWORD cellCount = static_cast<DWORD>(bufferSize.X) * static_cast<DWORD>(bufferSize.Y);
-        DWORD written = 0;
-        const WORD backgroundTheme = BACKGROUND_BLUE | BACKGROUND_GREEN | BACKGROUND_INTENSITY;
-        const WORD textTheme = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-        const WORD themeAttributes = backgroundTheme | textTheme;
-        const WORD accentAttributes = BACKGROUND_BLUE | BACKGROUND_INTENSITY | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY;
-
-        FillConsoleOutputAttribute(hConsole, themeAttributes, cellCount, origin, &written);
-        FillConsoleOutputCharacter(hConsole, TEXT(' '), cellCount, origin, &written);
-
-        FillConsoleOutputAttribute(hConsole, accentAttributes, bufferSize.X, origin, &written);
-        FillConsoleOutputCharacter(hConsole, TEXT(' '), bufferSize.X, origin, &written);
-
-        COORD dividerRow = { 0, 1 };
-        FillConsoleOutputAttribute(hConsole, accentAttributes, bufferSize.X, dividerRow, &written);
-        FillConsoleOutputCharacter(hConsole, TEXT(' '), bufferSize.X, dividerRow, &written);
-
-        std::wstring title = L"  SphereServer 51.x  •  Control Console  ";
-        if (static_cast<SHORT>(title.length()) > bufferSize.X)
-        {
-                title.resize(bufferSize.X);
-        }
-        const SHORT titleLength = static_cast<SHORT>(title.length());
-        std::wstring divider(static_cast<size_t>(bufferSize.X), L'─');
-
-        COORD titlePosition = { 0, 0 };
-        if (titleLength < bufferSize.X)
-        {
-                titlePosition.X = static_cast<SHORT>((bufferSize.X - titleLength) / 2);
-        }
-
-        SetConsoleCursorPosition(hConsole, titlePosition);
-        SetConsoleTextAttribute(hConsole, accentAttributes);
-
-        DWORD textWritten = 0;
-        if (titleLength > 0)
-        {
-                WriteConsoleW(hConsole, title.c_str(), static_cast<DWORD>(title.length()), &textWritten, nullptr);
-        }
-
-        if (!divider.empty())
-        {
-                SetConsoleCursorPosition(hConsole, dividerRow);
-                WriteConsoleW(hConsole, divider.c_str(), static_cast<DWORD>(divider.length()), &textWritten, nullptr);
-        }
-
-        SetConsoleTextAttribute(hConsole, themeAttributes);
-        COORD contentPosition = { 0, 2 };
-        if (bufferSize.Y <= 2)
-        {
-                contentPosition.Y = static_cast<SHORT>(bufferSize.Y > 0 ? bufferSize.Y - 1 : 0);
-        }
-        SetConsoleCursorPosition(hConsole, contentPosition);
-
-        CONSOLE_CURSOR_INFO cursorInfo;
-        if (GetConsoleCursorInfo(hConsole, &cursorInfo))
-        {
-                cursorInfo.bVisible = TRUE;
-                cursorInfo.dwSize = 15;
-                SetConsoleCursorInfo(hConsole, &cursorInfo);
-        }
-}
-}
-#endif
-
 const TCHAR * g_Stat_Name[STAT_QTY] =
 {
 	"STR",
@@ -1034,62 +913,15 @@ int _cdecl main(int argc, char * argv[])
 	ASSERT( sizeof(CUOItemTypeRec) == 37 );	// byte pack working ?
 
 #ifdef _WIN32
-	ApplyModernConsoleTheme();
-	SetConsoleTitle( g_szServerDescription );
+	SetConsoleTitle( GRAY_TITLE " V" GRAY_VERSION );
 	_set_se_translator( Exception_Win32 );
 	SetConsoleCtrlHandler( ConsoleHandlerRoutine, TRUE );
 #endif
 
-	// Compose a modern startup banner similar to SphereX.
-	const std::string compileInfo = "Compiled at " __DATE__ " (" __TIME__ ")";
-	const std::string poweredInfo = std::string("Powered by ") + GRAY_URL;
-	std::vector<std::string> headerLines = {
-		std::string(g_szServerDescription),
-		compileInfo,
-		poweredInfo
-	};
-
-	size_t innerWidth = 0;
-	for (const auto & line : headerLines)
-	{
-		innerWidth = std::max(innerWidth, line.length());
-	}
-
-	const size_t kMinInnerWidth = 48;
-	if (innerWidth < kMinInnerWidth)
-	{
-		innerWidth = kMinInnerWidth;
-	}
-
-	auto makeSeparator = [innerWidth]()
-	{
-		return std::string("╟─") + std::string(innerWidth, '─') + "─╢\n";
-	};
-
-	auto makeLine = [innerWidth](const std::string & text)
-	{
-		std::string line = "║ ";
-		line += text;
-		if (text.length() < innerWidth)
-		{
-			line += std::string(innerWidth - text.length(), ' ');
-		}
-		line += " ║\n";
-		return line;
-	};
-
-	std::string header;
-	header.reserve((innerWidth + 6) * (headerLines.size() + 4));
-	header += std::string("╔═") + std::string(innerWidth, '═') + "═╗\n";
-	header += makeLine("SphereServer 51.x");
-	header += makeSeparator();
-	for (const auto & line : headerLines)
-	{
-		header += makeLine(line);
-	}
-	header += std::string("╚═") + std::string(innerWidth, '═') + "═╝\n\n";
-
-	g_Log.Event( LOGM_INIT, "%s", header.c_str() );
+	g_Log.Event( LOGM_INIT, "\n%s\n"
+		"Compiled at " __DATE__ " (" __TIME__ ")\n"
+		"\n",
+		g_szServerDescription );
 
 	if ( ! g_Serv.Load())
 	{
