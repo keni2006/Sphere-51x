@@ -2983,11 +2983,24 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
                                 return false;
                         }
 
+                        auto cleanupPartialFile = [&out, &sFilePath]()
+                        {
+                                if ( out.is_open())
+                                {
+                                        out.close();
+                                }
+                                if ( !sFilePath.IsEmpty())
+                                {
+                                        std::remove( (const char *) sFilePath );
+                                }
+                        };
+
                         CGString sShow;
                         sShow.Format( "SHOW CREATE TABLE `%s`;", (const char *) entry.m_Source );
                         std::unique_ptr<Storage::IDatabaseResult> result;
                         if ( ! Query( sShow, &result ))
                         {
+                                cleanupPartialFile();
                                 g_Log.Event( LOGM_SAVE|LOGL_ERROR,
                                         "Failed to read schema for MySQL snapshot table '%s'.\n",
                                         (const char *) entry.m_Source );
@@ -2996,6 +3009,7 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
 
                         if ( !result || !result->IsValid())
                         {
+                                cleanupPartialFile();
                                 g_Log.Event( LOGM_SAVE|LOGL_ERROR,
                                         "Invalid schema result for MySQL snapshot table '%s'.\n",
                                         (const char *) entry.m_Source );
@@ -3005,6 +3019,7 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
                         Storage::IDatabaseResult::Row schemaRow = result->FetchRow();
                         if ( schemaRow == NULL || schemaRow[1] == NULL )
                         {
+                                cleanupPartialFile();
                                 g_Log.Event( LOGM_SAVE|LOGL_ERROR,
                                         "Incomplete schema result for MySQL snapshot table '%s'.\n",
                                         (const char *) entry.m_Source );
@@ -3019,6 +3034,7 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
                         result.reset();
                         if ( ! Query( sSelect, &result ))
                         {
+                                cleanupPartialFile();
                                 g_Log.Event( LOGM_SAVE|LOGL_ERROR,
                                         "Failed to stream data for MySQL snapshot table '%s'.\n",
                                         (const char *) entry.m_Source );
@@ -3056,11 +3072,14 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
                         out.flush();
                         if ( !out.good())
                         {
+                                cleanupPartialFile();
                                 g_Log.Event( LOGM_SAVE|LOGL_ERROR,
                                         "Failed while writing MySQL snapshot file '%s'.\n",
                                         (const char *) sFilePath );
                                 return false;
                         }
+
+                        out.close();
 
                         return true;
                 };
@@ -3122,6 +3141,18 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
                         return false;
                 }
 
+                auto cleanupMetadataFile = [&metadata, &sMetadataPath]()
+                {
+                        if ( metadata.is_open())
+                        {
+                                metadata.close();
+                        }
+                        if ( !sMetadataPath.IsEmpty())
+                        {
+                                std::remove( (const char *) sMetadataPath );
+                        }
+                };
+
                 metadata << "Label=" << sanitizeMetadataValue((const char *) sSnapshotLabel) << '\n';
                 metadata << "CreatedAt=" << sanitizeMetadataValue((const char *) sTimestampReadable) << '\n';
                 metadata << "ObjectsCount=" << objectsCount << '\n';
@@ -3130,11 +3161,14 @@ bool MySqlStorageService::CreateWorldSnapshot( const CGString & label )
                 metadata.flush();
                 if ( !metadata.good())
                 {
+                        cleanupMetadataFile();
                         g_Log.Event( LOGM_SAVE|LOGL_ERROR,
                                 "Failed to write MySQL snapshot metadata file '%s'.\n",
                                 (const char *) sMetadataPath );
                         return false;
                 }
+
+                metadata.close();
 
 #ifdef _WIN32
                 CGString sInsertSavepoint;

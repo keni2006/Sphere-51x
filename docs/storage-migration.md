@@ -36,6 +36,9 @@ lives across `GraySvr/MySqlStorageService.cpp`,
    - `MYSQLCHARSET` now feeds directly into the connection manager. You can
      optionally append a collation (e.g. `utf8mb4 utf8mb4_unicode_ci`) and the
      manager will derive the charset/charset-collation pair automatically.
+   - Temporary dump directories are no longer part of the workflow. Remove any
+     deployment hooks that attempted to populate `MYSQLTEMP` or stage helper
+     scripts; the service streams snapshots straight to `WORLDSAVE`.
 2. Advanced connection behaviour is controlled through the fields on
    `CServerMySQLConfig`:
    - `m_fAutoReconnect` (defaults to `true`)
