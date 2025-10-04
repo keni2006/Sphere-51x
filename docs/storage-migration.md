@@ -1,5 +1,8 @@
 # MySQL storage migration guide
 
+> 🇷🇺 For Russian, see [`docs/ru/storage-migration.md`](docs/ru/storage-migration.md).
+
+
 This guide walks administrators through upgrading an existing SphereServer 0.51x
 installation to the refactored MySQL storage stack. The new code path introduces
 an explicit storage façade, a connection manager with pooling/retry logic and a

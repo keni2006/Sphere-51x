@@ -1,111 +1,130 @@
 # SphereServer-0.51x
 
-Potential Update to the Recovered 0.51a aka (0.52) Source given by Westy before he passed.  
-[Source Archive](https://github.com/Sphereserver/Source-Archive/tree/main/0.52)
+<p align="center">
+  <img src="https://avatars.githubusercontent.com/u/7201959?s=200&v=4" alt="SphereServer logo" width="120" />
+</p>
 
-![SphereServer](https://avatars.githubusercontent.com/u/7201959?s=200&v=4) 
+<p align="center">
+  <a href="https://github.com/keni2006/Sphere-51x/releases"><img src="https://img.shields.io/badge/Download-Release-blue.svg" alt="Download" /></a>
+  <a href="https://github.com/keni2006/Sphere-51x/issues"><img src="https://img.shields.io/badge/Report-Issue-red.svg" alt="Issues" /></a>
+  <a href="https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/Contribute-Guidelines-green.svg" alt="Contribution" /></a>
+</p>
 
-[![Download](https://img.shields.io/badge/Download-Release-blue.svg)](https://github.com/keni2006/Sphere-51x/releases) 
-[![Issues](https://img.shields.io/badge/Report-Issue-red.svg)](https://github.com/keni2006/Sphere-51x/issues) 
-[![Contribution](https://img.shields.io/badge/Contribute-Guidelines-green.svg)](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md) 
+<p align="center">
+  <strong>Languages:</strong>
+  <a href="#english">English</a>
+  ·
+  <a href="#russian">Русский</a>
+  ·
+  <a href="docs/README.md">Docs hub</a>
+</p>
 
-## 🚀 GLOBAL TODO
+---
 
-- Fix some problems with the protocol.
-- Fix server crashes after using incorrect values and parameters in scripts.
-- Ensure PvM and PvP points charge correctly by zones.
-- Implement MySQL data store without `SAVEWORLD`. +DONE
+## 🇺🇸 English <a id="english"></a>
 
+### Overview
+SphereServer-0.51x is an evolution of the recovered 0.51a (a.k.a. 0.52) Ultima Online server sources that were originally preserved by Westy. This repository continues the restoration work with modern tooling, optional MySQL storage and gameplay quality-of-life improvements while keeping compatibility with the classic scripting ecosystem.
 
-### 🎉 Features:
-`src.pvpPoints`
-`color names abyss style`
-`color output console`
-`src.sysmessage Hello world^Привет мир`
-`no duplicates names on character`
+### Feature highlights
+- **Modern persistence:** Optional MySQL backend for accounts, world saves, GM pages and timers with automatic migrations and import of legacy `sphereaccu.scp` data.
+- **Gameplay tooling:** PvP point tracking (`src.pvpPoints`), duplicate name prevention and coloured console output for easier moderation.
+- **Script localisation:** Extended `sysmessage` syntax (`src.sysmessage Hello world^Привет мир`) to support bilingual shards out of the box.
+- **Configurable storage layer:** Connection pooling, charset normalisation and repository helpers contained in `GraySvr/MySqlStorageService.*`.
 
-## 🗄️ MySQL backend
-
-Sphere 0.51x now ships with an optional MySQL storage layer that is capable of
-keeping accounts, world saves, GM pages, server listings and timers inside a
-relational database instead of flat `.scp` files.
-
-### Minimum requirements
-
-- MySQL Server **5.7** or newer (MariaDB **10.3**+ works as well) with InnoDB
-  and `utf8mb4` enabled.
-- MariaDB Connector/C **3.3.8** (or any compatible client library). Run
-  `scripts\fetch_mariadb_connector.bat` after cloning the repository to download
-  the official Windows and Linux connector archives into `third_party/`. The
-  legacy Oracle MySQL Connector/C **6.1.11** headers remain available under
-  `third_party/mysql-connector-c-6.1.11-win32` for projects that still rely on
-  them. Visual Studio builds also probe `MariaDBConnector/` at the repository
-  root so you can keep a copy of the connector tree under source control if you
-  prefer. You can still override the include/library directories with the
-  `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR` environment variables if you would
-  rather target a system-wide installation.
-- When building with Visual Studio you can keep the defaults that point at the
-  bundled MariaDB connector or set the `MYSQL_INCLUDE_DIR` and
-  `MYSQL_LIB_DIR` environment variables to target a custom installation. Those
-  overrides take precedence over the bundled packages.
-
-### New configuration keys (`spheredef.ini aka sphere.ini`)
-
-| Key          | Description |
-| ------------ | ----------- |
-| `MYSQL`      | `0`/`1` toggle. When enabled the server attempts to connect to the configured MySQL instance during boot. |
-| `MYSQLHOST`  | MySQL host name or IP. Defaults to `localhost`. |
-| `MYSQLPORT`  | TCP port, defaults to `3306`. |
-| `MYSQLUSER`  | Database user that has permission to create tables and run DDL. |
-| `MYSQLPASS`  | Password for the database user. |
-| `MYSQLDB`    | Database/schema name where the tables will be created. |
-| `MYSQLPREFIX`| Optional prefix that is prepended to every table (useful when sharing the schema with other applications). |
-
-Additional tuning knobs such as automatic reconnect behaviour live in the
-`[SPHERE]` section and are documented inline in `GraySvr/spheredef.ini`.
-
-### First time migration
-
-1. Configure the keys above and make sure the MySQL user can create tables in
-   the target schema.
-2. Start the server. During the first boot the storage façade
-   (`GraySvr/MySqlStorageService.cpp`) coordinates with the schema manager
-   (`GraySvr/Storage/Schema/SchemaManager.cpp`) to create or upgrade every
-   table (see also `docs/mysql-schema.sql`).
-3. Account data is imported automatically the first time the server connects to
-   MySQL while the legacy `sphereaccu.scp` file is still present. Existing
-   database rows are never overwritten.
-4. Perform a manual `SAVE 0` (or wait for the scheduled world save) to populate
-   the new world persistence tables. The server tracks the process and will
-   resume if it was interrupted.
-5. Validate the schema status with:
-
-   ```sql
-   SELECT id, version FROM `<prefix>schema_version` ORDER BY id;
+### Quick start
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/keni2006/Sphere-51x.git
+   cd Sphere-51x
    ```
+2. **Fetch the MariaDB Connector/C binaries** (required for the optional MySQL backend):
+   ```cmd
+   scripts\fetch_mariadb_connector.bat
+   ```
+3. **Open `GraySvr.sln` in Visual Studio** (2019 or newer is recommended) and select the desired configuration (`Release`/`Debug`).
+4. **Configure MySQL** by editing `GraySvr/spheredef.ini` (also known as `sphere.ini`). Use the keys documented in [`docs/database-schema.md`](docs/database-schema.md) and the Russian translation in [`docs/ru/database-schema.md`](docs/ru/database-schema.md).
+5. **Launch the shard** and use in-game commands or scripts to verify that accounts and world data are saved correctly.
 
-   `id = 1` should report version **3** after all migrations completed, while
-   `id = 2` flips to **1** once the legacy account import finished. Rows **3**
-   and **4** record the save counter and whether the last save completed
-   successfully.
+> Tip: If you prefer a system-wide connector install, set the `MYSQL_INCLUDE_DIR` and `MYSQL_LIB_DIR` environment variables before building.
 
 ### Documentation
+The repository includes full English and Russian documentation. Use the [Markdown docs hub](docs/README.md) or follow the links below:
 
-- `docs/database-schema.md` – textual description of the schema and storage
-  modules.
-- `docs/mysql-schema.sql` – example SQL dump that reflects the structure
-  generated by the built-in migrations.
-- `docs/storage-migration.md` – upgrade checklist and configuration guidance for
-  new deployments.
-- `docs/mysql-world-snapshots.md` – bilingual guide that explains how MySQL
-  world snapshots are queued, where they are stored and how to restore them.
-- `docs/third_party.md` – licensing and usage notes for the bundled MySQL
-  Connector/C distribution.
+| Topic | English | Russian |
+| ----- | ------- | ------- |
+| Storage architecture | [`docs/database-schema.md`](docs/database-schema.md) | [`docs/ru/database-schema.md`](docs/ru/database-schema.md) |
+| Migration checklist | [`docs/storage-migration.md`](docs/storage-migration.md) | [`docs/ru/storage-migration.md`](docs/ru/storage-migration.md) |
+| World snapshots | [`docs/mysql-world-snapshots.md`](docs/mysql-world-snapshots.md) | [`docs/ru/mysql-world-snapshots.md`](docs/ru/mysql-world-snapshots.md) |
+| Third-party libraries | [`docs/third_party.md`](docs/third_party.md) | [`docs/ru/third_party.md`](docs/ru/third_party.md) |
+| Change log | [`Changelog.md`](Changelog.md) | [`docs/ru/Changelog.ru.md`](docs/ru/Changelog.ru.md) |
 
-## 🤝 Contributing
+### Roadmap
+The current global goals for the project:
 
-If you would like to contribute, please fork the repository and create a pull request. For more details, check our [Contribution Guidelines](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md).
+- [ ] Refine network protocol handling.
+- [ ] Harden the script engine against invalid input to prevent crashes.
+- [x] Ensure PvM/PvP point accrual honours zone restrictions.
+- [x] Ship a MySQL datastore that eliminates the need for `SAVEWORLD`.
+- [ ] Polish multi-language tooling (`lang` command integration).
 
-## 📝 License
+### Contributing & support
+We welcome bug reports, feature suggestions and pull requests. Please review the [Contribution Guidelines](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md) before submitting changes. Join the discussion via [GitHub Issues](https://github.com/keni2006/Sphere-51x/issues) and keep an eye on the [Changelog](Changelog.md) for the latest updates.
 
-This project is licensed under the MIT License - see the [LICENSE](https://github.com/keni2006/Sphere-51x/blob/main/LICENSE) file for details.
+### License
+SphereServer-0.51x is distributed under the [MIT License](https://github.com/keni2006/Sphere-51x/blob/main/LICENSE).
+
+---
+
+## 🇷🇺 Русский <a id="russian"></a>
+
+### Обзор
+SphereServer-0.51x — это развитие восстановленного исходного кода Ultima Online версии 0.51a (также известной как 0.52), который был сохранён Westy. Репозиторий продолжает работу по реставрации: добавляет современную инфраструктуру, опциональное хранение в MySQL и улучшения игрового процесса, сохраняя при этом совместимость с классической системой скриптов.
+
+### Основные возможности
+- **Современное хранение данных.** Опциональный MySQL-бэкенд для аккаунтов, сохранений мира, страниц GM и таймеров с автоматическими миграциями и импортом старого файла `sphereaccu.scp`.
+- **Инструменты для геймплея.** Учёт PvP-очков (`src.pvpPoints`), предотвращение дублирования имён и цветной вывод в консоль для удобства модерации.
+- **Локализация скриптов.** Расширенный синтаксис `sysmessage` (`src.sysmessage Hello world^Привет мир`) позволяет запускать двуязычные шард‑серверы без дополнительных модификаций.
+- **Гибкий слой хранения.** Пул подключений, нормализация кодировок и репозитории, реализованные в файлах `GraySvr/MySqlStorageService.*`.
+
+### Быстрый старт
+1. **Клонируйте репозиторий.**
+   ```bash
+   git clone https://github.com/keni2006/Sphere-51x.git
+   cd Sphere-51x
+   ```
+2. **Загрузите MariaDB Connector/C** (необходим для MySQL-бэкенда):
+   ```cmd
+   scripts\fetch_mariadb_connector.bat
+   ```
+3. **Откройте `GraySvr.sln` в Visual Studio** (желательно 2019 и новее) и выберите нужную конфигурацию (`Release` или `Debug`).
+4. **Настройте MySQL** через файл `GraySvr/spheredef.ini` (он же `sphere.ini`). Подробности описаны в [`docs/database-schema.md`](docs/database-schema.md) и в русской версии [`docs/ru/database-schema.md`](docs/ru/database-schema.md).
+5. **Запустите сервер** и убедитесь, что учётные записи и данные мира корректно сохраняются.
+
+> Совет: Если используется системная установка коннектора, укажите переменные окружения `MYSQL_INCLUDE_DIR` и `MYSQL_LIB_DIR` перед сборкой.
+
+### Документация
+Полный комплект документации доступен на английском и русском языках. Можно воспользоваться [Markdown-хабом документации](docs/README.md) или перейти по ссылкам ниже:
+
+| Раздел | Английский | Русский |
+| ------ | ---------- | ------- |
+| Архитектура хранения | [`docs/database-schema.md`](docs/database-schema.md) | [`docs/ru/database-schema.md`](docs/ru/database-schema.md) |
+| Чек-лист миграции | [`docs/storage-migration.md`](docs/storage-migration.md) | [`docs/ru/storage-migration.md`](docs/ru/storage-migration.md) |
+| Снимки мира | [`docs/mysql-world-snapshots.md`](docs/mysql-world-snapshots.md) | [`docs/ru/mysql-world-snapshots.md`](docs/ru/mysql-world-snapshots.md) |
+| Сторонние библиотеки | [`docs/third_party.md`](docs/third_party.md) | [`docs/ru/third_party.md`](docs/ru/third_party.md) |
+| Журнал изменений | [`Changelog.md`](Changelog.md) | [`docs/ru/Changelog.ru.md`](docs/ru/Changelog.ru.md) |
+
+### План работ
+Текущие глобальные задачи проекта:
+
+- [ ] Уточнить обработку сетевого протокола.
+- [ ] Повысить устойчивость движка скриптов к некорректным данным.
+- [x] Убедиться, что PvM/PvP-очки начисляются с учётом зон.
+- [x] Реализовать MySQL-хранилище, избавляющее от необходимости `SAVEWORLD`.
+- [ ] Завершить интеграцию языковой команды `lang`.
+
+### Участие и поддержка
+Мы приветствуем отчёты об ошибках, предложения и pull request'ы. Перед отправкой изменений ознакомьтесь с [руководством по участию](https://github.com/keni2006/Sphere-51x/blob/main/CONTRIBUTING.md). Общение ведётся через [раздел Issues](https://github.com/keni2006/Sphere-51x/issues), актуальные новости публикуются в [журнале изменений](Changelog.md).
+
+### Лицензия
+SphereServer-0.51x распространяется по лицензии [MIT](https://github.com/keni2006/Sphere-51x/blob/main/LICENSE).
