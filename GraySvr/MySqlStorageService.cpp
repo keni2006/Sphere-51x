@@ -55,6 +55,7 @@
 #endif
 
 #include "Storage/MySql/MySqlConnection.h"
+#include "Common/cmemoryscriptstream.h"
 
 namespace
 {
@@ -189,59 +190,6 @@ namespace
                 }
         }
 
-        class TempFileGuard
-        {
-        public:
-                TempFileGuard()
-                {
-                }
-
-                explicit TempFileGuard( std::string path ) :
-                        m_Path( std::move( path ))
-                {
-                }
-
-                ~TempFileGuard()
-                {
-                        if ( ! m_Path.empty())
-                        {
-                                ::remove( m_Path.c_str());
-                        }
-                }
-
-                TempFileGuard( const TempFileGuard & ) = delete;
-                TempFileGuard & operator=( const TempFileGuard & ) = delete;
-
-                TempFileGuard( TempFileGuard && other ) noexcept :
-                        m_Path( std::move( other.m_Path ))
-                {
-                        other.m_Path.clear();
-                }
-
-                TempFileGuard & operator=( TempFileGuard && other ) noexcept
-                {
-                        if ( this != &other )
-                        {
-                                m_Path = std::move( other.m_Path );
-                                other.m_Path.clear();
-                        }
-                        return *this;
-                }
-
-                const std::string & GetPath() const
-                {
-                        return m_Path;
-                }
-
-                bool IsValid() const
-                {
-                        return ! m_Path.empty();
-                }
-
-        private:
-                std::string m_Path;
-        };
-
         bool EnsureDirectoryExists( const CGString & path )
         {
                 if ( path.IsEmpty())
@@ -283,27 +231,6 @@ namespace
 
                 return false;
         }
-
-bool GenerateTempScriptPath( std::string & outPath )
-{
-        char szBaseName[L_tmpnam];
-        if ( tmpnam( szBaseName ) == NULL )
-        {
-                return false;
-        }
-
-        try
-        {
-                outPath.assign( szBaseName );
-                outPath += ".scp";
-        }
-        catch ( const std::bad_alloc & )
-        {
-                return false;
-        }
-
-        return true;
-}
 
 bool IsSafeMariaDbIdentifierToken( const std::string & token )
 {
@@ -3865,44 +3792,12 @@ MySqlStorageService::SerializationResult MySqlStorageService::SerializeWorldObje
                 return SerializationResult::Failed;
         }
 
-        std::string sTempPath;
-        if ( ! GenerateTempScriptPath( sTempPath ))
-        {
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "failed to generate temporary script path" );
-                return SerializationResult::Failed;
-        }
-
-        TempFileGuard tempFile( sTempPath );
-        if ( ! tempFile.IsValid())
-        {
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", "failed to create temporary script file" );
-                return SerializationResult::Failed;
-        }
-
-        CScript script;
-        if ( ! script.Open( tempFile.GetPath().c_str(), OF_WRITE | OF_TEXT ))
-        {
-                std::string reason = "unable to open temporary script file \"" + tempFile.GetPath() + "\" for writing";
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
-                return SerializationResult::Failed;
-        }
-
+        CMemoryScriptStream stream;
+        CScript script( &stream );
         pObject->r_Write( script );
         script.Close();
 
-        std::ifstream input( tempFile.GetPath().c_str(), std::ios::in | std::ios::binary );
-        if ( ! input.is_open())
-        {
-                std::string reason = "unable to reopen temporary script file \"" + tempFile.GetPath() + "\" for reading";
-                LogPersistenceFailure( *pObject, LOGL_ERROR, "serialize", reason );
-                return SerializationResult::Failed;
-        }
-
-        std::ostringstream buffer;
-        buffer << input.rdbuf();
-        input.close();
-
-        const std::string serialized = buffer.str();
+        const std::string & serialized = stream.GetBuffer();
         if ( serialized.empty())
         {
                 if ( pObject->IsChar())
@@ -3925,32 +3820,8 @@ MySqlStorageService::SerializationResult MySqlStorageService::SerializeWorldObje
 
 bool MySqlStorageService::ApplyWorldObjectData( CObjBase & object, const CGString & serialized ) const
 {
-        std::string sTempPath;
-        if ( ! GenerateTempScriptPath( sTempPath ))
-        {
-                return false;
-        }
-
-        TempFileGuard tempFile( sTempPath );
-        if ( ! tempFile.IsValid())
-        {
-                return false;
-        }
-
-        {
-                std::ofstream output( tempFile.GetPath().c_str(), std::ios::out | std::ios::binary );
-                if ( ! output.is_open())
-                {
-                        return false;
-                }
-                output << (const char *) serialized;
-        }
-
-        CScript script;
-        if ( ! script.Open( tempFile.GetPath().c_str(), OF_READ | OF_TEXT ))
-        {
-                return false;
-        }
+        CMemoryScriptStream stream( serialized );
+        CScript script( &stream );
 
         bool fResult = false;
         bool fLoadedRoot = false;
