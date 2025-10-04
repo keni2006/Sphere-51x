@@ -152,7 +152,6 @@ extern int FindStrWord( const TCHAR * pTextSearch, const TCHAR * pszKeyWord );
 extern struct CLog : public CFileText, public CEventLog
 {
 	// subject matter. (severity level is first 4 bits, LOGL_EVENT)
-#define LOGM_STYLE_NOCATEGORY   0x0010  // suppress category badges for styled console output.
 #define LOGM_ACCOUNTS		0x0080
 #define LOGM_INIT			0x0100	// start up messages.
 #define LOGM_SAVE			0x0200	// world save status.
