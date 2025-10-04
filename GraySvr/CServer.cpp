@@ -2938,40 +2938,23 @@ void CServer::PrintStr( const TCHAR * pStr ) const
 
 int CServer::PrintPercent( long iCount, long iTotal )
 {
-        static int prevPercent = 100;
-        static size_t frameIndex = 0;
-        // These vals can get very large. so use MulDiv to prevent overflow. (not IMULDIV)
-        DEBUG_CHECK( iCount >= 0 );
-        DEBUG_CHECK( iTotal >= 0 );
-        if ( iTotal <= 0 )
-                return( 100 );
-        int iPercent = MulDiv( iCount, 100, iTotal );
-        if ( prevPercent == iPercent )     // avoid excessive redraws if the value is unchanged
-        {
-                return iPercent;
-        }
-        prevPercent = iPercent;
-        static const char * const kClockFrames[] =
-        {
-                "[o^]",
-                "[o>]",
-                "[ov]",
-                "[o<]",
-        };
-        const char * frame = kClockFrames[frameIndex];
-        frameIndex = (frameIndex + 1) % COUNTOF(kClockFrames);
-        CGString sProgress;
-        int len = sProgress.Format( "%s  ", frame );
-        PrintStr( sProgress );
-        while ( len-- )
-        {
-                PrintStr( "\x08" );
-        }
-        if ( iPercent >= 100 )
-        {
-                frameIndex = 0;
-        }
-        return( iPercent );
+	static int prev = 100;
+	// These vals can get very large. so use MulDiv to prevent overflow. (not IMULDIV)
+	DEBUG_CHECK( iCount >= 0 );
+	DEBUG_CHECK( iTotal >= 0 );
+	if ( iTotal <= 0 )
+		return( 100 );
+    int iPercent = MulDiv( iCount, 100, iTotal );
+	if (prev == iPercent)//avoid updating if the value is the same as before, updating it too much will slow down console output and also the loading
+	{
+		return iPercent;
+	}
+	prev = iPercent;
+	CGString sProgress;
+	int len = sProgress.Format( "%d%%  ", iPercent );
+	PrintStr( sProgress );
+	while ( len-- ) PrintStr( "\x08" );
+	return( iPercent );
 }
 
 const COreDef * CServer::GetOreColor( COLOR_TYPE color ) const
