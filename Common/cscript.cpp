@@ -11,6 +11,8 @@
 #include "graycom.h"
 #endif
 
+#include <string>
+
 int CScriptObj::sm_iTrigArg;			// a modifying arg to the current trigger.
 
 ///////////////////////////////////////////////////////////////
@@ -209,38 +211,52 @@ bool CScript::Open( const TCHAR *pszFilename, WORD wFlags )
 
 bool CScript::ReadTextLine( bool fRemoveBlanks ) // Read a line from the opened script file
 {
-	ASSERT( ! IsBinaryMode());
-	while (true)
-	{
-		TCHAR * pData = m_Buffer.GetBuffer(MAX_SCRIPT_LINE_LEN);
-		ASSERT(pData);
-		if ( StreamReadLine( pData, MAX_SCRIPT_LINE_LEN ) == NULL )
-		{
-			pData[0] = '\0';
-			return( false );
-		}
-		m_iLineNum++;
+        ASSERT( ! IsBinaryMode());
+        while ( true )
+        {
+                TCHAR * pData = m_Buffer.GetBuffer( MAX_SCRIPT_LINE_LEN );
+                ASSERT( pData );
+                if ( StreamReadLine( pData, MAX_SCRIPT_LINE_LEN ) == NULL )
+                {
+                        pData[0] = '\0';
+                        return( false );
+                }
+                m_iLineNum++;
 
-		// Now parse the line for comments and leading and trailing whitespace junk
-		int len = 0;
-		for ( ; len<MAX_SCRIPT_LINE_LEN; len++ )
-		{
-			TCHAR ch = pData[len];
-			if ( ch == '\0' ) 
-				break;
-			if ( ch == '/' && pData[len+1] == '/' ) 
-			{
-				// Remove comment at end of line.
-				break;
-			}
-		}
-		// Remove CR and LF from the end of the line.
-		len = TrimEndWhitespace( pData, len );
-		if ( fRemoveBlanks && len <= 0 ) 
-			continue;
-		pData[len] = '\0';
-		return( true );
-	}
+                size_t len = 0;
+                while (( len < ( MAX_SCRIPT_LINE_LEN - 1 )) && ( pData[len] != '\0' ))
+                {
+                        ++len;
+                }
+                pData[len] = '\0';
+
+                if (( m_iLineNum == 1 ) && ( len >= 3 ))
+                {
+                        const unsigned char * raw = reinterpret_cast<const unsigned char *>( pData );
+                        if (( raw[0] == 0xEF ) && ( raw[1] == 0xBB ) && ( raw[2] == 0xBF ))
+                        {
+                                len -= 3;
+                                memmove( pData, pData + 3, len + 1 );
+                        }
+                }
+
+                for ( size_t i = 0; i + 1 < len; ++i )
+                {
+                        if (( pData[i] == '/' ) && ( pData[i + 1] == '/' ))
+                        {
+                                len = i;
+                                break;
+                        }
+                }
+
+                len = static_cast<size_t>( TrimEndWhitespace( pData, static_cast<int>( len )));
+                if ( fRemoveBlanks && ( len == 0 ))
+                {
+                        continue;
+                }
+                pData[len] = '\0';
+                return( true );
+        }
 }
 
 bool CScript::FindTextHeader( const TCHAR *pszName, CScriptLink *pPrev, WORD wModeFlags ) // Find a section in the current script
@@ -514,13 +530,17 @@ bool CScript::ReadKeyParse() // Read line from script
 		return( false );	// end of section.
 	}
 	Parse( m_Buffer.GetBuffer(), &m_pArg );
+	if (( m_pArg != NULL ) && ( m_pArg[0] == '=' ))
+	{
+		m_pArg = TrimWhitespace( m_pArg + 1 );
+	}
 	return( true );
 }
 
 TCHAR * CScript::GetArgNextStr()
 {
-Parse( m_pArg, &m_pArg );
-return( m_pArg );
+	Parse( m_pArg, &m_pArg );
+	return( m_pArg );
 }
 
 TCHAR * CScript::GetArgStr( bool * pfQuoted )
@@ -843,34 +863,41 @@ bool _cdecl CScript::WriteSection( const TCHAR * pszSection, ... )
 
 bool CScript::WriteKey( const TCHAR * pszKey, const TCHAR * pszVal )
 {
-	if ( pszKey == NULL || pszKey[0] == '\0' )
-	{
-		return false;
-	}
-	if ( IsBinaryMode())
-	{
-		int iLen = m_Buffer.Format( "%s=%s", pszKey, pszVal ? pszVal : "" );
+        if ( pszKey == NULL || pszKey[0] == '\0' )
+        {
+                return( false );
+        }
+        if ( IsBinaryMode())
+        {
+                int iLen = m_Buffer.Format( "%s=%s", pszKey, pszVal ? pszVal : "" );
 
-		iLen = CompressBin( iLen );
-		if ( iLen <= 0 ) 
-			return( false );
+                iLen = CompressBin( iLen );
+                if ( iLen <= 0 )
+                        return( false );
 
-		WriteBinLength( iLen );
-		StreamWrite( m_pArg, iLen );
-	}
-	else
-	{
-		if ( pszVal == NULL || pszVal[0] == '\0' )
-		{
-			// Books are like this. No real keys.
-			StreamPrintf( "%s\n", pszKey );
-		}
-		else
-		{
-			StreamPrintf( "%s=%s\n", pszKey, pszVal );
-		}
-	}
-	return( true );
+                WriteBinLength( iLen );
+                StreamWrite( m_pArg, iLen );
+        }
+        else
+        {
+                std::string line( pszKey );
+                if ( pszVal == NULL || pszVal[0] == '\0' )
+                {
+                        line.push_back( '\n' );
+                }
+                else
+                {
+                        line.push_back( '=' );
+                        line.append( pszVal );
+                        line.push_back( '\n' );
+                }
+
+                if ( line.size() >= MAX_SCRIPT_LINE_LEN )
+                        return( false );
+                if ( ! StreamWrite( line.data(), line.size()))
+                        return( false );
+        }
+        return( true );
 }
 
 void _cdecl CScript::WriteKeyFormat( const TCHAR * pszKey, const TCHAR * pszVal, ... )

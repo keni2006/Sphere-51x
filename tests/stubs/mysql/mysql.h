@@ -44,6 +44,14 @@ typedef struct st_mysql_charset_info
         unsigned int state;
 } MY_CHARSET_INFO;
 
+#define CR_UNKNOWN_ERROR 2000
+#define CR_CONNECTION_ERROR 2002
+#define CR_CONN_HOST_ERROR 2003
+#define CR_SERVER_GONE_ERROR 2006
+#define CR_MALFORMED_PACKET 2027
+#define CR_SERVER_LOST 2013
+#define CR_SERVER_LOST_EXTENDED 2055
+
 enum enum_field_types
 {
         MYSQL_TYPE_DECIMAL,
